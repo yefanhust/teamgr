@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  teamgr:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: teamgr-app
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - ../config:/app/config:ro
+      - ../data:/app/data
+      - ../scripts:/workspace/scripts:ro
+    environment:
+      - TEAMGR_CONFIG=/app/config/config.yaml
+      - TEAMGR_DATA_DIR=/app/data
+      - PYTHONPATH=/app
+
+  nginx:
+    image: nginx:alpine
+    container_name: teamgr-nginx
+    restart: unless-stopped
+    ports:
+      - "6443:6443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx-entrypoint.sh:/nginx-entrypoint.sh:ro
+      - ../ssl:/etc/nginx/ssl
+    entrypoint: ["/nginx-entrypoint.sh"]
+    depends_on:
+      - teamgr

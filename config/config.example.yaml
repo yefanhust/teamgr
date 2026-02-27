@@ -1,0 +1,48 @@
+# TeaMgr 配置文件示例
+# 复制此文件为 config.yaml 并填入真实配置
+
+# 网站认证密码 (留空则进入无密码模式，会显示警告页)
+auth:
+  password: ""
+  jwt_secret: "change-this-to-a-random-string"
+
+# Gemini API 配置
+gemini:
+  api_key: "your-gemini-api-key-here"
+  current_model: "gemini-2.5-flash"
+  available_models:
+    - "gemini-2.5-flash"
+    - "gemini-2.5-pro"
+    - "gemini-2.5-flash-lite"
+    - "gemini-3-flash-preview"
+
+# 腾讯云 COS 备份配置
+cos:
+  enabled: false
+  secret_id: "your-cos-secret-id"
+  secret_key: "your-cos-secret-key"
+  region: "ap-guangzhou"
+  bucket: "your-bucket-name"
+  backup_prefix: "teamgr-backup/"
+
+# 安全配置
+security:
+  rate_limit_per_minute: 5
+  ban_thresholds:
+    - fails: 5
+      duration_minutes: 30
+    - fails: 10
+      duration_minutes: 120
+    - fails: 20
+      duration_minutes: 1440
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+# 备份调度
+backup:
+  enabled: false
+  cron_hour: 3
+  cron_minute: 0

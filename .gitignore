@@ -1,0 +1,13 @@
+config/config.yaml
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+ssl/
+__pycache__/
+*.pyc
+.env
+node_modules/
+frontend/dist/
+*.log
+.DS_Store
