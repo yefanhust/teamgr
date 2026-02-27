@@ -5,6 +5,7 @@
       <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
         <h1 class="text-lg font-bold text-gray-800">👥 人才卡</h1>
         <div class="flex gap-2">
+          <van-button size="small" icon="chart-trending-o" @click="$router.push('/stats')">统计</van-button>
           <van-button size="small" icon="search" @click="$router.push('/search')">搜索</van-button>
           <van-button size="small" icon="edit" type="primary" @click="$router.push('/entry')">录入</van-button>
         </div>

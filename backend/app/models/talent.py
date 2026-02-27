@@ -75,3 +75,15 @@ class CardDimension(Base):
     is_default = Column(Boolean, default=False)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class LLMUsageLog(Base):
+    __tablename__ = "llm_usage_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    model_name = Column(String(100), nullable=False)
+    call_type = Column(String(30), nullable=False)  # text-entry / pdf-parse / semantic-search
+    duration_ms = Column(Integer, nullable=False)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)

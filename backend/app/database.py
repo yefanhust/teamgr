@@ -42,7 +42,7 @@ def get_db():
 
 
 def init_db():
-    from app.models.talent import Talent, Tag, TalentTag, EntryLog, LoginAttempt, CardDimension  # noqa
+    from app.models.talent import Talent, Tag, TalentTag, EntryLog, LoginAttempt, CardDimension, LLMUsageLog  # noqa
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _seed_default_dimensions()

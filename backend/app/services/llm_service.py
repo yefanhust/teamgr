@@ -9,6 +9,28 @@ from app.config import get_gemini_config
 
 logger = logging.getLogger(__name__)
 
+
+def _record_llm_usage(model_name: str, call_type: str, duration_ms: int, input_tokens: int, output_tokens: int):
+    """Record LLM usage to database. Wrapped in try/except to never break main flow."""
+    try:
+        from app.database import SessionLocal
+        from app.models.talent import LLMUsageLog
+        db = SessionLocal()
+        try:
+            log = LLMUsageLog(
+                model_name=model_name,
+                call_type=call_type,
+                duration_ms=duration_ms,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+            )
+            db.add(log)
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Failed to record LLM usage: {e}")
+
 _model_instance = None
 _current_model_name = None
 
@@ -116,7 +138,15 @@ async def update_talent_card(
     try:
         t0 = time.monotonic()
         response = await asyncio.to_thread(model.generate_content, prompt)
-        logger.info(f"[TIMING] Gemini text-entry API call: {time.monotonic() - t0:.1f}s")
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(f"[TIMING] Gemini text-entry API call: {duration_ms}ms")
+
+        # Record usage
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) or 0
+        osl = getattr(usage, 'candidates_token_count', 0) or 0
+        _record_llm_usage(_current_model_name or "unknown", "text-entry", duration_ms, isl, osl)
+
         text = response.text.strip()
         # Try to extract JSON if wrapped in code blocks
         if text.startswith("```"):
@@ -221,7 +251,15 @@ async def parse_pdf_content(
     try:
         t1 = time.monotonic()
         response = await asyncio.to_thread(model.generate_content, content_parts)
-        logger.info(f"[TIMING] Gemini API call: {time.monotonic() - t1:.1f}s")
+        duration_ms = int((time.monotonic() - t1) * 1000)
+        logger.info(f"[TIMING] Gemini pdf-parse API call: {duration_ms}ms")
+
+        # Record usage
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) or 0
+        osl = getattr(usage, 'candidates_token_count', 0) or 0
+        _record_llm_usage(_current_model_name or "unknown", "pdf-parse", duration_ms, isl, osl)
+
         text = response.text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
@@ -286,7 +324,17 @@ async def semantic_search(
 """
 
     try:
+        t0 = time.monotonic()
         response = await asyncio.to_thread(model.generate_content, prompt)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(f"[TIMING] Gemini semantic-search API call: {duration_ms}ms")
+
+        # Record usage
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) or 0
+        osl = getattr(usage, 'candidates_token_count', 0) or 0
+        _record_llm_usage(_current_model_name or "unknown", "semantic-search", duration_ms, isl, osl)
+
         text = response.text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
