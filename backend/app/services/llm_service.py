@@ -353,3 +353,119 @@ async def semantic_search(
     except Exception as e:
         logger.error(f"LLM semantic search failed: {e}")
         return []
+
+
+async def analyze_query_dimensions(
+    query: str,
+    dimensions: list[dict],
+) -> dict:
+    """Step 1 of chat query: identify which dimensions are relevant to the user's question.
+
+    Returns: {"relevant_dimensions": [{"key": str, "label": str}], "reasoning": str}
+    """
+    model = _get_model()
+    if not model:
+        return {"relevant_dimensions": [], "reasoning": "模型未配置"}
+
+    dimensions_desc = "\n".join(f"- {d['key']} ({d['label']}): 结构为 {d['schema']}" for d in dimensions)
+
+    prompt = f"""你是一个人才数据分析助手。用户要查询关于人才库的问题，请判断回答这个问题需要查看哪些人才卡维度。
+
+## 可用维度:
+{dimensions_desc}
+
+## 用户问题:
+{query}
+
+## 要求:
+1. 选择与问题最相关的维度（可以多选）
+2. 简要说明为什么选择这些维度
+
+请严格返回以下JSON格式（不要包含markdown代码块标记）:
+{{
+  "relevant_dimensions": [{{"key": "dimension_key", "label": "维度中文名"}}, ...],
+  "reasoning": "简要说明为什么选择这些维度"
+}}
+"""
+
+    try:
+        t0 = time.monotonic()
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(f"[TIMING] Gemini chat-analyze API call: {duration_ms}ms")
+
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) or 0
+        osl = getattr(usage, 'candidates_token_count', 0) or 0
+        _record_llm_usage(_current_model_name or "unknown", "chat-analyze", duration_ms, isl, osl)
+
+        text = response.text.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            json_lines = []
+            inside = False
+            for line in lines:
+                if line.startswith("```") and not inside:
+                    inside = True
+                    continue
+                elif line.startswith("```") and inside:
+                    break
+                elif inside:
+                    json_lines.append(line)
+            text = "\n".join(json_lines)
+
+        result = json.loads(text)
+        return {
+            "relevant_dimensions": result.get("relevant_dimensions", []),
+            "reasoning": result.get("reasoning", ""),
+        }
+    except Exception as e:
+        logger.error(f"LLM chat-analyze failed: {e}")
+        return {"relevant_dimensions": [], "reasoning": "分析失败"}
+
+
+async def answer_talent_query(
+    query: str,
+    talents_context_json: str,
+    dimensions_used: list[str],
+) -> dict:
+    """Step 2 of chat query: answer the user's question with talent data context.
+
+    Returns: {"answer": str}
+    """
+    model = _get_model()
+    if not model:
+        return {"answer": "模型未配置，无法回答"}
+
+    prompt = f"""你是一个人才数据分析助手。请根据以下人才数据回答用户的问题。
+
+## 人才数据（JSON格式，包含 {len(dimensions_used)} 个相关维度）:
+{talents_context_json[:30000]}
+
+## 用户问题:
+{query}
+
+## 要求:
+1. 基于提供的数据如实回答，不要编造信息
+2. 如果数据不足以回答，请说明
+3. 回答要简洁有条理
+4. 如果涉及多个人才的对比，用列表展示
+
+请直接回答（纯文本，不要JSON格式）:
+"""
+
+    try:
+        t0 = time.monotonic()
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(f"[TIMING] Gemini chat-answer API call: {duration_ms}ms")
+
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) or 0
+        osl = getattr(usage, 'candidates_token_count', 0) or 0
+        _record_llm_usage(_current_model_name or "unknown", "chat-answer", duration_ms, isl, osl)
+
+        return {"answer": response.text.strip()}
+    except Exception as e:
+        logger.error(f"LLM chat-answer failed: {e}")
+        return {"answer": "回答生成失败，请重试"}

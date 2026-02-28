@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from app.config import load_config, get_auth_password, get_gemini_config
 from app.database import init_db, SessionLocal
-from app.routers import auth, talents, entry, stats
+from app.routers import auth, talents, entry, stats, chat
 from app.services.backup_service import setup_backup_scheduler
 
 # ANSI color codes
@@ -147,6 +147,7 @@ app.include_router(auth.router)
 app.include_router(talents.router)
 app.include_router(entry.router)
 app.include_router(stats.router)
+app.include_router(chat.router)
 
 
 # Settings API for model switching
@@ -184,11 +185,14 @@ async def update_model_settings(body: dict):
     actual_path = config_path if os.path.exists(config_path) else local_path
 
     if os.path.exists(actual_path):
-        with open(actual_path, "r", encoding="utf-8") as f:
-            file_cfg = yaml.safe_load(f) or {}
-        file_cfg.setdefault("gemini", {})["current_model"] = model
-        with open(actual_path, "w", encoding="utf-8") as f:
-            yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
+        try:
+            with open(actual_path, "r", encoding="utf-8") as f:
+                file_cfg = yaml.safe_load(f) or {}
+            file_cfg.setdefault("gemini", {})["current_model"] = model
+            with open(actual_path, "w", encoding="utf-8") as f:
+                yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
+        except OSError:
+            pass  # config volume may be read-only
 
     # Reset model instance
     from app.services import llm_service

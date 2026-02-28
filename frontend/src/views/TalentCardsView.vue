@@ -109,6 +109,11 @@
           </div>
         </div>
       </van-pull-refresh>
+
+      <!-- Chat Query Panel -->
+      <div class="mt-6">
+        <ChatQueryPanel />
+      </div>
     </div>
 
     <!-- FAB: Add Talent -->
@@ -162,6 +167,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useTalentStore } from '../stores/talent'
 import { showToast } from 'vant'
+import ChatQueryPanel from '../components/ChatQueryPanel.vue'
 
 const store = useTalentStore()
 
