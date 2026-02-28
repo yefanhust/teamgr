@@ -148,6 +148,7 @@
       v-model:show="showModelPicker"
       :actions="modelActions"
       cancel-text="取消"
+      close-on-click-action
       @select="onModelSelect"
     />
 
