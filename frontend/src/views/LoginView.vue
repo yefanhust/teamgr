@@ -14,6 +14,7 @@
           placeholder="请输入访问密码"
           :error-message="errorMsg"
           class="mb-4"
+          @keypress.enter="handleLogin"
         />
 
         <van-button
