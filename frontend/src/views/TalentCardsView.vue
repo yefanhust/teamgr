@@ -110,6 +110,25 @@
         </div>
       </van-pull-refresh>
 
+      <!-- Scheduled Query Results -->
+      <div v-if="scheduledResults.length > 0" class="mt-4 space-y-3">
+        <h3 class="text-sm font-semibold text-gray-600 flex items-center gap-1">
+          <van-icon name="clock-o" size="14" />
+          定时查询结果
+        </h3>
+        <div
+          v-for="result in scheduledResults"
+          :key="result.id"
+          class="bg-blue-50 rounded-xl p-3 border border-blue-100"
+        >
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-medium text-blue-700">{{ result.question_snapshot }}</span>
+            <span class="text-xs text-gray-400">{{ formatTime(result.generated_at) }} · {{ result.model_name }}</span>
+          </div>
+          <p class="text-sm text-gray-700 whitespace-pre-line">{{ result.answer }}</p>
+        </div>
+      </div>
+
       <!-- Chat Query Panel -->
       <div class="mt-6">
         <ChatQueryPanel />
@@ -168,6 +187,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useTalentStore } from '../stores/talent'
 import { showToast } from 'vant'
 import ChatQueryPanel from '../components/ChatQueryPanel.vue'
+import api from '../api'
 
 const store = useTalentStore()
 
@@ -183,6 +203,7 @@ const editingTagName = ref('')
 const tagEditInput = ref(null)
 const showDeleteTagConfirm = ref(false)
 const deletingTag = ref(null)
+const scheduledResults = ref([])
 const newTalent = ref({
   name: '', email: '', phone: '', current_role: '', department: '',
 })
@@ -208,9 +229,25 @@ onMounted(async () => {
   await Promise.all([
     store.fetchTalents(),
     store.fetchTags(),
+    fetchScheduledResults(),
   ])
   selectedTagIds.value = new Set(store.tags.map(t => t.id))
 })
+
+async function fetchScheduledResults() {
+  try {
+    const res = await api.get('/api/chat/scheduled-results', { params: { limit: 10 } })
+    scheduledResults.value = res.data
+  } catch (e) {
+    // ignore
+  }
+}
+
+function formatTime(isoStr) {
+  if (!isoStr) return ''
+  const d = new Date(isoStr + 'Z')
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`
+}
 
 function selectAll() {
   if (allSelected.value) {
@@ -250,6 +287,7 @@ async function onRefresh() {
   await Promise.all([
     store.fetchTalents(),
     store.fetchTags(),
+    fetchScheduledResults(),
   ])
   refreshing.value = false
 }

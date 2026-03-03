@@ -42,10 +42,14 @@ def get_db():
 
 
 def init_db():
-    from app.models.talent import Talent, Tag, TalentTag, EntryLog, LoginAttempt, CardDimension, LLMUsageLog  # noqa
+    from app.models.talent import (  # noqa
+        Talent, Tag, TalentTag, EntryLog, LoginAttempt,
+        CardDimension, LLMUsageLog, PresetQuestion, ScheduledQueryResult,
+    )
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _seed_default_dimensions()
+    _seed_default_preset_questions()
 
 
 def _migrate_schema():
@@ -137,6 +141,25 @@ def _seed_default_dimensions():
                 is_default=True,
                 sort_order=8,
             ),
+        ]
+        db.add_all(defaults)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _seed_default_preset_questions():
+    from app.models.talent import PresetQuestion
+    db = SessionLocal()
+    try:
+        existing = db.query(PresetQuestion).count()
+        if existing > 0:
+            return
+
+        defaults = [
+            PresetQuestion(question="未来15天有哪些人过生日？", sort_order=0),
+            PresetQuestion(question="有哪些33、34岁的人才？", sort_order=1),
+            PresetQuestion(question="有哪些35岁及以上的人才？", sort_order=2),
         ]
         db.add_all(defaults)
         db.commit()

@@ -117,6 +117,25 @@ async def lifespan(app: FastAPI):
     # Setup backup scheduler
     _scheduler = setup_backup_scheduler()
 
+    # Setup scheduled query job (daily at 5:00 AM)
+    from app.services.scheduled_query_service import run_scheduled_queries
+    if _scheduler is None:
+        try:
+            from apscheduler.schedulers.background import BackgroundScheduler
+            _scheduler = BackgroundScheduler()
+            _scheduler.start()
+        except ImportError:
+            logger.warning("APScheduler not installed. Scheduled queries disabled.")
+    if _scheduler:
+        _scheduler.add_job(
+            run_scheduled_queries,
+            "cron",
+            hour=5,
+            minute=0,
+            id="daily_scheduled_queries",
+        )
+        logger.info("Scheduled query job registered: daily at 05:00")
+
     logger.info("TeaMgr server started successfully")
 
     yield
@@ -162,13 +181,15 @@ async def get_model_settings():
 
 @app.put("/api/settings/model")
 async def update_model_settings(body: dict):
-    from app.config import get_config
+    from app.config import get_config, get_local_models_config
     import yaml
 
     model = body.get("model", "")
-    available = get_config().get("gemini", {}).get("available_models", [])
+    gemini_models = get_config().get("gemini", {}).get("available_models", [])
+    local_names = [m["name"] for m in get_local_models_config()]
+    all_valid = gemini_models + local_names
 
-    if model not in available:
+    if model not in all_valid:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail=f"不支持的模型: {model}")
 

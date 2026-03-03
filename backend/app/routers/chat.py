@@ -2,11 +2,11 @@ import json
 import logging
 import secrets
 import string
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models.talent import Talent, CardDimension
+from app.models.talent import Talent, CardDimension, PresetQuestion, ScheduledQueryResult
 from app.middleware.auth_middleware import require_auth
 from app.services.llm_service import analyze_query_dimensions, answer_talent_query
 
@@ -22,6 +22,15 @@ class ChatAnalyzeRequest(BaseModel):
 class ChatAnswerRequest(BaseModel):
     query: str
     dimension_keys: list[str]
+
+
+class PresetQuestionCreate(BaseModel):
+    question: str
+
+
+class PresetQuestionUpdate(BaseModel):
+    question: str | None = None
+    is_scheduled: bool | None = None
 
 
 def _get_dimensions(db: Session) -> list[dict]:
@@ -123,3 +132,81 @@ async def chat_answer(req: ChatAnswerRequest, db: Session = Depends(get_db)):
         "talent_count": len(all_talents),
         "dimensions_used": req.dimension_keys,
     }
+
+
+# --- Preset Questions CRUD ---
+
+def _preset_to_dict(p: PresetQuestion) -> dict:
+    return {
+        "id": p.id,
+        "question": p.question,
+        "is_scheduled": p.is_scheduled,
+        "sort_order": p.sort_order,
+        "created_at": p.created_at.isoformat() if p.created_at else "",
+    }
+
+
+@router.get("/presets")
+async def list_presets(db: Session = Depends(get_db)):
+    presets = db.query(PresetQuestion).order_by(PresetQuestion.sort_order).all()
+    return [_preset_to_dict(p) for p in presets]
+
+
+@router.post("/presets")
+async def create_preset(body: PresetQuestionCreate, db: Session = Depends(get_db)):
+    max_order = db.query(PresetQuestion).count()
+    preset = PresetQuestion(question=body.question, sort_order=max_order)
+    db.add(preset)
+    db.commit()
+    db.refresh(preset)
+    return _preset_to_dict(preset)
+
+
+@router.put("/presets/{preset_id}")
+async def update_preset(preset_id: int, body: PresetQuestionUpdate, db: Session = Depends(get_db)):
+    preset = db.query(PresetQuestion).filter(PresetQuestion.id == preset_id).first()
+    if not preset:
+        raise HTTPException(status_code=404, detail="预设问题不存在")
+    if body.question is not None:
+        preset.question = body.question
+    if body.is_scheduled is not None:
+        preset.is_scheduled = body.is_scheduled
+    db.commit()
+    db.refresh(preset)
+    return _preset_to_dict(preset)
+
+
+@router.delete("/presets/{preset_id}")
+async def delete_preset(preset_id: int, db: Session = Depends(get_db)):
+    preset = db.query(PresetQuestion).filter(PresetQuestion.id == preset_id).first()
+    if not preset:
+        raise HTTPException(status_code=404, detail="预设问题不存在")
+    db.delete(preset)
+    db.commit()
+    return {"message": "已删除"}
+
+
+# --- Scheduled Query Results ---
+
+@router.get("/scheduled-results")
+async def list_scheduled_results(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    results = (
+        db.query(ScheduledQueryResult)
+        .order_by(ScheduledQueryResult.generated_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "preset_question_id": r.preset_question_id,
+            "question_snapshot": r.question_snapshot,
+            "answer": r.answer,
+            "model_name": r.model_name,
+            "generated_at": r.generated_at.isoformat() if r.generated_at else "",
+        }
+        for r in results
+    ]

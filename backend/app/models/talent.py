@@ -87,3 +87,36 @@ class LLMUsageLog(Base):
     duration_ms = Column(Integer, nullable=False)
     input_tokens = Column(Integer, default=0)
     output_tokens = Column(Integer, default=0)
+
+
+class PresetQuestion(Base):
+    __tablename__ = "preset_questions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    question = Column(Text, nullable=False)
+    is_scheduled = Column(Boolean, default=False)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    scheduled_results = relationship(
+        "ScheduledQueryResult",
+        back_populates="preset_question",
+        cascade="all, delete-orphan",
+    )
+
+
+class ScheduledQueryResult(Base):
+    __tablename__ = "scheduled_query_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    preset_question_id = Column(
+        Integer,
+        ForeignKey("preset_questions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    question_snapshot = Column(Text, nullable=False)
+    answer = Column(Text, nullable=False)
+    model_name = Column(String(100), nullable=False)
+    generated_at = Column(DateTime, default=datetime.utcnow)
+
+    preset_question = relationship("PresetQuestion", back_populates="scheduled_results")
