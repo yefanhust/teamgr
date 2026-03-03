@@ -1,9 +1,13 @@
+from datetime import timedelta, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.talent import LLMUsageLog
 from app.middleware.auth_middleware import require_auth
+
+_SHANGHAI_TZ = timezone(timedelta(hours=8))
 
 router = APIRouter(prefix="/api/stats", tags=["stats"], dependencies=[Depends(require_auth)])
 
@@ -30,7 +34,7 @@ def get_llm_logs(
         "items": [
             {
                 "id": log.id,
-                "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+                "timestamp": log.timestamp.replace(tzinfo=timezone.utc).astimezone(_SHANGHAI_TZ).isoformat() if log.timestamp else None,
                 "model_name": log.model_name,
                 "call_type": log.call_type,
                 "duration_ms": log.duration_ms,
