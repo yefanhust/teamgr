@@ -1,11 +1,13 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Optional
 
 import google.generativeai as genai
-from app.config import get_gemini_config
+import httpx
+from app.config import get_gemini_config, get_local_models_config
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +37,25 @@ _model_instance = None
 _current_model_name = None
 
 
+def _get_local_model_config(model_name: str) -> dict | None:
+    """Return config dict for a local model, or None if not found."""
+    for m in get_local_models_config():
+        if m.get("name") == model_name:
+            return m
+    return None
+
+
 def _get_model():
+    """Get a Gemini model instance. Falls back to first Gemini model if current is local."""
     global _model_instance, _current_model_name
     cfg = get_gemini_config()
     api_key = cfg.get("api_key", "")
     model_name = cfg.get("current_model", "gemini-3-flash-preview")
+
+    # If current model is local, fall back to first Gemini model (for multimodal)
+    if _get_local_model_config(model_name):
+        available = cfg.get("available_models", ["gemini-2.5-flash"])
+        model_name = available[0] if available else "gemini-2.5-flash"
 
     if not api_key or api_key == "your-gemini-api-key-here":
         logger.warning("Gemini API key not configured. LLM features will not work.")
@@ -54,14 +70,168 @@ def _get_model():
     return _model_instance
 
 
+def _get_model_for_override(model_name: str):
+    """Create a one-off GenerativeModel instance for a specific model name.
+    Does NOT affect the global _model_instance cache."""
+    cfg = get_gemini_config()
+    api_key = cfg.get("api_key", "")
+    if not api_key or api_key == "your-gemini-api-key-here":
+        return None
+    genai.configure(api_key=api_key)
+    return genai.GenerativeModel(model_name)
+
+
+_LOCAL_CALL_TIMEOUT = 300.0
+
+# Regex to strip <think>...</think> blocks from model output
+_THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.DOTALL)
+
+
+def _strip_think_tags(text: str) -> str:
+    """Remove <think>...</think> blocks (Qwen3 thinking mode output).
+    Also handles unclosed <think> tags (truncated responses).
+    """
+    text = _THINK_TAG_RE.sub("", text)
+    # Handle unclosed <think> at the start (truncated by max_tokens)
+    text = re.sub(r"<think>[\s\S]*$", "", text)
+    return text.strip()
+
+
+def _extract_json(text: str) -> dict:
+    """Extract JSON from LLM response text.
+    Handles: raw JSON, ```json code blocks, mixed text with JSON.
+    Raises json.JSONDecodeError if no valid JSON found.
+    """
+    text = text.strip()
+    # 1. Try direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # 2. Try extracting from markdown code blocks
+    m = re.search(r"```(?:json)?\s*\n?([\s\S]*?)```", text)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    # 3. Try finding first { ... } block
+    start = text.find("{")
+    if start >= 0:
+        depth = 0
+        for i in range(start, len(text)):
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
+    raise json.JSONDecodeError("No valid JSON found in response", text, 0)
+
+
+async def _call_local_model(prompt: str, local_cfg: dict) -> tuple[str, int, int]:
+    """Call a local model via OpenAI-compatible chat completions API.
+    Returns (text, prompt_tokens, completion_tokens).
+    """
+    api_base = local_cfg["api_base"].rstrip("/")
+    api_key = local_cfg.get("api_key", "")
+
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {
+        "messages": [
+            {"role": "system", "content": "请直接回答，不要输出思考过程。"},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.7,
+        "max_tokens": 4096,
+    }
+    # Include model field only if explicitly configured (some engines like TACO-X
+    # expect exact model_dir path, so we skip it when not specified)
+    if local_cfg.get("model_id"):
+        payload["model"] = local_cfg["model_id"]
+
+    async with httpx.AsyncClient(timeout=_LOCAL_CALL_TIMEOUT) as client:
+        resp = await client.post(
+            f"{api_base}/chat/completions",
+            json=payload,
+            headers=headers,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        isl = usage.get("prompt_tokens", 0)
+        osl = usage.get("completion_tokens", 0)
+        return _strip_think_tags(content), isl, osl
+
+
+async def _call_model_text(
+    prompt: str,
+    call_type: str = "",
+    model_override: str | None = None,
+) -> str | None:
+    """Unified text generation that routes between Gemini and local models.
+    Returns response text, or None if no model is configured.
+    """
+    effective_model = model_override or get_current_model_name()
+    local_cfg = _get_local_model_config(effective_model)
+
+    t0 = time.monotonic()
+
+    if local_cfg:
+        text, isl, osl = await _call_local_model(prompt, local_cfg)
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(f"[TIMING] Local {effective_model} {call_type}: {duration_ms}ms (ISL={isl}, OSL={osl})")
+        _record_llm_usage(effective_model, call_type, duration_ms, isl, osl)
+        return text
+
+    # Gemini path
+    if model_override:
+        model = _get_model_for_override(model_override)
+        eff_name = model_override
+    else:
+        model = _get_model()
+        eff_name = _current_model_name or "unknown"
+
+    if not model:
+        return None
+
+    response = await asyncio.to_thread(model.generate_content, prompt)
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    logger.info(f"[TIMING] Gemini {call_type}: {duration_ms}ms")
+
+    usage = getattr(response, 'usage_metadata', None)
+    isl = getattr(usage, 'prompt_token_count', 0) or 0
+    osl = getattr(usage, 'candidates_token_count', 0) or 0
+    _record_llm_usage(eff_name, call_type, duration_ms, isl, osl)
+
+    return response.text.strip()
+
+
 def get_current_model_name() -> str:
     cfg = get_gemini_config()
-    return cfg.get("current_model", "gemini-2.5-flash")
+    explicit = cfg.get("current_model")
+    if explicit:
+        return explicit
+    # Default to first local model if available, otherwise Gemini
+    local_models = get_local_models_config()
+    if local_models:
+        return local_models[0]["name"]
+    return "gemini-2.5-flash"
 
 
 def get_available_models() -> list:
+    """Return list of available models with location metadata.
+    Each item: {"name": str, "location": "network" | "local"}
+    """
     cfg = get_gemini_config()
-    return cfg.get(
+    gemini_models = cfg.get(
         "available_models",
         [
             "gemini-2.5-flash",
@@ -70,6 +240,10 @@ def get_available_models() -> list:
             "gemini-3-flash-preview",
         ],
     )
+    result = [{"name": m, "location": "network"} for m in gemini_models]
+    for m in get_local_models_config():
+        result.append({"name": m["name"], "location": "local"})
+    return result
 
 
 async def update_talent_card(
@@ -87,85 +261,44 @@ async def update_talent_card(
         "new_dimensions": list of {key, label, schema} if LLM suggests new dimensions
     }
     """
-    model = _get_model()
-    if not model:
-        return {
-            "card_data": existing_card_data,
-            "summary": "",
-            "suggested_tags": [],
-            "new_dimensions": [],
-        }
+    dimensions_desc = ", ".join(f"{d['key']}({d['label']})" for d in dimensions)
 
-    dimensions_desc = "\n".join(f"- {d['key']} ({d['label']}): 结构为 {d['schema']}" for d in dimensions)
+    # Only include non-empty dimensions in card_data to reduce prompt size
+    compact_card = {k: v for k, v in existing_card_data.items()
+                    if v and v != {} and v != [] and v != ""}
 
-    prompt = f"""你是一个人才信息整理助手。请根据用户输入的信息，更新人才卡片数据。
+    prompt = f"""将用户输入的信息提取到人才卡片维度中。
 
-## 当前人才: {talent_name or '未命名'}
+人才: {talent_name or '未命名'}
+可用维度: {dimensions_desc}
+已有数据: {json.dumps(compact_card, ensure_ascii=False)}
+新输入: {user_input}
 
-## 当前维度定义:
-{dimensions_desc}
-
-## 当前卡片数据:
-```json
-{json.dumps(existing_card_data, ensure_ascii=False, indent=2)}
-```
-
-## 用户新输入的信息:
-{user_input}
-
-## 要求:
-1. 将用户输入的信息整理并合并到对应的维度中
-2. 保留已有的信息，新增或更新相关字段
-3. 如果用户输入的信息无法归入现有维度，可以在 new_dimensions 中建议新增维度
-4. 为此人才建议合适的标签。标签必须原子化，每个标签只表达一个独立概念，不要组合。例如"中科院硕士"应拆为"中科院"和"硕士"两个标签，"前端技术专家"应拆为"前端"和"技术专家"
-5. 生成一句话总结更新到 one_liner 维度
-
-请严格返回以下JSON格式（不要包含markdown代码块标记）:
-{{
-  "card_data": {{ ... 更新后的完整卡片数据，key必须与维度定义对齐 ... }},
-  "summary": "一句话描述这个人才",
-  "suggested_tags": ["标签1", "标签2"],
-  "new_dimensions": [
-    {{
-      "key": "dimension_key",
-      "label": "维度中文名",
-      "schema": "JSON schema string defining the structure"
-    }}
-  ]
-}}
-"""
+只返回JSON（不要代码块），只包含需要新增或修改的维度，不要重复已有不变的数据:
+{{"card_updates": {{"维度key": {{变更字段}}}}, "summary": "一句话总结此人", "suggested_tags": ["原子化标签"], "new_dimensions": []}}"""
 
     try:
-        t0 = time.monotonic()
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        duration_ms = int((time.monotonic() - t0) * 1000)
-        logger.info(f"[TIMING] Gemini text-entry API call: {duration_ms}ms")
+        text = await _call_model_text(prompt, call_type="text-entry")
+        if text is None:
+            return {
+                "card_data": existing_card_data,
+                "summary": "",
+                "suggested_tags": [],
+                "new_dimensions": [],
+            }
+        result = _extract_json(text)
 
-        # Record usage
-        usage = getattr(response, 'usage_metadata', None)
-        isl = getattr(usage, 'prompt_token_count', 0) or 0
-        osl = getattr(usage, 'candidates_token_count', 0) or 0
-        _record_llm_usage(_current_model_name or "unknown", "text-entry", duration_ms, isl, osl)
+        # Merge card_updates into existing data (incremental update)
+        updates = result.get("card_updates") or result.get("card_data") or {}
+        merged = dict(existing_card_data)
+        for dim_key, dim_val in updates.items():
+            if isinstance(dim_val, dict) and isinstance(merged.get(dim_key), dict):
+                merged[dim_key] = {**merged[dim_key], **dim_val}
+            else:
+                merged[dim_key] = dim_val
 
-        text = response.text.strip()
-        # Try to extract JSON if wrapped in code blocks
-        if text.startswith("```"):
-            lines = text.split("\n")
-            json_lines = []
-            inside = False
-            for line in lines:
-                if line.startswith("```") and not inside:
-                    inside = True
-                    continue
-                elif line.startswith("```") and inside:
-                    break
-                elif inside:
-                    json_lines.append(line)
-            text = "\n".join(json_lines)
-
-        result = json.loads(text)
         return {
-            "card_data": result.get("card_data", existing_card_data),
+            "card_data": merged,
             "summary": result.get("summary", ""),
             "suggested_tags": result.get("suggested_tags", []),
             "new_dimensions": result.get("new_dimensions", []),
@@ -261,22 +394,7 @@ async def parse_pdf_content(
         _record_llm_usage(_current_model_name or "unknown", "pdf-parse", duration_ms, isl, osl)
 
         text = response.text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            json_lines = []
-            inside = False
-            for line in lines:
-                if line.startswith("```") and not inside:
-                    inside = True
-                    continue
-                elif line.startswith("```") and inside:
-                    break
-                elif inside:
-                    json_lines.append(line)
-            text = "\n".join(json_lines)
-
-        result = json.loads(text)
-        # Ensure result is a dict
+        result = _extract_json(text)
         if not isinstance(result, dict):
             logger.warning(f"LLM returned non-dict type: {type(result)}")
             return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
@@ -284,6 +402,93 @@ async def parse_pdf_content(
         return result
     except Exception as e:
         logger.error(f"LLM PDF parsing failed: {e}")
+        return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
+                "extracted_info": {}}
+
+
+async def parse_image_content(
+    images: list[bytes],
+    dimensions: list[dict],
+    talent_name: str = "",
+) -> dict:
+    """Use VLM (multimodal) to extract structured info from uploaded images.
+
+    Args:
+        images: List of image bytes (PNG/JPG/etc.)
+        dimensions: Card dimension definitions
+        talent_name: Known talent name (optional)
+
+    Returns: dict with extracted_info, card_data, summary, suggested_tags, new_dimensions
+    """
+    model = _get_model()
+    if not model:
+        return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
+                "extracted_info": {}}
+
+    dimensions_desc = "\n".join(f"- {d['key']} ({d['label']}): 结构为 {d['schema']}" for d in dimensions)
+
+    prompt = f"""你是一个人才信息提取助手。请仔细查看以下图片，提取与人才相关的结构化信息，填入人才卡片。
+图片可能是名片、截图、证件照、简历照片等任何与人才相关的图片。
+
+## 人才姓名: {talent_name or '从图片中识别'}
+
+## 人才卡维度定义:
+{dimensions_desc}
+
+## 要求:
+1. 仔细查看所有图片中的内容（包括文字、Logo、头像旁的信息等）
+2. 从图片中提取信息，填入对应的维度
+3. 如果能识别出姓名、邮箱、电话，请在返回的 extracted_info 中提供
+4. 如果图片中有信息无法归入现有维度，建议新维度
+5. 标签必须原子化，每个标签只表达一个独立概念，不要组合
+
+请严格返回以下JSON格式（不要包含markdown代码块标记）:
+{{
+  "extracted_info": {{
+    "name": "识别到的姓名",
+    "email": "邮箱",
+    "phone": "电话",
+    "current_role": "当前职位",
+    "department": "部门"
+  }},
+  "card_data": {{ ... 填充的卡片数据 ... }},
+  "summary": "一句话描述",
+  "suggested_tags": ["标签1"],
+  "new_dimensions": []
+}}
+"""
+
+    from PIL import Image as PILImage
+    import io
+
+    t0 = time.monotonic()
+    content_parts = [prompt]
+
+    for img_bytes in images:
+        img = PILImage.open(io.BytesIO(img_bytes))
+        content_parts.append(img)
+    logger.info(f"[TIMING] Image prep ({len(images)} images): {time.monotonic() - t0:.2f}s")
+
+    try:
+        t1 = time.monotonic()
+        response = await asyncio.to_thread(model.generate_content, content_parts)
+        duration_ms = int((time.monotonic() - t1) * 1000)
+        logger.info(f"[TIMING] Gemini image-parse API call: {duration_ms}ms")
+
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) or 0
+        osl = getattr(usage, 'candidates_token_count', 0) or 0
+        _record_llm_usage(_current_model_name or "unknown", "image-parse", duration_ms, isl, osl)
+
+        text = response.text.strip()
+        result = _extract_json(text)
+        if not isinstance(result, dict):
+            logger.warning(f"LLM returned non-dict type: {type(result)}")
+            return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
+                    "extracted_info": {}}
+        return result
+    except Exception as e:
+        logger.error(f"LLM image parsing failed: {e}")
         return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
                 "extracted_info": {}}
 
@@ -300,10 +505,6 @@ async def semantic_search(
 
     Returns: list of talent IDs sorted by relevance
     """
-    model = _get_model()
-    if not model:
-        return []
-
     talents_text = "\n".join(
         f"ID={t['id']}, 姓名={t['name']}, 标签={','.join(t.get('tags', []))}, 摘要={t.get('summary', '无')}"
         for t in all_talents_summary
@@ -324,32 +525,10 @@ async def semantic_search(
 """
 
     try:
-        t0 = time.monotonic()
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        duration_ms = int((time.monotonic() - t0) * 1000)
-        logger.info(f"[TIMING] Gemini semantic-search API call: {duration_ms}ms")
-
-        # Record usage
-        usage = getattr(response, 'usage_metadata', None)
-        isl = getattr(usage, 'prompt_token_count', 0) or 0
-        osl = getattr(usage, 'candidates_token_count', 0) or 0
-        _record_llm_usage(_current_model_name or "unknown", "semantic-search", duration_ms, isl, osl)
-
-        text = response.text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            json_lines = []
-            inside = False
-            for line in lines:
-                if line.startswith("```") and not inside:
-                    inside = True
-                    continue
-                elif line.startswith("```") and inside:
-                    break
-                elif inside:
-                    json_lines.append(line)
-            text = "\n".join(json_lines)
-        return json.loads(text)
+        text = await _call_model_text(prompt, call_type="semantic-search")
+        if text is None:
+            return []
+        return _extract_json(text)
     except Exception as e:
         logger.error(f"LLM semantic search failed: {e}")
         return []
@@ -358,15 +537,12 @@ async def semantic_search(
 async def analyze_query_dimensions(
     query: str,
     dimensions: list[dict],
+    model_override: str | None = None,
 ) -> dict:
     """Step 1 of chat query: identify which dimensions are relevant to the user's question.
 
     Returns: {"relevant_dimensions": [{"key": str, "label": str}], "reasoning": str}
     """
-    model = _get_model()
-    if not model:
-        return {"relevant_dimensions": [], "reasoning": "模型未配置"}
-
     dimensions_desc = "\n".join(f"- {d['key']} ({d['label']}): 结构为 {d['schema']}" for d in dimensions)
 
     prompt = f"""你是一个人才数据分析助手。用户要查询关于人才库的问题，请判断回答这个问题需要查看哪些人才卡维度。
@@ -389,32 +565,10 @@ async def analyze_query_dimensions(
 """
 
     try:
-        t0 = time.monotonic()
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        duration_ms = int((time.monotonic() - t0) * 1000)
-        logger.info(f"[TIMING] Gemini chat-analyze API call: {duration_ms}ms")
-
-        usage = getattr(response, 'usage_metadata', None)
-        isl = getattr(usage, 'prompt_token_count', 0) or 0
-        osl = getattr(usage, 'candidates_token_count', 0) or 0
-        _record_llm_usage(_current_model_name or "unknown", "chat-analyze", duration_ms, isl, osl)
-
-        text = response.text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            json_lines = []
-            inside = False
-            for line in lines:
-                if line.startswith("```") and not inside:
-                    inside = True
-                    continue
-                elif line.startswith("```") and inside:
-                    break
-                elif inside:
-                    json_lines.append(line)
-            text = "\n".join(json_lines)
-
-        result = json.loads(text)
+        text = await _call_model_text(prompt, call_type="chat-analyze", model_override=model_override)
+        if text is None:
+            return {"relevant_dimensions": [], "reasoning": "模型未配置"}
+        result = _extract_json(text)
         return {
             "relevant_dimensions": result.get("relevant_dimensions", []),
             "reasoning": result.get("reasoning", ""),
@@ -428,16 +582,19 @@ async def answer_talent_query(
     query: str,
     talents_context_json: str,
     dimensions_used: list[str],
+    model_override: str | None = None,
 ) -> dict:
     """Step 2 of chat query: answer the user's question with talent data context.
 
     Returns: {"answer": str}
     """
-    model = _get_model()
-    if not model:
-        return {"answer": "模型未配置，无法回答"}
+    from datetime import datetime
+    now_str = datetime.now().strftime("%Y年%m月%d日 %H:%M（%A）")
 
     prompt = f"""你是一个人才数据分析助手。请根据以下人才数据回答用户的问题。
+
+## 当前时间:
+{now_str}
 
 ## 人才数据（JSON格式，包含 {len(dimensions_used)} 个相关维度）:
 {talents_context_json[:30000]}
@@ -447,25 +604,21 @@ async def answer_talent_query(
 
 ## 要求:
 1. 基于提供的数据如实回答，不要编造信息
-2. 如果数据不足以回答，请说明
+2. 如果部分人才缺少回答所需的关键信息（如缺少生日日期、缺少某维度数据），请：
+   a. 先从数据完整的人才中给出能回答的结果
+   b. 再列出哪些人才缺少该关键信息，建议补充
 3. 回答要简洁有条理
 4. 如果涉及多个人才的对比，用列表展示
+5. 不要简单说"无法回答"就结束，尽量从已有数据中挖掘有价值的信息
 
 请直接回答（纯文本，不要JSON格式）:
 """
 
     try:
-        t0 = time.monotonic()
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        duration_ms = int((time.monotonic() - t0) * 1000)
-        logger.info(f"[TIMING] Gemini chat-answer API call: {duration_ms}ms")
-
-        usage = getattr(response, 'usage_metadata', None)
-        isl = getattr(usage, 'prompt_token_count', 0) or 0
-        osl = getattr(usage, 'candidates_token_count', 0) or 0
-        _record_llm_usage(_current_model_name or "unknown", "chat-answer", duration_ms, isl, osl)
-
-        return {"answer": response.text.strip()}
+        text = await _call_model_text(prompt, call_type="chat-answer", model_override=model_override)
+        if text is None:
+            return {"answer": "模型未配置，无法回答"}
+        return {"answer": text}
     except Exception as e:
         logger.error(f"LLM chat-answer failed: {e}")
         return {"answer": "回答生成失败，请重试"}

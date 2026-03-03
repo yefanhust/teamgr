@@ -1,0 +1,7 @@
+{
+    "enable_caching": true,
+    "block_size": 16,
+    "gpu_memory_utilization": 0.1,
+    "disk_cache_path": "disk_cache",
+    "kv_layout_type": 1
+}

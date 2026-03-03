@@ -16,6 +16,12 @@ gemini:
     - "gemini-2.5-flash-lite"
     - "gemini-3-flash-preview"
 
+# 本地模型配置 (通过 TACO-X 部署的 OpenAI 兼容服务)
+local_models:
+  - name: "Qwen3-32B"
+    api_base: "http://tacox:18080/v1"   # docker-compose 内部服务名
+    # api_key: ""                           # 如需 API key 可在此配置
+
 # 腾讯云 COS 备份配置
 cos:
   enabled: false

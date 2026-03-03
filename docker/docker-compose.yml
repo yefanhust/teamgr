@@ -18,6 +18,42 @@ services:
       - TEAMGR_DATA_DIR=/app/data
       - PYTHONPATH=/app
 
+  tacox:
+    image: taco-0.tencentcloudcr.com/taco/taco_x_prod:v0.0.1-260302-default
+    container_name: teamgr-tacox
+    restart: unless-stopped
+    ipc: host
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 2
+              capabilities: [gpu]
+    volumes:
+      - ~/.cache/huggingface/hub/models--Qwen--Qwen3-32B:/models/Qwen3-32B
+      - ../local_llm/qwen3_32b_taco_x_config:/workspace/qwen3_32b_taco_x_config:ro
+    expose:
+      - "18080"
+    entrypoint: >
+      bash -c "python3 -m taco_x.api_server
+      --model_dir /models/Qwen3-32B/snapshots/9216db5781bf21249d130ec9da846c4624c16137
+      --model_type qwen3_32b
+      --config_dir /workspace/qwen3_32b_taco_x_config
+      --port 18080
+      --tp 2
+      --opt-level 3
+      --quantization fp8"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,json; urllib.request.urlopen(urllib.request.Request('http://localhost:18080/v1/chat/completions',data=json.dumps({'messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(),headers={'Content-Type':'application/json'}))"]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 600s
+
   nginx:
     image: nginx:alpine
     container_name: teamgr-nginx

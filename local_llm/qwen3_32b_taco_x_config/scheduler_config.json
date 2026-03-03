@@ -1,0 +1,16 @@
+{
+    "max_num_seqs": 8,
+    "max_num_images": 0,
+    "max_num_batched_tokens": 16384,
+    "max_model_len": 16384,
+    "long_prefill_token_threshold": 0,
+    "max_num_encoder_input_tokens": 16384,
+    "encoder_cache_size": 32768,
+    "max_num_mm_embeds_per_batch": 0,
+    "gpu_memory_utilization": 0.90,
+    "max_num_image_windows": 0,
+    "enable_cuda_graph": false,
+    "enable_custom_all_reduce": false,
+    "enable_vision_dp": false,
+    "max_num_lora_models_reserved": 0
+}

@@ -51,12 +51,15 @@ gemini:
 docker-compose -f docker/docker-compose.yml up -d --build
 ```
 
-启动后会运行两个容器：
+启动后会运行以下容器：
 
 | 容器 | 作用 |
 |------|------|
 | `teamgr-app` | 后端运行环境，等待通过 exec 启动 uvicorn |
+| `teamgr-tacox` | 本地 LLM 推理服务（Qwen3-32B，需要 GPU） |
 | `teamgr-nginx` | HTTPS 反向代理（端口 6443），首次启动自动生成自签名证书 |
+
+> 如果没有 GPU，`tacox` 容器会启动失败但不影响其他服务，Gemini 云端模型仍可正常使用。
 
 ### 3. 启动 Web 服务
 
@@ -103,6 +106,10 @@ docker-compose -f docker/docker-compose.yml exec teamgr /workspace/scripts/start
 | `gemini.api_key` | Gemini API Key | 是 |
 | `gemini.current_model` | 当前使用的模型 | 否 |
 | `gemini.available_models` | 可选模型列表 | 否 |
+| `local_models` | 本地模型配置列表 | 否 |
+| `local_models[].name` | 模型名称 | 是 |
+| `local_models[].api_base` | OpenAI 兼容 API 地址 | 是 |
+| `local_models[].api_key` | API Key（如需要） | 否 |
 | `cos.enabled` | 是否启用COS备份 | 否 |
 | `cos.secret_id` | 腾讯云SecretId | 备份时必填 |
 | `cos.secret_key` | 腾讯云SecretKey | 备份时必填 |
@@ -187,6 +194,59 @@ teamgr/
 │       └── api/         # API封装
 ├── data/                # SQLite数据库(运行时生成)
 └── ssl/                 # 自签名证书(自动生成)
+```
+
+## 本地 LLM 部署（TACO-X + Qwen3-32B）
+
+系统支持通过 TACO-X 在本地部署 LLM，减少对 Gemini API 的依赖。当前预配置了 Qwen3-32B 模型，使用 2 张 L20 GPU（TP2）进行推理。
+
+### 前置要求
+
+- 2 张 NVIDIA GPU（如 L20）
+- NVIDIA 驱动 + nvidia-container-toolkit
+- 预下载的 Qwen3-32B 模型权重
+
+### 模型准备
+
+模型需预先下载到 `~/.cache/huggingface/hub/models--Qwen--Qwen3-32B/` 目录。可通过 `huggingface-cli` 下载：
+
+```bash
+pip install huggingface_hub
+huggingface-cli download Qwen/Qwen3-32B
+```
+
+### 配置
+
+在 `config/config.yaml` 中添加：
+
+```yaml
+local_models:
+  - name: "Qwen3-32B"
+    api_base: "http://tacox:18080/v1"
+```
+
+### 使用
+
+`docker-compose up -d` 后，`tacox` 容器会自动启动推理服务（首次加载模型约需 2 分钟）。
+
+在页面的模型选择器中，可以看到带"本地"标签的 Qwen3-32B 选项。选择后所有文本生成类 LLM 调用（人才查询、信息录入、语义搜索）会路由到本地模型。PDF/图片解析等多模态功能仍使用 Gemini。
+
+### 检查服务状态
+
+```bash
+# 查看 tacox 容器状态
+docker ps | grep tacox
+
+# 测试 API 是否就绪（发送一个最小请求）
+docker exec teamgr-tacox python3 -c "
+import urllib.request, json
+req = urllib.request.Request(
+    'http://localhost:18080/v1/chat/completions',
+    data=json.dumps({'messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(),
+    headers={'Content-Type':'application/json'}
+)
+print(urllib.request.urlopen(req).read().decode())
+"
 ```
 
 ## 腾讯云COS备份配置

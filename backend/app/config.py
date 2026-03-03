@@ -88,6 +88,11 @@ def get_server_config() -> dict:
     return cfg.get("server", {"host": "0.0.0.0", "port": 8000})
 
 
+def get_local_models_config() -> list:
+    cfg = get_config()
+    return cfg.get("local_models", [])
+
+
 def get_backup_config() -> dict:
     cfg = get_config()
     return cfg.get("backup", {"enabled": False, "cron_hour": 3, "cron_minute": 0})
