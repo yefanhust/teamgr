@@ -77,6 +77,18 @@ export const useTalentStore = defineStore('talent', () => {
     return res.data
   }
 
+  async function uploadImage(talentId, files) {
+    const formData = new FormData()
+    formData.append('talent_id', talentId)
+    for (const file of files) {
+      formData.append('files', file)
+    }
+    const res = await api.post('/api/entry/image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return res.data
+  }
+
   async function getEntryLogs(talentId) {
     const res = await api.get(`/api/entry/logs/${talentId}`)
     return res.data
@@ -120,6 +132,7 @@ export const useTalentStore = defineStore('talent', () => {
     semanticSearch,
     submitTextEntry,
     uploadPdf,
+    uploadImage,
     getEntryLogs,
     deleteEntryLog,
     createTag,

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import time
 import traceback
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
 from app.models.talent import Talent, Tag, TalentTag, EntryLog, CardDimension
 from app.middleware.auth_middleware import require_auth
-from app.services.llm_service import update_talent_card, parse_pdf_content
+from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content
 from app.services.pdf_service import extract_text_from_pdf, pdf_to_images
 from app.services.pinyin_service import get_pinyin_data
 
@@ -352,6 +353,158 @@ async def upload_pdf_resume(
 
     return {
         "message": "简历已上传，后台解析中",
+        "entry_id": entry_log.id,
+        "talent_id": talent.id,
+        "status": "processing",
+    }
+
+
+ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB per image
+MAX_IMAGE_COUNT = 10
+
+
+async def _process_image_entry_bg(entry_log_id: int, talent_id: int,
+                                   images: list[bytes],
+                                   dimensions: list[dict], talent_name: str):
+    """Background task: call VLM to parse uploaded images and update talent card."""
+    t_start = time.monotonic()
+    db = SessionLocal()
+    try:
+        t0 = time.monotonic()
+        result = await parse_image_content(
+            images=images,
+            dimensions=dimensions,
+            talent_name=talent_name,
+        )
+        logger.info(f"[TIMING] Image VLM parse: {time.monotonic() - t0:.1f}s (entry {entry_log_id})")
+
+        if not isinstance(result, dict):
+            logger.warning(f"parse_image_content returned non-dict: {type(result)}")
+            result = {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": []}
+
+        talent = db.query(Talent).filter(Talent.id == talent_id).first()
+        if not talent:
+            return
+
+        # Apply new dimensions
+        new_dims = result.get("new_dimensions", [])
+        if isinstance(new_dims, list):
+            new_dims = [d for d in new_dims if isinstance(d, dict)]
+            _apply_new_dimensions(db, new_dims)
+
+        # Update talent basic info from extraction
+        extracted = result.get("extracted_info", {})
+        if not isinstance(extracted, dict):
+            extracted = {}
+        if extracted.get("email") and not talent.email:
+            talent.email = extracted["email"]
+        if extracted.get("phone") and not talent.phone:
+            talent.phone = extracted["phone"]
+        if extracted.get("current_role") and not talent.current_role:
+            talent.current_role = extracted["current_role"]
+        if extracted.get("department") and not talent.department:
+            talent.department = extracted["department"]
+
+        # Merge card data
+        new_card_data = result.get("card_data", {})
+        if isinstance(new_card_data, dict):
+            existing_card = talent.card_data or {}
+            for key, value in new_card_data.items():
+                if value and value != "" and value != [] and value != {}:
+                    existing_card[key] = value
+            talent.card_data = existing_card
+
+        if result.get("summary"):
+            talent.summary = result["summary"]
+
+        # Handle tags
+        suggested_tags = result.get("suggested_tags", [])
+        if isinstance(suggested_tags, list) and suggested_tags:
+            tag_ids = _ensure_tags(db, [t for t in suggested_tags if isinstance(t, str)])
+            existing_tag_ids = {tt.tag_id for tt in db.query(TalentTag).filter(
+                TalentTag.talent_id == talent.id
+            ).all()}
+            for tid in tag_ids:
+                if tid not in existing_tag_ids:
+                    db.add(TalentTag(talent_id=talent.id, tag_id=tid))
+
+        # Update entry log
+        entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+        if entry_log:
+            entry_log.llm_response = json.dumps(result, ensure_ascii=False)
+            entry_log.status = "done"
+
+        db.commit()
+        logger.info(f"Image LLM processing done for talent {talent_id}, entry {entry_log_id}, total: {time.monotonic() - t_start:.1f}s")
+
+    except Exception as e:
+        logger.error(f"Background image processing failed for entry {entry_log_id}: {e}\n{traceback.format_exc()}")
+        try:
+            entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+            if entry_log:
+                entry_log.status = "failed"
+                entry_log.llm_response = json.dumps({"error": str(e)}, ensure_ascii=False)
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+@router.post("/image")
+async def upload_images(
+    talent_id: int = Form(...),
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Upload images (business card, screenshot, etc). Saves immediately, LLM processes in background."""
+    if not files:
+        raise HTTPException(status_code=400, detail="请上传至少一张图片")
+
+    if len(files) > MAX_IMAGE_COUNT:
+        raise HTTPException(status_code=400, detail=f"最多上传{MAX_IMAGE_COUNT}张图片")
+
+    talent = db.query(Talent).filter(Talent.id == talent_id).first()
+    if not talent:
+        raise HTTPException(status_code=404, detail="人才不存在")
+
+    # Validate and read images
+    image_bytes_list = []
+    filenames = []
+    for f in files:
+        ext = os.path.splitext(f.filename or "")[1].lower()
+        if ext not in ALLOWED_IMAGE_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
+        data = await f.read()
+        if len(data) > MAX_IMAGE_SIZE:
+            raise HTTPException(status_code=400, detail=f"图片 {f.filename} 太大（最大10MB）")
+        image_bytes_list.append(data)
+        filenames.append(f.filename or "unknown")
+
+    dimensions = _get_dimensions(db)
+
+    entry_log = EntryLog(
+        talent_id=talent.id,
+        content=f"[图片上传] {', '.join(filenames)} ({len(image_bytes_list)}张)",
+        source="image",
+        status="processing",
+    )
+    db.add(entry_log)
+    db.commit()
+    db.refresh(entry_log)
+
+    asyncio.create_task(_process_image_entry_bg(
+        entry_log_id=entry_log.id,
+        talent_id=talent.id,
+        images=image_bytes_list,
+        dimensions=dimensions,
+        talent_name=talent.name,
+    ))
+
+    return {
+        "message": "图片已上传，后台解析中",
         "entry_id": entry_log.id,
         "talent_id": talent.id,
         "status": "processing",

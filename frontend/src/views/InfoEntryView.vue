@@ -78,6 +78,15 @@
                       : 'bg-gray-100 text-gray-700'
               ]"
             >
+              <div v-if="msg.images && msg.images.length" class="flex flex-wrap gap-1.5 mb-1">
+                <img
+                  v-for="(src, imgIdx) in msg.images"
+                  :key="imgIdx"
+                  :src="src"
+                  class="w-20 h-20 object-cover rounded-lg cursor-pointer"
+                  @click="previewImage(src)"
+                />
+              </div>
               <div v-if="msg.status === 'processing'" class="flex items-center gap-2">
                 <van-loading size="14px" />
                 <span>{{ msg.content }}</span>
@@ -104,9 +113,10 @@
             v-model="inputText"
             type="textarea"
             :autosize="{ minHeight: 100 }"
-            placeholder="输入候选人的信息..."
+            placeholder="输入候选人的信息（支持粘贴图片）..."
             class="flex-1 entry-input"
             @keypress.enter.exact.prevent="submitEntry"
+            @paste="handlePaste"
           />
           <van-button
             type="primary"
@@ -120,26 +130,47 @@
         </div>
       </div>
 
-      <!-- PDF Upload -->
+      <!-- File Upload -->
       <div class="bg-white rounded-xl shadow-sm p-4 mb-4">
-        <label class="text-sm font-medium text-gray-600 mb-2 block">上传简历PDF</label>
-        <van-uploader
-          :after-read="handlePdfUpload"
-          accept="application/pdf"
-          :max-count="1"
-          :disabled="!selectedTalent || uploading"
-        >
-          <van-button
-            icon="description"
-            type="primary"
-            plain
-            size="small"
-            :loading="uploading"
-            :disabled="!selectedTalent"
+        <label class="text-sm font-medium text-gray-600 mb-2 block">上传文件</label>
+        <div class="flex gap-3">
+          <van-uploader
+            :after-read="handlePdfUpload"
+            accept="application/pdf"
+            :max-count="1"
+            :disabled="!selectedTalent || uploading"
           >
-            {{ selectedTalent ? '选择PDF文件' : '请先选择候选人' }}
-          </van-button>
-        </van-uploader>
+            <van-button
+              icon="description"
+              type="primary"
+              plain
+              size="small"
+              :loading="uploading"
+              :disabled="!selectedTalent"
+            >
+              简历PDF
+            </van-button>
+          </van-uploader>
+          <van-uploader
+            :after-read="handleImageUpload"
+            accept="image/*"
+            :max-count="10"
+            multiple
+            :disabled="!selectedTalent || uploadingImage"
+          >
+            <van-button
+              icon="photo-o"
+              type="primary"
+              plain
+              size="small"
+              :loading="uploadingImage"
+              :disabled="!selectedTalent"
+            >
+              图片（名片等）
+            </van-button>
+          </van-uploader>
+        </div>
+        <p v-if="!selectedTalent" class="text-xs text-gray-400 mt-1">请先选择候选人</p>
       </div>
     </div>
 
@@ -170,7 +201,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTalentStore } from '../stores/talent'
-import { showToast } from 'vant'
+import { showToast, showImagePreview } from 'vant'
 import api from '../api'
 
 const route = useRoute()
@@ -183,6 +214,7 @@ const selectedTalent = ref(null)
 const inputText = ref('')
 const messages = ref([])
 const uploading = ref(false)
+const uploadingImage = ref(false)
 const chatContainer = ref(null)
 const showNewTalent = ref(false)
 const newTalentName = ref('')
@@ -200,9 +232,10 @@ const canSubmit = computed(() => {
 
 const modelActions = computed(() => {
   return availableModels.value.map(m => ({
-    name: m,
-    color: m === currentModel.value ? '#1989fa' : undefined,
-    className: m === currentModel.value ? 'font-bold' : '',
+    name: m.name,
+    subname: m.location === 'local' ? '本地' : '网络',
+    color: m.name === currentModel.value ? '#1989fa' : undefined,
+    className: m.name === currentModel.value ? 'font-bold' : '',
   }))
 })
 
@@ -405,6 +438,102 @@ async function handlePdfUpload(file) {
   }
 }
 
+function handlePaste(event) {
+  if (!selectedTalent.value) return
+
+  const items = event.clipboardData?.items
+  if (!items) return
+
+  const imageFiles = []
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const blob = item.getAsFile()
+      if (blob) imageFiles.push(blob)
+    }
+  }
+
+  if (imageFiles.length === 0) return
+
+  // Prevent the default paste (don't insert binary data into textarea)
+  event.preventDefault()
+
+  // Trigger the same upload flow
+  uploadingImage.value = true
+  const imageUrls = imageFiles.map(f => URL.createObjectURL(f))
+  messages.value.push({
+    role: 'user',
+    content: `粘贴了 ${imageFiles.length} 张图片`,
+    images: imageUrls,
+  })
+
+  const processingIdx = messages.value.length
+  messages.value.push({
+    role: 'assistant',
+    status: 'processing',
+    content: '图片解析中...',
+  })
+
+  nextTick().then(() => scrollToBottom())
+
+  store.uploadImage(selectedTalent.value.id, imageFiles)
+    .then(result => {
+      pendingEntries.value.set(result.entry_id, processingIdx)
+      startPolling()
+    })
+    .catch(e => {
+      messages.value[processingIdx] = {
+        role: 'assistant',
+        status: 'failed',
+        content: '图片上传失败: ' + (e.response?.data?.detail || '未知错误'),
+      }
+    })
+    .finally(() => {
+      uploadingImage.value = false
+    })
+}
+
+async function handleImageUpload(fileOrFiles) {
+  if (!selectedTalent.value) return
+
+  const fileList = Array.isArray(fileOrFiles) ? fileOrFiles : [fileOrFiles]
+
+  uploadingImage.value = true
+  const imageUrls = fileList.map(f => f.content)
+  const names = fileList.map(f => f.file.name).join(', ')
+  messages.value.push({
+    role: 'user',
+    content: names,
+    images: imageUrls,
+  })
+
+  const processingIdx = messages.value.length
+  messages.value.push({
+    role: 'assistant',
+    status: 'processing',
+    content: '图片解析中...',
+  })
+
+  await nextTick()
+  scrollToBottom()
+
+  try {
+    const result = await store.uploadImage(
+      selectedTalent.value.id,
+      fileList.map(f => f.file)
+    )
+    pendingEntries.value.set(result.entry_id, processingIdx)
+    startPolling()
+  } catch (e) {
+    messages.value[processingIdx] = {
+      role: 'assistant',
+      status: 'failed',
+      content: '图片上传失败: ' + (e.response?.data?.detail || '未知错误'),
+    }
+  } finally {
+    uploadingImage.value = false
+  }
+}
+
 async function createAndSelect() {
   if (!newTalentName.value.trim()) {
     showToast('请输入姓名')
@@ -420,6 +549,10 @@ async function createAndSelect() {
   } catch (e) {
     showToast('创建失败')
   }
+}
+
+function previewImage(src) {
+  showImagePreview({ images: [src], closeable: true })
 }
 
 function scrollToBottom() {
