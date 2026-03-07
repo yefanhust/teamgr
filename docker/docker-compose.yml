@@ -10,9 +10,10 @@ services:
     expose:
       - "8000"
     volumes:
-      - ../config:/app/config:ro
+      - ../config:/app/config
       - ../data:/app/data
       - ../scripts:/workspace/scripts:ro
+      - ../backend/app:/app/app:ro
     environment:
       - TEAMGR_CONFIG=/app/config/config.yaml
       - TEAMGR_DATA_DIR=/app/data
@@ -34,19 +35,18 @@ services:
               count: 2
               capabilities: [gpu]
     volumes:
-      - ~/.cache/huggingface/hub/models--Qwen--Qwen3-32B:/models/Qwen3-32B
-      - ../local_llm/qwen3_32b_taco_x_config:/workspace/qwen3_32b_taco_x_config:ro
+      - ~/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-Instruct-2507:/models/Qwen3-30B-A3B
+      - ../local_llm/qwen3_moe_30b_taco_x_config:/workspace/qwen3_moe_30b_taco_x_config:ro
     expose:
       - "18080"
     entrypoint: >
       bash -c "python3 -m taco_x.api_server
-      --model_dir /models/Qwen3-32B/snapshots/9216db5781bf21249d130ec9da846c4624c16137
-      --model_type qwen3_32b
-      --config_dir /workspace/qwen3_32b_taco_x_config
+      --model_dir /models/Qwen3-30B-A3B/snapshots/0d7cf23991f47feeb3a57ecb4c9cee8ea4a17bfe
+      --model_type qwen3_moe_30b
+      --config_dir /workspace/qwen3_moe_30b_taco_x_config
       --port 18080
       --tp 2
-      --opt-level 3
-      --quantization fp8"
+      --opt-level 3"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,json; urllib.request.urlopen(urllib.request.Request('http://localhost:18080/v1/chat/completions',data=json.dumps({'messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(),headers={'Content-Type':'application/json'}))"]
       interval: 30s

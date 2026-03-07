@@ -18,7 +18,7 @@ gemini:
 
 # 本地模型配置 (通过 TACO-X 部署的 OpenAI 兼容服务)
 local_models:
-  - name: "Qwen3-32B"
+  - name: "Qwen3-30B-A3B"
     api_base: "http://tacox:18080/v1"   # docker-compose 内部服务名
     # api_key: ""                           # 如需 API key 可在此配置
 

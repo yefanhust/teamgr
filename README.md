@@ -1,14 +1,15 @@
-# TeaMgr - 人才卡管理系统
+# TeaMgr - 个人工作台
 
-团队整合人才管理工具。通过 LLM（Gemini）智能整理 1:1 交流记录，生成标准化人才卡，支持拼音搜索、标签分类、PDF简历导入/导出。
+个人工作台工具。集人才卡管理、Studio（任务管理 + Vibe Coding）、灵感碎片于一体。通过 LLM（Gemini / 本地模型）提供智能辅助，通过 Claude Code 驱动自动化编码。
 
 ## 功能概览
 
 - **人才卡管理** - 统一维度的人才画像，支持标签分类和搜索
 - **信息录入** - 对话式录入 + PDF简历上传，LLM自动整理到人才卡
 - **智能搜索** - 拼音模糊搜索 + AI语义搜索
-- **PDF导出** - 一键导出人才卡为PDF
-- **动态维度** - LLM可根据输入信息建议新增维度，所有人才卡维度自动对齐
+- **Studio** - 任务管理 + 标签分类 + 重复任务 + 截止日期 + 效率分析 + Vibe Coding
+- **灵感碎片** - 随时记录想法，LLM定时聚合生成洞见
+- **Vibe Coding** - 自动化研发管理（规划→实现→验证→提交），Claude Code 驱动
 - **安全认证** - 密码认证 + 渐进式封禁 + 自动解封 + IP限流
 - **数据备份** - 每日自动备份到腾讯云COS
 - **响应式设计** - 支持 iPhone / Android 和 PC 浏览器
@@ -83,7 +84,24 @@ docker-compose -f docker/docker-compose.yml logs -f
 # 停止所有容器
 docker-compose -f docker/docker-compose.yml down
 
-# 修改代码或依赖后重新构建（必须先 down 再 up，否则可能报 "No such image" 错误）
+# ---- 热更新（最轻量，不重启容器） ----
+
+# 仅修改前端代码：构建 + 复制到容器，刷新浏览器即可
+docker run --rm -v "$(pwd)/frontend:/build" -w /build node:20-alpine sh -c "npm install && npm run build" && docker cp frontend/dist/. teamgr-app:/app/frontend/dist/
+
+# 仅修改后端 Python 代码：复制 + 重启 uvicorn
+docker cp backend/. teamgr-app:/app/
+docker exec teamgr-app pkill -f uvicorn
+docker-compose -f docker/docker-compose.yml exec teamgr /workspace/scripts/start_web.sh
+
+# ---- 单服务重建（前后端代码都改了，但依赖没变） ----
+# 只重建 teamgr 容器，不影响 nginx / tacox
+docker-compose -f docker/docker-compose.yml rm -sf teamgr && docker-compose -f docker/docker-compose.yml up -d --build teamgr && docker-compose -f docker/docker-compose.yml exec teamgr /workspace/scripts/start_web.sh
+
+# ---- 完整重建（仅在以下情况需要） ----
+# - 修改了 Dockerfile 或 docker-compose.yml
+# - 修改了 requirements.txt 或 package.json（依赖变更）
+# 必须先 down 再 up，否则可能报 "No such image" 错误
 docker-compose -f docker/docker-compose.yml down
 docker-compose -f docker/docker-compose.yml up -d --build
 docker-compose -f docker/docker-compose.yml exec teamgr /workspace/scripts/start_web.sh
@@ -177,14 +195,15 @@ teamgr/
 │   ├── docker-compose.yml
 │   ├── nginx.conf
 │   └── nginx-entrypoint.sh
-├── scripts/             # 容器内执行的脚本
-│   ├── start_web.sh     # 启动 uvicorn
-│   └── restart_web.sh   # 重启 uvicorn
+├── scripts/             # 脚本
+│   ├── start_web.sh     # 启动 uvicorn（容器内）
+│   ├── restart_web.sh   # 重启 uvicorn（容器内）
+│   └── vibe-watcher.sh  # Vibe Coding 自动化 Watcher（宿主机）
 ├── backend/             # Python FastAPI后端
 │   └── app/
 │       ├── main.py      # 入口
-│       ├── models/      # 数据库模型
-│       ├── routers/     # API路由
+│       ├── models/      # 数据库模型 (talent, todo)
+│       ├── routers/     # API路由 (talents, todos, ideas, auth)
 │       ├── services/    # 业务服务(LLM/PDF/拼音/备份)
 │       └── middleware/  # 认证/限流中间件
 ├── frontend/            # Vue 3前端
@@ -192,7 +211,10 @@ teamgr/
 │       ├── views/       # 页面组件
 │       ├── stores/      # Pinia状态管理
 │       └── api/         # API封装
-├── data/                # SQLite数据库(运行时生成)
+├── data/                # 运行时数据（SQLite、队列文件、日志）
+│   ├── teamgr.db        # SQLite数据库
+│   ├── vibe-queue/      # Vibe Watcher 信号队列
+│   └── vibe-sessions/   # Claude Code 会话 ID 存储
 └── ssl/                 # 自签名证书(自动生成)
 ```
 
@@ -247,6 +269,69 @@ req = urllib.request.Request(
 )
 print(urllib.request.urlopen(req).read().decode())
 "
+```
+
+## Vibe Coding 自动化研发
+
+系统内置 Vibe Coding 工作流，通过 Claude Code CLI 驱动自动化编码。以 "vibe" 开头的任务会进入研发进度管理流程。
+
+### 工作流
+
+```
+TODO (vibe开头) → 认领 → 规划中 ⇄ 三思而行 → 实现中 → 待验证 ⇄ 改进 → 提交中 → 已提交
+```
+
+| 阶段 | 说明 |
+|------|------|
+| 规划中 | Claude Code 分析任务复杂度，生成实现计划。人工审核后可"同意"进入实现或"三思而行"要求重新规划 |
+| 实现中 | Claude Code 按计划修改代码 |
+| 待验证 | 人工验证实现结果。可"改进"退回实现中附带反馈，或确认通过进入提交 |
+| 提交中 | Claude Code 生成 commit message，自动 git add + commit + push |
+| 已提交 | 任务完成，关联 git commit hash |
+
+### 核心设计
+
+- **Claude Code 驱动**：所有代码修改、计划生成、变更总结均由 Claude Code（宿主机）完成，非后端 LLM
+- **Session 绑定**：一个任务绑定一个 Claude Code session，全生命周期 resume 同一 session
+- **串行执行**：任何时刻最多一个活跃 session，Watcher 串行处理队列
+- **自动认领**：任务进入"待验证"后自动认领下一个 vibe 任务
+- **信号文件**：容器通过共享 volume（`data/vibe-queue/`）写信号文件，宿主机 Watcher 通过 inotifywait 监听并处理
+
+### 前置要求
+
+- 宿主机安装 Claude Code CLI、inotify-tools、jq
+- 宿主机有 git + SSH push 权限
+
+### 启动 Watcher
+
+推荐通过 tmux 启动，终端实时显示日志的同时也写入文件：
+
+```bash
+# 安装依赖（仅首次）
+sudo apt-get install -y inotify-tools jq tmux
+
+# 创建 tmux session 并启动 watcher（tee 同时输出到终端和日志文件）
+tmux new-session -s autovibe "bash scripts/vibe-watcher.sh 2>&1 | tee -a data/vibe-watcher.log"
+
+# 接入查看实时输出
+tmux attach -t vibe
+
+# 脱离 tmux（watcher 继续后台运行）：按 Ctrl+B 然后按 D
+
+# 重新接入
+tmux attach -t vibe
+
+# 停止 watcher
+tmux kill-session -t vibe
+```
+
+### 手动触发认领
+
+在 Studio 页面创建以 "vibe:" 开头的任务，或通过 API 手动触发：
+
+```bash
+curl -sk -X POST https://localhost:6443/api/todos/vibe-claim \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 腾讯云COS备份配置
