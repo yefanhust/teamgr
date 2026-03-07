@@ -35,9 +35,24 @@ const routes = [
     component: () => import('../views/SearchView.vue'),
   },
   {
+    path: '/ideas',
+    name: 'Ideas',
+    component: () => import('../views/IdeasView.vue'),
+  },
+  {
+    path: '/todos',
+    name: 'Todos',
+    component: () => import('../views/TodoView.vue'),
+  },
+  {
     path: '/stats',
     name: 'Stats',
     component: () => import('../views/StatsView.vue'),
+  },
+  {
+    path: '/settings',
+    name: 'Settings',
+    component: () => import('../views/SettingsView.vue'),
   },
 ]
 
