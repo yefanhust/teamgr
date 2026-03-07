@@ -179,6 +179,12 @@ async def _call_model_text(
     """Unified text generation that routes between Gemini and local models.
     Returns response text, or None if no model is configured.
     """
+    # Priority: explicit override > per-call-type default > global default
+    if not model_override and call_type:
+        from app.config import get_model_defaults
+        per_type = get_model_defaults().get(call_type)
+        if per_type:
+            model_override = per_type
     effective_model = model_override or get_current_model_name()
     local_cfg = _get_local_model_config(effective_model)
 
@@ -238,6 +244,7 @@ def get_available_models() -> list:
             "gemini-2.5-pro",
             "gemini-2.5-flash-lite",
             "gemini-3-flash-preview",
+            "gemini-3.1-pro-preview",
         ],
     )
     result = [{"name": m, "location": "network"} for m in gemini_models]
@@ -491,6 +498,119 @@ async def parse_image_content(
         logger.error(f"LLM image parsing failed: {e}")
         return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
                 "extracted_info": {}}
+
+
+async def classify_idea(
+    raw_text: str,
+    existing_fragments: list[dict],
+) -> dict:
+    """Use LLM to classify, tag, and organize a new idea input.
+
+    Returns: {
+        "fragments": [
+            {"action": "new"|"merge", "merge_target_id": int|null,
+             "title": str, "content": str, "category": str, "tags": [str]}
+        ]
+    }
+    """
+    existing_desc = ""
+    if existing_fragments:
+        items = []
+        for f in existing_fragments[:50]:
+            items.append(f"ID={f['id']}, 标题={f['title']}, 分类={f['category']}, 标签={','.join(f.get('tags', []))}, 内容={f['content'][:100]}")
+        existing_desc = "\n".join(items)
+
+    prompt = f"""你是一个灵感整理助手。用户输入了一段灵感/想法，请你：
+1. 将其分类、打标签、整理为一个或多个"灵感碎片"
+2. 如果新输入与已有碎片高度相关，应合并到已有碎片（action="merge"，并提供merge_target_id）
+3. 如果是全新的主题，则创建新条目（action="new"）
+4. 一次输入可能包含多个不同的灵感，请拆分为多个碎片
+
+## 用户输入:
+{raw_text}
+
+## 已有灵感碎片:
+{existing_desc if existing_desc else "（暂无）"}
+
+请严格返回以下JSON格式（不要代码块）:
+{{
+  "fragments": [
+    {{
+      "action": "new 或 merge",
+      "merge_target_id": null,
+      "title": "简短标题",
+      "content": "整理后的内容（合并时应包含新旧内容的融合）",
+      "category": "分类名",
+      "tags": ["标签1", "标签2"]
+    }}
+  ]
+}}"""
+
+    try:
+        text = await _call_model_text(prompt, call_type="idea-classify")
+        if text is None:
+            return {"fragments": [{"action": "new", "merge_target_id": None,
+                                   "title": "未分类灵感", "content": raw_text,
+                                   "category": "未分类", "tags": []}]}
+        return _extract_json(text)
+    except Exception as e:
+        logger.error(f"LLM idea classification failed: {e}")
+        return {"fragments": [{"action": "new", "merge_target_id": None,
+                               "title": "未分类灵感", "content": raw_text,
+                               "category": "未分类", "tags": []}]}
+
+
+async def aggregate_idea_insights(
+    fragments: list[dict],
+    previous_liked_insights: list[str],
+) -> list[dict]:
+    """Aggregate all idea fragments into 1-3 deep insights.
+
+    Returns: [{"content": str, "reasoning": str}, ...]
+    """
+    frag_text = "\n".join(
+        f"- [{f['category']}] {f['title']}: {f['content'][:200]}"
+        for f in fragments
+    )
+
+    liked_text = ""
+    if previous_liked_insights:
+        liked_text = "\n## 此前被认可的洞见（请参考但不要简单重复）:\n" + "\n".join(
+            f"- {ins}" for ins in previous_liked_insights
+        )
+
+    prompt = f"""你是一个深度思考助手。以下是用户积累的所有灵感碎片。请你从这些碎片中，找出隐藏的联系、模式和深层含义，生成1到3条最有想象力、最深刻、最有价值的洞见和推论。
+
+## 所有灵感碎片:
+{frag_text[:8000]}
+{liked_text}
+
+## 要求:
+1. 不要简单总结或复述碎片内容
+2. 要发现碎片之间的深层联系，提炼出用户自己可能还没意识到的洞见
+3. 每条洞见要有reasoning（推理过程）说明这个洞见是如何从碎片中推导出来的
+4. 洞见要有启发性和行动指导意义
+5. 生成1到3条，宁缺毋滥
+
+请严格返回以下JSON格式（不要代码块）:
+{{
+  "insights": [
+    {{
+      "content": "洞见内容",
+      "reasoning": "推理过程：从哪些碎片、如何推导出这个洞见"
+    }}
+  ]
+}}"""
+
+    try:
+        text = await _call_model_text(prompt, call_type="idea-insight")
+        if text is None:
+            return []
+        result = _extract_json(text)
+        return result.get("insights", [])
+    except Exception as e:
+        logger.error(f"LLM idea insight aggregation failed: {e}")
+        return []
 
 
 async def semantic_search(

@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from app.config import load_config, get_auth_password, get_gemini_config
 from app.database import init_db, SessionLocal
-from app.routers import auth, talents, entry, stats, chat
+from app.routers import auth, talents, entry, stats, chat, ideas, todos
 from app.services.backup_service import setup_backup_scheduler
 
 # ANSI color codes
@@ -136,6 +136,38 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Scheduled query job registered: daily at 05:00")
 
+        # Idea insight aggregation: daily at 3:00 AM
+        from app.routers.ideas import run_daily_idea_aggregation_sync
+        _scheduler.add_job(
+            run_daily_idea_aggregation_sync,
+            "cron",
+            hour=3,
+            minute=0,
+            id="daily_idea_aggregation",
+        )
+        logger.info("Idea aggregation job registered: daily at 03:00")
+
+        # Todo efficiency analysis: daily at 3:30 AM
+        from app.routers.todos import run_daily_todo_analysis_sync
+        _scheduler.add_job(
+            run_daily_todo_analysis_sync,
+            "cron",
+            hour=3,
+            minute=30,
+            id="daily_todo_analysis",
+        )
+        logger.info("Todo analysis job registered: daily at 03:30")
+
+        # Repeat todo check: every hour
+        from app.routers.todos import check_and_spawn_repeat_todos_sync
+        _scheduler.add_job(
+            check_and_spawn_repeat_todos_sync,
+            "interval",
+            hours=1,
+            id="repeat_todo_check",
+        )
+        logger.info("Repeat todo check job registered: every hour")
+
     logger.info("TeaMgr server started successfully")
 
     yield
@@ -167,6 +199,8 @@ app.include_router(talents.router)
 app.include_router(entry.router)
 app.include_router(stats.router)
 app.include_router(chat.router)
+app.include_router(ideas.router)
+app.include_router(todos.router)
 
 
 # Settings API for model switching
@@ -220,6 +254,28 @@ async def update_model_settings(body: dict):
     llm_service._model_instance = None
 
     return {"current_model": model}
+
+
+@app.get("/api/settings/model-defaults")
+async def get_model_defaults_api():
+    from app.config import LLM_CALL_TYPES, get_model_defaults
+    from app.services.llm_service import get_current_model_name, get_available_models
+    return {
+        "call_types": LLM_CALL_TYPES,
+        "defaults": get_model_defaults(),
+        "global_model": get_current_model_name(),
+        "available_models": get_available_models(),
+    }
+
+
+@app.put("/api/settings/model-defaults")
+async def update_model_defaults_api(body: dict):
+    from app.config import LLM_CALL_TYPES, set_model_defaults
+    defaults = body.get("defaults", {})
+    # Only keep valid call types
+    filtered = {k: v for k, v in defaults.items() if k in LLM_CALL_TYPES}
+    set_model_defaults(filtered)
+    return {"defaults": filtered}
 
 
 # Serve frontend static files

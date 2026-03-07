@@ -119,8 +119,8 @@
           <template v-else-if="typeof getCardValue(dim.key) === 'object'">
             <div class="space-y-2">
               <div v-for="(val, key) in getCardValue(dim.key)" :key="key">
+                <span class="text-gray-500">{{ key }}：</span>
                 <template v-if="val && val !== '' && !(Array.isArray(val) && val.length === 0)">
-                  <span class="text-gray-500">{{ key }}：</span>
                   <!-- Array of objects inside an object field -->
                   <template v-if="Array.isArray(val) && val.length > 0 && typeof val[0] === 'object'">
                     <div
@@ -145,6 +145,11 @@
                     <span v-else-if="typeof val === 'object' && val !== null" class="editable-value" @dblclick.stop="startEdit(dim.key, [key], Object.entries(val).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(', '))">{{ Object.entries(val).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(', ') || '' }}</span>
                     <span v-else class="editable-value" @dblclick.stop="startEdit(dim.key, [key], val)">{{ val }}</span>
                   </template>
+                </template>
+                <template v-else>
+                  <input v-if="isEditing(dim.key, key)" v-model="editValue" class="edit-value-input" ref="editInput"
+                    @blur="finishEdit" @keypress.enter="finishEdit" @keydown.escape="cancelEdit" />
+                  <span v-else class="text-gray-300 editable-value" @dblclick.stop="startEdit(dim.key, [key], '')">未填写</span>
                 </template>
               </div>
             </div>
@@ -284,6 +289,8 @@ function getCardValue(key) {
   // Filter out JSON Schema definitions mistakenly stored as data
   if (typeof val === 'object' && !Array.isArray(val)) {
     if ('type' in val && ('properties' in val || 'items' in val)) return null
+    // For object types, always return so empty fields can be edited
+    return val
   }
   // Recursively check if all values are empty
   if (isEmptyValue(val)) return null

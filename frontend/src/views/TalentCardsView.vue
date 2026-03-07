@@ -5,8 +5,11 @@
       <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
         <h1 class="text-lg font-bold text-gray-800">👥 人才卡</h1>
         <div class="flex gap-2">
+          <van-button size="small" icon="setting-o" @click="$router.push('/settings')">设置</van-button>
           <van-button size="small" icon="chart-trending-o" @click="$router.push('/stats')">统计</van-button>
           <van-button size="small" icon="search" @click="$router.push('/search')">搜索</van-button>
+          <van-button size="small" icon="bulb-o" @click="$router.push('/ideas')">灵感</van-button>
+          <van-button size="small" icon="todo-list-o" @click="$router.push('/todos')">Studio</van-button>
           <van-button size="small" icon="edit" type="primary" @click="$router.push('/entry')">录入</van-button>
         </div>
       </div>
@@ -24,7 +27,7 @@
 
     <!-- Tag Filter -->
     <div class="px-4 pt-3 pb-1">
-      <div class="flex gap-2 flex-wrap items-center">
+      <div class="flex items-center gap-2 mb-2">
         <van-checkbox
           :model-value="allSelected"
           shape="square"
@@ -34,7 +37,61 @@
         >
           全选
         </van-checkbox>
-        <template v-for="tag in store.tags" :key="tag.id">
+        <van-button
+          size="mini"
+          icon="sort"
+          :loading="organizing"
+          @click="organizeTags"
+        >
+          一键整理
+        </van-button>
+      </div>
+      <!-- Organize progress -->
+      <div v-if="organizing || organizeStatus" class="mb-3 bg-gray-50 rounded-lg p-3 text-sm">
+        <div v-if="organizeStatus" class="flex items-center gap-2 mb-1">
+          <van-icon v-if="organizeStatus === 'done'" name="checked" color="#10B981" size="14" />
+          <van-icon v-else-if="organizeStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
+          <van-loading v-else size="14" />
+          <span class="text-gray-600">{{ organizeStatusText }}</span>
+        </div>
+        <pre v-if="thinkingStream" ref="thinkingPre" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed italic">💭 {{ thinkingStream }}</pre>
+        <pre v-if="organizeStream" ref="organizePre" class="text-xs text-gray-500 whitespace-pre-wrap max-h-48 overflow-y-auto font-mono leading-relaxed">{{ organizeStream }}</pre>
+      </div>
+      <!-- Hierarchical tags display -->
+      <template v-if="tagTree.length > 0">
+        <div v-for="group in tagTree" :key="group.id" class="mb-2">
+          <div class="flex gap-2 flex-wrap items-center">
+            <span class="text-xs text-gray-500 font-medium flex-shrink-0" :style="{ color: group.color }">{{ group.name }}</span>
+            <template v-for="tag in group.children" :key="tag.id">
+              <input
+                v-if="editingTagId === tag.id"
+                v-model="editingTagName"
+                class="edit-tag-input"
+                @blur="finishEditTag(tag)"
+                @keypress.enter="finishEditTag(tag)"
+                @keydown.escape="cancelEditTag"
+                ref="tagEditInput"
+              />
+              <van-tag
+                v-else
+                :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
+                :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
+                size="medium"
+                class="cursor-pointer tag-closeable"
+                closeable
+                @click="toggleTag(tag.id)"
+                @dblclick.stop="startEditTag(tag)"
+                @close.stop="confirmDeleteTag(tag)"
+              >
+                {{ tag.name }}
+              </van-tag>
+            </template>
+          </div>
+        </div>
+      </template>
+      <!-- Flat tags (no hierarchy yet) -->
+      <div v-if="orphanTags.length > 0" class="flex gap-2 flex-wrap items-center">
+        <template v-for="tag in orphanTags" :key="tag.id">
           <input
             v-if="editingTagId === tag.id"
             v-model="editingTagName"
@@ -183,7 +240,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useTalentStore } from '../stores/talent'
 import { showToast } from 'vant'
 import ChatQueryPanel from '../components/ChatQueryPanel.vue'
@@ -204,13 +261,39 @@ const tagEditInput = ref(null)
 const showDeleteTagConfirm = ref(false)
 const deletingTag = ref(null)
 const scheduledResults = ref([])
+const organizing = ref(false)
+const organizeStream = ref('')
+const thinkingStream = ref('')
+const thinkingPre = ref(null)
+const organizePre = ref(null)
+const organizeStatus = ref('')
+const organizeStatusText = ref('')
 const newTalent = ref({
   name: '', email: '', phone: '', current_role: '', department: '',
 })
 
+// Auto-scroll streaming outputs to bottom
+function autoScroll(el) {
+  if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight })
+}
+watch(thinkingStream, () => autoScroll(thinkingPre.value), { flush: 'post' })
+watch(organizeStream, () => autoScroll(organizePre.value), { flush: 'post' })
+
+// Build tag tree from flat tags with parent_id
+const parentTags = computed(() => store.tags.filter(t => !t.parent_id && store.tags.some(c => c.parent_id === t.id)))
+const childTags = computed(() => store.tags.filter(t => t.parent_id))
+const orphanTags = computed(() => store.tags.filter(t => !t.parent_id && !store.tags.some(c => c.parent_id === t.id)))
+const tagTree = computed(() => {
+  return parentTags.value.map(p => ({
+    ...p,
+    children: childTags.value.filter(c => c.parent_id === p.id),
+  }))
+})
+
 const allSelected = computed(() => {
-  if (store.tags.length === 0) return true
-  return store.tags.every(t => selectedTagIds.value.has(t.id))
+  const leafTags = [...childTags.value, ...orphanTags.value]
+  if (leafTags.length === 0) return true
+  return leafTags.every(t => selectedTagIds.value.has(t.id))
 })
 
 const displayedTalents = computed(() => {
@@ -231,7 +314,9 @@ onMounted(async () => {
     store.fetchTags(),
     fetchScheduledResults(),
   ])
-  selectedTagIds.value = new Set(store.tags.map(t => t.id))
+  // Select only leaf tags (children + orphans), not parent tags
+  const leafs = store.tags.filter(t => t.parent_id || !store.tags.some(c => c.parent_id === t.id))
+  selectedTagIds.value = new Set(leafs.map(t => t.id))
 })
 
 async function fetchScheduledResults() {
@@ -250,10 +335,11 @@ function formatTime(isoStr) {
 }
 
 function selectAll() {
+  const leafs = [...childTags.value, ...orphanTags.value]
   if (allSelected.value) {
     selectedTagIds.value = new Set()
   } else {
-    selectedTagIds.value = new Set(store.tags.map(t => t.id))
+    selectedTagIds.value = new Set(leafs.map(t => t.id))
   }
   quickSearchResults.value = null
   quickSearchQuery.value = ''
@@ -353,6 +439,94 @@ async function startEditTag(tag) {
 function cancelEditTag() {
   editingTagId.value = null
   editingTagName.value = ''
+}
+
+function handleSSELine(line) {
+  if (!line.startsWith('data: ')) return
+  try {
+    const data = JSON.parse(line.slice(6))
+    if (data.type === 'thinking') {
+      organizeStatusText.value = `模型正在思考中... (${data.elapsed}s)`
+    } else if (data.type === 'thinking_chunk') {
+      organizeStatusText.value = '模型正在思考中...'
+      thinkingStream.value += data.content
+    } else if (data.type === 'thinking_done') {
+      organizeStatusText.value = `思考完成 (${data.elapsed}s)，正在生成分类结果...`
+    } else if (data.type === 'chunk') {
+      organizeStream.value += data.content
+    } else if (data.type === 'merge') {
+      const count = data.merges.length
+      organizeStream.value += `\n--- 合并了 ${count} 组相似标签 ---\n` + data.merges.map(m => `  ${m}`).join('\n') + '\n'
+    } else if (data.type === 'done') {
+      store.tags = data.tags
+      const leafs = data.tags.filter(t => t.parent_id || !data.tags.some(c => c.parent_id === t.id))
+      selectedTagIds.value = new Set(leafs.map(t => t.id))
+      const parentCount = data.tags.filter(t => !t.parent_id && data.tags.some(c => c.parent_id === t.id)).length
+      organizeStatus.value = 'done'
+      organizeStatusText.value = `整理完成：${parentCount} 个分类，${leafs.length} 个标签`
+      setTimeout(() => { organizeStatus.value = ''; organizeStream.value = ''; thinkingStream.value = '' }, 3000)
+    } else if (data.type === 'error') {
+      organizeStatus.value = 'error'
+      organizeStatusText.value = `整理失败：${data.content}`
+      setTimeout(() => { organizeStatus.value = ''; organizeStream.value = ''; thinkingStream.value = '' }, 5000)
+    }
+  } catch (e) {
+    console.error('SSE parse error:', e, 'line:', line)
+  }
+}
+
+async function organizeTags() {
+  organizing.value = true
+  organizeStream.value = ''
+  thinkingStream.value = ''
+  organizeStatus.value = 'running'
+  organizeStatusText.value = `正在分析 ${store.tags.length} 个标签...`
+
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    const res = await fetch('/api/talents/tags/organize', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`)
+    }
+
+    // Read stream incrementally
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() // keep incomplete last line
+      for (const line of lines) {
+        handleSSELine(line)
+      }
+    }
+    // Process any remaining buffer
+    if (buffer.trim()) handleSSELine(buffer)
+
+    // If no done/error event was received, refresh tags
+    if (organizeStatus.value === 'running') {
+      await store.fetchTags()
+      const leafs = store.tags.filter(t => t.parent_id || !store.tags.some(c => c.parent_id === t.id))
+      selectedTagIds.value = new Set(leafs.map(t => t.id))
+      organizeStatus.value = 'done'
+      organizeStatusText.value = '整理完成'
+      setTimeout(() => { organizeStatus.value = ''; organizeStream.value = ''; thinkingStream.value = '' }, 3000)
+    }
+  } catch (e) {
+    organizeStatus.value = 'error'
+    organizeStatusText.value = `整理失败：${e.message}`
+    setTimeout(() => { organizeStatus.value = ''; organizeStream.value = ''; thinkingStream.value = '' }, 5000)
+  } finally {
+    organizing.value = false
+  }
 }
 
 async function finishEditTag(tag) {

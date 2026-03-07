@@ -96,3 +96,50 @@ def get_local_models_config() -> list:
 def get_backup_config() -> dict:
     cfg = get_config()
     return cfg.get("backup", {"enabled": False, "cron_hour": 3, "cron_minute": 0})
+
+
+# All LLM call types and their display labels
+LLM_CALL_TYPES = {
+    "text-entry": "信息录入（文本）",
+    "pdf-parse": "PDF简历解析",
+    "image-parse": "图片解析",
+    "semantic-search": "语义搜索",
+    "chat-analyze": "人才查询-维度分析",
+    "chat-answer": "人才查询-回答生成",
+    "organize-tags": "标签整理",
+    "idea-classify": "灵感分类整理",
+    "idea-insight": "灵感洞见生成",
+    "todo-auto-tag": "任务自动打标",
+    "todo-organize-tags": "任务标签整理",
+    "todo-analysis": "任务完成效率分析",
+}
+
+
+def get_model_defaults() -> dict:
+    """Return per-call-type model defaults. Missing keys use global current_model."""
+    cfg = get_config()
+    return cfg.get("model_defaults", {})
+
+
+def set_model_defaults(defaults: dict):
+    """Update per-call-type model defaults in memory and persist to config file."""
+    cfg = get_config()
+    cfg["model_defaults"] = defaults
+
+    config_path = os.environ.get("TEAMGR_CONFIG", "/app/config/config.yaml")
+    local_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config", "config.yaml"
+    )
+    actual_path = config_path if os.path.exists(config_path) else local_path
+
+    if os.path.exists(actual_path):
+        try:
+            import yaml
+            with open(actual_path, "r", encoding="utf-8") as f:
+                file_cfg = yaml.safe_load(f) or {}
+            file_cfg["model_defaults"] = defaults
+            with open(actual_path, "w", encoding="utf-8") as f:
+                yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
+        except OSError:
+            pass

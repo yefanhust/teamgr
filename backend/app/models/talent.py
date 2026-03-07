@@ -38,7 +38,9 @@ class Tag(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(50), unique=True, nullable=False)
     color = Column(String(20), default="#3B82F6")
+    parent_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
 
+    parent = relationship("Tag", remote_side="Tag.id", backref="children")
     talents = relationship("Talent", secondary="talent_tags", back_populates="tags")
 
 
@@ -120,3 +122,41 @@ class ScheduledQueryResult(Base):
     generated_at = Column(DateTime, default=datetime.utcnow)
 
     preset_question = relationship("PresetQuestion", back_populates="scheduled_results")
+
+
+class IdeaFragment(Base):
+    """A classified and tagged inspiration fragment."""
+    __tablename__ = "idea_fragments"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    category = Column(String(100), default="")
+    tags = Column(JSON, default=list)  # ["tag1", "tag2"]
+    source_input_ids = Column(JSON, default=list)  # [input_log_id, ...]
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class IdeaInputLog(Base):
+    """Raw input history for the inspiration space."""
+    __tablename__ = "idea_input_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    raw_text = Column(Text, nullable=False)
+    status = Column(String(20), default="processing")  # processing / done / failed
+    llm_response = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IdeaInsight(Base):
+    """Daily LLM-generated insights from all idea fragments."""
+    __tablename__ = "idea_insights"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    content = Column(Text, nullable=False)
+    reasoning = Column(Text, default="")
+    liked = Column(Boolean, default=False)
+    generated_date = Column(String(10), nullable=False)  # "2026-03-06"
+    model_name = Column(String(100), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)

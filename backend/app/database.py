@@ -45,10 +45,13 @@ def init_db():
     from app.models.talent import (  # noqa
         Talent, Tag, TalentTag, EntryLog, LoginAttempt,
         CardDimension, LLMUsageLog, PresetQuestion, ScheduledQueryResult,
+        IdeaFragment, IdeaInputLog, IdeaInsight,
     )
+    from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis  # noqa
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _seed_default_dimensions()
+    _migrate_personal_info_birthday()
     _seed_default_preset_questions()
 
 
@@ -57,6 +60,21 @@ def _migrate_schema():
     inspector = inspect(engine)
     migrations = [
         ("entry_logs", "status", "TEXT DEFAULT 'done'"),
+        ("tags", "parent_id", "INTEGER REFERENCES tags(id) ON DELETE SET NULL"),
+        ("todo_items", "deadline", "DATE"),
+        ("todo_items", "description", "TEXT DEFAULT ''"),
+        ("todo_items", "repeat_rule", "TEXT"),
+        ("todo_items", "repeat_interval", "INTEGER DEFAULT 1"),
+        ("todo_items", "repeat_next_at", "DATE"),
+        ("todo_items", "repeat_source_id", "INTEGER REFERENCES todo_items(id) ON DELETE SET NULL"),
+        ("todo_items", "repeat_include_weekends", "BOOLEAN DEFAULT 0"),
+        ("todo_items", "vibe_status", "TEXT"),
+        ("todo_items", "vibe_summary", "TEXT"),
+        ("todo_items", "vibe_plan", "TEXT"),
+        ("todo_items", "vibe_commit_id", "TEXT"),
+        ("todo_items", "vibe_session_id", "TEXT"),
+        ("todo_analyses", "model_name", "TEXT"),
+        ("idea_insights", "model_name", "TEXT DEFAULT ''"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in migrations:
@@ -81,7 +99,7 @@ def _seed_default_dimensions():
             CardDimension(
                 key="personal_info",
                 label="个人信息",
-                schema='{"age": "", "gender": "", "location": "", "hometown": ""}',
+                schema='{"birthday": "", "age": "", "gender": "", "location": "", "hometown": ""}',
                 is_default=True,
                 sort_order=0,
             ),
@@ -143,6 +161,38 @@ def _seed_default_dimensions():
             ),
         ]
         db.add_all(defaults)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _migrate_personal_info_birthday():
+    """Ensure personal_info dimension schema includes birthday field."""
+    import json as _json
+    from app.models.talent import CardDimension, Talent
+    db = SessionLocal()
+    try:
+        dim = db.query(CardDimension).filter(CardDimension.key == "personal_info").first()
+        if dim:
+            schema = _json.loads(dim.schema) if dim.schema else {}
+            if "birthday" not in schema:
+                schema = {"birthday": "", **schema}
+                dim.schema = _json.dumps(schema, ensure_ascii=False)
+                db.commit()
+                logger.info("Migration: added birthday to personal_info schema")
+        # Also add birthday field to existing talents' card_data (use raw SQL for reliable JSON update)
+        from sqlalchemy import text
+        talents = db.query(Talent).all()
+        for t in talents:
+            cd = t.card_data or {}
+            pi = cd.get("personal_info")
+            if isinstance(pi, dict) and "birthday" not in pi:
+                pi["birthday"] = ""
+                new_cd = {**cd, "personal_info": pi}
+                db.execute(
+                    text("UPDATE talents SET card_data = :data WHERE id = :id"),
+                    {"data": _json.dumps(new_cd, ensure_ascii=False), "id": t.id},
+                )
         db.commit()
     finally:
         db.close()

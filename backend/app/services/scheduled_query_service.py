@@ -121,6 +121,10 @@ def run_scheduled_queries():
         for preset in scheduled:
             try:
                 answer = asyncio.run(_run_single_query(preset.question))
+                # Delete old results for this preset, only keep the latest
+                db.query(ScheduledQueryResult).filter(
+                    ScheduledQueryResult.preset_question_id == preset.id
+                ).delete()
                 result = ScheduledQueryResult(
                     preset_question_id=preset.id,
                     question_snapshot=preset.question,

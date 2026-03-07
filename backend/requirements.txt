@@ -6,6 +6,7 @@ python-jose[cryptography]==3.3.0
 python-multipart==0.0.19
 pyyaml==6.0.2
 google-generativeai==0.8.4
+google-genai>=1.0.0
 pypinyin==0.53.0
 pdfplumber==0.11.4
 PyMuPDF==1.25.3

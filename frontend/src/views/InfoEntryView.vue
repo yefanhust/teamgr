@@ -190,9 +190,19 @@
       show-cancel-button
       @confirm="createAndSelect"
     >
-      <div class="px-4 py-2">
-        <van-field v-model="newTalentName" label="姓名" placeholder="必填" required />
-      </div>
+      <form class="px-4 py-2" @submit.prevent="createAndSelect">
+        <div class="van-cell van-field">
+          <div class="van-cell__title van-field__label">
+            <label><span class="text-red-500 mr-1">*</span>姓名</label>
+          </div>
+          <div class="van-cell__value van-field__value">
+            <div class="van-field__body">
+              <input v-model="newTalentName" type="text" placeholder="必填" class="van-field__control" />
+            </div>
+          </div>
+        </div>
+        <button type="submit" style="display:none" />
+      </form>
     </van-dialog>
   </div>
 </template>
@@ -229,6 +239,7 @@ let pollTimer = null
 const canSubmit = computed(() => {
   return selectedTalent.value && inputText.value.trim()
 })
+
 
 const modelActions = computed(() => {
   return availableModels.value.map(m => ({
@@ -541,6 +552,11 @@ async function createAndSelect() {
   }
   try {
     const created = await store.createTalent({ name: newTalentName.value.trim() })
+    showNewTalent.value = false
+    messages.value = []
+    inputText.value = ''
+    pendingEntries.value.clear()
+    stopPolling()
     selectedTalent.value = created
     candidateSearch.value = created.name
     newTalentName.value = ''
