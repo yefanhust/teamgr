@@ -2,10 +2,6 @@
   <div class="min-h-screen bg-gray-100">
     <!-- Top Navigation -->
     <TopNavBar />
-    <!-- Settings -->
-    <div class="max-w-3xl mx-auto px-4 py-1 flex justify-end">
-      <van-icon name="setting-o" size="20" class="text-gray-500 cursor-pointer" @click="$router.push('/settings')" />
-    </div>
 
     <!-- Main Tabs -->
     <van-tabs v-model:active="activeTab" sticky offset-top="52" class="todo-tabs">

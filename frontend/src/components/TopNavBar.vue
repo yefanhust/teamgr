@@ -1,7 +1,7 @@
 <template>
   <div class="top-nav bg-white shadow-sm sticky top-0 z-10">
     <div class="max-w-3xl mx-auto px-4 py-2">
-      <div class="flex gap-2">
+      <div class="flex gap-2 items-center">
         <div
           v-for="item in navItems"
           :key="item.route"
@@ -12,6 +12,7 @@
           <van-icon :name="item.icon" :size="isActive(item.route) ? '20' : '16'" :color="isActive(item.route) ? 'white' : item.color" />
           <span class="text-sm font-medium" :class="{ 'font-bold': isActive(item.route) }">{{ item.label }}</span>
         </div>
+        <van-icon name="setting-o" size="20" class="text-gray-400 cursor-pointer flex-shrink-0 ml-1" @click="router.push('/settings')" />
       </div>
     </div>
   </div>
