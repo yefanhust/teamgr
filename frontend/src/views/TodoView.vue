@@ -986,7 +986,7 @@
                 </div>
               </div>
             </div>
-            <span v-if="detailAssignedTags.length === 0 && !showDetailTagPicker" class="text-xs text-gray-400">暂无标签</span>
+            <span v-if="detailAssignedTags.length === 0 && !showDetailTagPicker" class="text-xs text-gray-400">点击 + 添加标签</span>
           </div>
         </div>
 
@@ -1418,7 +1418,8 @@ function openDetail(item) {
 // Available tags for the detail popup (based on item's scope)
 const detailAvailableTags = computed(() => {
   if (!detailItem.value) return []
-  if (detailItem.value.vibe_status === 'requirement') {
+  // All vibe items (any vibe_status) use requirement-scope tags
+  if (detailItem.value.vibe_status) {
     return store.reqTags.filter(t => t.parent_id)
       .concat(store.reqTags.filter(t => !t.parent_id && !store.reqTags.some(c => c.parent_id === t.id)))
   }
@@ -2056,9 +2057,9 @@ async function confirmVibeVerified(item) {
     committingId.value = item.id
     await api.post(`/api/todos/${item.id}/vibe-commit`)
     showToast('正在提交代码...')
-    // Poll until committed
-    for (let i = 0; i < 30; i++) {
-      await new Promise(r => setTimeout(r, 2000))
+    // Poll until committed (5 min max — Claude commit msg generation + push can be slow)
+    for (let i = 0; i < 100; i++) {
+      await new Promise(r => setTimeout(r, 3000))
       await store.fetchAll()
       const updated = [...store.pending, ...store.completed].find(t => t.id === item.id)
       if (!updated || updated.vibe_status === 'committed') {
