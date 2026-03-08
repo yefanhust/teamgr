@@ -329,7 +329,7 @@ async function handleDelete() {
   try {
     await store.deleteTalent(talent.value.id)
     showToast('已删除')
-    router.push('/')
+    router.push('/talent-cards')
   } catch (e) {
     showToast('删除失败')
   }
@@ -486,7 +486,7 @@ onMounted(async () => {
     }
   } catch (e) {
     showToast('加载失败')
-    router.push('/')
+    router.push('/talent-cards')
   }
 })
 

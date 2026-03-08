@@ -51,11 +51,6 @@ export const useTodosStore = defineStore('todos', () => {
     const res = await api.post(`/api/todos/${id}/complete`)
     pending.value = pending.value.filter(t => t.id !== id)
     completed.value.unshift(res.data)
-    // If a repeat todo was spawned, add it to pending
-    if (res.data.spawned) {
-      pending.value.unshift(res.data.spawned)
-      _sortPending()
-    }
     return res.data
   }
 

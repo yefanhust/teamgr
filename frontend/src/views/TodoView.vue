@@ -3,9 +3,10 @@
     <!-- Header -->
     <div class="bg-white shadow-sm sticky top-0 z-10">
       <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <van-icon name="arrow-left" size="20" class="cursor-pointer" @click="$router.push('/')" />
-          <h1 class="text-lg font-bold text-gray-800">Studio</h1>
+        <h1 class="text-lg font-bold text-gray-800">Studio</h1>
+        <div class="flex gap-2">
+          <van-button size="small" icon="friends-o" @click="$router.push('/talent-cards')">人才卡</van-button>
+          <van-button size="small" icon="setting-o" @click="$router.push('/settings')">设置</van-button>
         </div>
       </div>
     </div>
@@ -500,6 +501,30 @@
                   </div>
                 </div>
 
+                <!-- Batch actions -->
+                <div v-if="filteredRequirements.length > 0" class="flex items-center gap-3">
+                  <van-checkbox
+                    :model-value="allReqSelected"
+                    shape="square"
+                    icon-size="16px"
+                    class="flex-shrink-0 select-all-checkbox"
+                    @update:model-value="toggleReqSelectAll"
+                  >
+                    <span class="text-sm text-gray-500">全选</span>
+                  </van-checkbox>
+                  <van-button
+                    v-if="selectedReqIds.size > 0"
+                    size="small"
+                    type="primary"
+                    icon="guide-o"
+                    :loading="batchSubmitting"
+                    @click="submitSelectedRequirements"
+                  >
+                    提交选中 ({{ selectedReqIds.size }})
+                  </van-button>
+                  <span v-if="batchSubmitProgress" class="text-xs text-gray-400">{{ batchSubmitProgress }}</span>
+                </div>
+
                 <!-- Requirements list -->
                 <div v-if="filteredRequirements.length === 0 && !addingReq" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400">
                   <p class="text-sm">暂无需求</p>
@@ -507,9 +532,13 @@
                 </div>
                 <div v-for="item in filteredRequirements" :key="item.id" class="bg-white rounded-xl shadow-sm p-3">
                   <div class="flex items-start gap-3">
-                    <div class="flex-shrink-0 mt-1">
-                      <span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span>
-                    </div>
+                    <van-checkbox
+                      :model-value="selectedReqIds.has(item.id)"
+                      shape="square"
+                      icon-size="16px"
+                      class="flex-shrink-0 mt-1"
+                      @update:model-value="toggleReqSelection(item.id)"
+                    />
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
                       <div class="flex items-center gap-2">
                         <span class="text-sm text-gray-800 font-medium">{{ item.title }}</span>
@@ -875,7 +904,7 @@
       round
       :style="{ maxHeight: '80vh' }"
     >
-      <div v-if="detailItem" class="p-4 space-y-4">
+      <div v-if="detailItem" class="p-4 space-y-4" @click="showDetailTagPicker = false">
         <div class="flex items-center justify-between">
           <h3 class="text-base font-semibold text-gray-800">详情</h3>
           <van-icon name="cross" size="20" class="cursor-pointer text-gray-400" @click="showDetail = false" />
@@ -913,22 +942,51 @@
         <!-- Tags (editable) -->
         <div>
           <label class="text-xs text-gray-400 mb-1 block">标签</label>
-          <div class="flex gap-1.5 flex-wrap">
-            <van-tag
-              v-for="tag in detailAvailableTags"
-              :key="tag.id"
-              :type="detailItemTagIds.has(tag.id) ? 'primary' : 'default'"
-              :color="detailItemTagIds.has(tag.id) ? tag.color : undefined"
-              :plain="!detailItemTagIds.has(tag.id)"
-              size="medium"
-              class="cursor-pointer"
-              :closeable="detailItemTagIds.has(tag.id)"
-              @click="toggleDetailTag(tag.id)"
-              @close.stop="toggleDetailTag(tag.id)"
-            >
-              {{ tag.name }}
-            </van-tag>
-            <span v-if="detailAvailableTags.length === 0" class="text-xs text-gray-400">暂无可用标签</span>
+          <div class="flex gap-1.5 flex-wrap items-center">
+            <template v-for="tag in detailAssignedTags" :key="tag.id">
+              <input
+                v-if="editingTagId === tag.id"
+                v-model="editingTagName"
+                class="edit-tag-input"
+                ref="detailTagEditInput"
+                @blur="finishEditTag(tag)"
+                @keypress.enter="finishEditTag(tag)"
+                @keydown.escape="cancelEditTag"
+              />
+              <van-tag
+                v-else
+                type="primary"
+                :color="tag.color"
+                size="medium"
+                class="cursor-pointer tag-closeable"
+                closeable
+                @dblclick.stop="startEditTag(tag)"
+                @close.stop="removeDetailTag(tag.id)"
+              >
+                {{ tag.name }}
+              </van-tag>
+            </template>
+            <div class="detail-tag-add-wrapper" style="position: relative;" @click.stop>
+              <van-tag
+                plain
+                type="primary"
+                size="medium"
+                class="cursor-pointer"
+                @click="showDetailTagPicker = !showDetailTagPicker"
+              >+</van-tag>
+              <div v-if="showDetailTagPicker" class="detail-tag-picker">
+                <div v-if="detailUnassignedTags.length === 0" class="text-xs text-gray-400 px-2 py-1.5">暂无更多标签</div>
+                <div
+                  v-for="tag in detailUnassignedTags"
+                  :key="tag.id"
+                  class="detail-tag-picker-item"
+                  @click="addDetailTag(tag.id)"
+                >
+                  <van-tag size="medium" :color="tag.color" type="primary">{{ tag.name }}</van-tag>
+                </div>
+              </div>
+            </div>
+            <span v-if="detailAssignedTags.length === 0 && !showDetailTagPicker" class="text-xs text-gray-400">暂无标签</span>
           </div>
         </div>
 
@@ -1091,6 +1149,10 @@ const editingTagName = ref('')
 const tagEditInput = ref(null)
 const showDeleteTagConfirm = ref(false)
 const deletingTag = ref(null)
+
+// Detail tag picker
+const showDetailTagPicker = ref(false)
+const detailTagEditInput = ref(null)
 
 // Tag filter state (requirement scope)
 const reqSelectedTagIds = ref(new Set())
@@ -1349,20 +1411,60 @@ function openDetail(item) {
   detailRepeatRule.value = item.repeat_rule || ''
   detailRepeatInterval.value = item.repeat_interval || 1
   detailRepeatIncludeWeekends.value = !!item.repeat_include_weekends
+  showDetailTagPicker.value = false
   showDetail.value = true
 }
 
 // Available tags for the detail popup (based on item's scope)
 const detailAvailableTags = computed(() => {
   if (!detailItem.value) return []
-  // For vibe items (requirements), use reqTags; otherwise use todo tags
   if (detailItem.value.vibe_status === 'requirement') {
-    return store.reqTags.filter(t => t.parent_id) // leaf tags only
+    return store.reqTags.filter(t => t.parent_id)
       .concat(store.reqTags.filter(t => !t.parent_id && !store.reqTags.some(c => c.parent_id === t.id)))
   }
-  return store.tags.filter(t => t.parent_id) // leaf tags only
+  return store.tags.filter(t => t.parent_id)
     .concat(store.tags.filter(t => !t.parent_id && !store.tags.some(c => c.parent_id === t.id)))
 })
+
+// Tags currently assigned to the detail item (use item's own tags directly)
+const detailAssignedTags = computed(() => {
+  if (!detailItem.value) return []
+  return detailItem.value.tags || []
+})
+
+// Tags not yet assigned to the detail item (for the picker)
+const detailUnassignedTags = computed(() => {
+  if (!detailItem.value) return []
+  const assignedIds = new Set((detailItem.value.tags || []).map(t => t.id))
+  return detailAvailableTags.value.filter(t => !assignedIds.has(t.id))
+})
+
+async function addDetailTag(tagId) {
+  showDetailTagPicker.value = false
+  if (!detailItem.value) return
+  const s = new Set(detailItemTagIds.value)
+  s.add(tagId)
+  detailItemTagIds.value = s
+  try {
+    const updated = await store.updateTodo(detailItem.value.id, { tag_ids: [...s] })
+    detailItem.value = { ...updated }
+  } catch (e) {
+    showToast('标签添加失败')
+  }
+}
+
+async function removeDetailTag(tagId) {
+  if (!detailItem.value) return
+  const s = new Set(detailItemTagIds.value)
+  s.delete(tagId)
+  detailItemTagIds.value = s
+  try {
+    const updated = await store.updateTodo(detailItem.value.id, { tag_ids: [...s] })
+    detailItem.value = { ...updated }
+  } catch (e) {
+    showToast('标签移除失败')
+  }
+}
 
 async function toggleDetailTag(tagId) {
   if (!detailItem.value) return
@@ -1399,7 +1501,8 @@ async function startEditTag(tag) {
   editingTagId.value = tag.id
   editingTagName.value = tag.name
   await nextTick()
-  const inputs = tagEditInput.value
+  // Try both the main filter and detail popup input refs
+  const inputs = tagEditInput.value || detailTagEditInput.value
   if (inputs) {
     const el = Array.isArray(inputs) ? inputs[0] : inputs
     el?.focus()
@@ -1419,6 +1522,12 @@ async function finishEditTag(tag) {
   try {
     await store.updateTag(tag.id, newName, tag.color)
     await store.fetchAll()
+    // Refresh detail item if open
+    if (detailItem.value) {
+      const list = [...store.pending, ...store.completed]
+      const updated = list.find(t => t.id === detailItem.value.id)
+      if (updated) detailItem.value = { ...updated }
+    }
     showToast('标签已更新')
   } catch (e) {
     showToast(e.response?.data?.detail || '更新失败')
@@ -1751,6 +1860,63 @@ const newReqTitle = ref('')
 const newReqHighPriority = ref(false)
 const addingReq = ref(false)
 const submittingReqId = ref(null)
+const selectedReqIds = ref(new Set())
+const batchSubmitting = ref(false)
+const batchSubmitProgress = ref('')
+
+const allReqSelected = computed(() => {
+  const reqs = filteredRequirements.value
+  return reqs.length > 0 && reqs.every(r => selectedReqIds.value.has(r.id))
+})
+
+function toggleReqSelection(id) {
+  const s = new Set(selectedReqIds.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  selectedReqIds.value = s
+}
+
+function toggleReqSelectAll() {
+  const reqs = filteredRequirements.value
+  if (allReqSelected.value) {
+    selectedReqIds.value = new Set()
+  } else {
+    selectedReqIds.value = new Set(reqs.map(r => r.id))
+  }
+}
+
+async function submitSelectedRequirements() {
+  const ids = [...selectedReqIds.value].filter(id =>
+    filteredRequirements.value.some(r => r.id === id)
+  )
+  if (ids.length === 0) return
+  try {
+    await showConfirmDialog({
+      title: '批量提交需求',
+      message: `确认提交 ${ids.length} 个需求进入研发？将按顺序依次提交。`,
+    })
+  } catch { return }
+
+  batchSubmitting.value = true
+  let submitted = 0
+  for (const id of ids) {
+    const item = store.pending.find(t => t.id === id)
+    if (!item || item.vibe_status !== 'requirement') continue
+    batchSubmitProgress.value = `正在提交 (${submitted + 1}/${ids.length}): ${item.title}`
+    submittingReqId.value = id
+    try {
+      await store.submitRequirement(id)
+      submitted++
+    } catch (e) {
+      showToast(`提交「${item.title}」失败: ${e.response?.data?.detail || '未知错误'}`)
+    }
+    submittingReqId.value = null
+  }
+  selectedReqIds.value = new Set()
+  batchSubmitting.value = false
+  batchSubmitProgress.value = ''
+  if (submitted > 0) showToast(`已提交 ${submitted} 个需求`)
+}
 
 async function addRequirement() {
   if (!newReqTitle.value.trim()) return
@@ -2102,6 +2268,32 @@ function formatDateTime(isoStr) {
   width: 80px;
   outline: none;
   background: #fff;
+}
+.detail-tag-add-wrapper {
+  display: inline-block;
+}
+.detail-tag-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+  max-height: 200px;
+  overflow-y: auto;
+  min-width: 120px;
+  padding: 4px 0;
+}
+.detail-tag-picker-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.detail-tag-picker-item:hover {
+  background: #f3f4f6;
 }
 .line-clamp-2 {
   display: -webkit-box;

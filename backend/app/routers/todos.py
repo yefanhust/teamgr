@@ -306,14 +306,16 @@ def complete_todo(todo_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Todo not found")
     item.completed = True
     item.completed_at = datetime.utcnow()
+    # If this is a repeating todo, set repeat_next_at so it revives later
+    # (not immediately — _check_and_spawn_repeat_todos will spawn it when due)
+    if item.repeat_rule:
+        item.repeat_next_at = _calc_next_repeat(
+            date.today(), item.repeat_rule, item.repeat_interval or 1,
+            bool(item.repeat_include_weekends),
+        )
     db.commit()
     db.refresh(item)
-    result = _serialize(item)
-    # If this is a repeating todo, spawn a new one
-    if item.repeat_rule:
-        new_item = _spawn_repeat_todo(db, item)
-        result["spawned"] = _serialize(new_item)
-    return result
+    return _serialize(item)
 
 
 @router.post("/{todo_id}/restart")

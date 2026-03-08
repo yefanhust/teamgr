@@ -3,13 +3,12 @@
     <!-- Header -->
     <div class="bg-white shadow-sm sticky top-0 z-10">
       <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-        <h1 class="text-lg font-bold text-gray-800">👥 人才卡</h1>
+        <div class="flex items-center gap-3">
+          <van-icon name="arrow-left" size="20" class="cursor-pointer" @click="$router.push('/')" />
+          <h1 class="text-lg font-bold text-gray-800">👥 人才卡</h1>
+        </div>
         <div class="flex gap-2">
-          <van-button size="small" icon="setting-o" @click="$router.push('/settings')">设置</van-button>
-          <van-button size="small" icon="chart-trending-o" @click="$router.push('/stats')">统计</van-button>
           <van-button size="small" icon="search" @click="$router.push('/search')">搜索</van-button>
-          <van-button size="small" icon="bulb-o" @click="$router.push('/ideas')">灵感</van-button>
-          <van-button size="small" icon="todo-list-o" @click="$router.push('/todos')">Studio</van-button>
           <van-button size="small" icon="edit" type="primary" @click="$router.push('/entry')">录入</van-button>
         </div>
       </div>

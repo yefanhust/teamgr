@@ -16,6 +16,11 @@ const routes = [
   },
   {
     path: '/',
+    name: 'Studio',
+    component: () => import('../views/TodoView.vue'),
+  },
+  {
+    path: '/talent-cards',
     name: 'TalentCards',
     component: () => import('../views/TalentCardsView.vue'),
   },
@@ -41,8 +46,7 @@ const routes = [
   },
   {
     path: '/todos',
-    name: 'Todos',
-    component: () => import('../views/TodoView.vue'),
+    redirect: '/',
   },
   {
     path: '/stats',
