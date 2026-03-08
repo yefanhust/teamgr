@@ -73,6 +73,7 @@ def _migrate_schema():
         ("todo_items", "vibe_plan", "TEXT"),
         ("todo_items", "vibe_commit_id", "TEXT"),
         ("todo_items", "vibe_session_id", "TEXT"),
+        ("todo_tags", "scope", "TEXT DEFAULT 'todo'"),
         ("todo_analyses", "model_name", "TEXT"),
         ("idea_insights", "model_name", "TEXT DEFAULT ''"),
     ]
@@ -85,6 +86,17 @@ def _migrate_schema():
                 conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {column} {col_type}'))
                 conn.commit()
                 logger.info(f"Migration: added {table}.{column}")
+
+    # Drop unique constraint on todo_tags.name (allow same name in different scopes)
+    if "todo_tags" in inspector.get_table_names():
+        indexes = inspector.get_indexes("todo_tags")
+        unique_name_idx = [idx for idx in indexes if idx.get("unique") and idx.get("column_names") == ["name"]]
+        if unique_name_idx:
+            with engine.connect() as conn:
+                for idx in unique_name_idx:
+                    conn.execute(text(f'DROP INDEX IF EXISTS "{idx["name"]}"'))
+                conn.commit()
+                logger.info("Migration: dropped unique constraint on todo_tags.name")
 
 
 def _seed_default_dimensions():

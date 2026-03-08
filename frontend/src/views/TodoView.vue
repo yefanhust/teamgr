@@ -432,6 +432,168 @@
       <van-tab title="研发进度">
         <div class="max-w-3xl mx-auto px-4 py-4">
           <van-tabs v-model:active="vibeTab" type="card" class="vibe-tabs">
+            <!-- Sub-tab: 需求 -->
+            <van-tab title="需求" :badge="vibeRequirements.length || ''">
+              <div class="py-3 space-y-3">
+                <!-- Tag filter for requirements (separate from TODO tags) -->
+                <div v-if="reqAllTags.length > 0" class="pb-1">
+                  <div class="flex items-center gap-2 mb-2">
+                    <van-checkbox
+                      :model-value="reqAllSelected"
+                      shape="square"
+                      icon-size="16px"
+                      class="flex-shrink-0 select-all-checkbox"
+                      @update:model-value="reqSelectAll"
+                    >
+                      全选
+                    </van-checkbox>
+                    <van-button
+                      size="mini"
+                      icon="sort"
+                      :loading="reqOrganizing"
+                      @click="organizeReqTags"
+                    >
+                      一键整理
+                    </van-button>
+                  </div>
+                  <!-- Organize progress for requirement tags -->
+                  <div v-if="reqOrganizing || reqOrganizeStatus" class="mb-3 bg-gray-50 rounded-lg p-3 text-sm">
+                    <div v-if="reqOrganizeStatus" class="flex items-center gap-2 mb-1">
+                      <van-icon v-if="reqOrganizeStatus === 'done'" name="checked" color="#10B981" size="14" />
+                      <van-icon v-else-if="reqOrganizeStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
+                      <van-loading v-else size="14" />
+                      <span class="text-gray-600">{{ reqOrganizeStatusText }}</span>
+                    </div>
+                    <pre v-if="reqThinkingStream" ref="reqThinkingPre" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto">{{ reqThinkingStream }}</pre>
+                    <pre v-if="reqOrganizeStream" ref="reqOrganizePre" class="text-xs text-green-600 whitespace-pre-wrap max-h-32 overflow-y-auto mt-1">{{ reqOrganizeStream }}</pre>
+                  </div>
+                  <template v-if="reqTagTree.length > 0">
+                    <div v-for="group in reqTagTree" :key="'req-'+group.id" class="mb-2">
+                      <div class="flex gap-2 flex-wrap items-center">
+                        <span class="text-xs text-gray-500 font-medium flex-shrink-0" :style="{ color: group.color }">{{ group.name }}</span>
+                        <van-tag
+                          v-for="tag in group.children"
+                          :key="tag.id"
+                          :type="reqSelectedTagIds.has(tag.id) ? 'primary' : 'default'"
+                          :color="reqSelectedTagIds.has(tag.id) ? tag.color : undefined"
+                          size="medium"
+                          class="cursor-pointer"
+                          @click="reqToggleTag(tag.id)"
+                        >
+                          {{ tag.name }}
+                        </van-tag>
+                      </div>
+                    </div>
+                  </template>
+                  <div v-if="reqOrphanTags.length > 0" class="flex gap-2 flex-wrap items-center">
+                    <van-tag
+                      v-for="tag in reqOrphanTags"
+                      :key="tag.id"
+                      :type="reqSelectedTagIds.has(tag.id) ? 'primary' : 'default'"
+                      :color="reqSelectedTagIds.has(tag.id) ? tag.color : undefined"
+                      size="medium"
+                      class="cursor-pointer"
+                      @click="reqToggleTag(tag.id)"
+                    >
+                      {{ tag.name }}
+                    </van-tag>
+                  </div>
+                </div>
+
+                <!-- Requirements list -->
+                <div v-if="filteredRequirements.length === 0 && !addingReq" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400">
+                  <p class="text-sm">暂无需求</p>
+                  <p class="text-xs mt-1">在下方创建新需求，完善后点击"提交"进入研发</p>
+                </div>
+                <div v-for="item in filteredRequirements" :key="item.id" class="bg-white rounded-xl shadow-sm p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex-shrink-0 mt-1">
+                      <span class="inline-block w-2 h-2 rounded-full bg-cyan-400"></span>
+                    </div>
+                    <div class="flex-1 min-w-0" @click="openDetail(item)">
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm text-gray-800 font-medium">{{ item.title }}</span>
+                        <van-tag v-if="item.high_priority" type="danger" size="small">高优</van-tag>
+                      </div>
+                      <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-3">{{ item.description }}</p>
+                      <div class="flex items-center gap-1 mt-1 flex-wrap">
+                        <van-tag
+                          v-for="tag in (item.tags || [])"
+                          :key="tag.id"
+                          :color="tag.color"
+                          size="small"
+                          plain
+                        >
+                          {{ tag.name }}
+                        </van-tag>
+                        <span class="text-xs text-gray-400">{{ formatDateTime(item.created_at) }}</span>
+                      </div>
+                      <!-- Action buttons -->
+                      <div class="flex items-center gap-2 mt-2">
+                        <van-button
+                          size="small"
+                          type="primary"
+                          icon="guide-o"
+                          :loading="submittingReqId === item.id"
+                          @click.stop="submitRequirement(item)"
+                        >
+                          提交
+                        </van-button>
+                        <van-button
+                          size="small"
+                          plain
+                          icon="delete-o"
+                          @click.stop="deleteRequirement(item)"
+                        />
+                      </div>
+                    </div>
+                    <van-icon
+                      v-if="!item.high_priority"
+                      name="arrow-up"
+                      size="16"
+                      color="#EF4444"
+                      class="cursor-pointer flex-shrink-0 mt-1"
+                      @click="togglePriority(item, true)"
+                    />
+                    <van-icon
+                      v-else
+                      name="arrow-down"
+                      size="16"
+                      color="#9CA3AF"
+                      class="cursor-pointer flex-shrink-0 mt-1"
+                      @click="togglePriority(item, false)"
+                    />
+                  </div>
+                </div>
+
+                <!-- Requirement input -->
+                <div class="bg-white rounded-xl shadow-sm p-4">
+                  <div class="flex gap-2">
+                    <van-field
+                      v-model="newReqTitle"
+                      placeholder="添加新需求..."
+                      class="todo-input flex-1"
+                      @keyup.enter="addRequirement"
+                    />
+                    <van-button
+                      type="primary"
+                      icon="plus"
+                      :disabled="!newReqTitle.trim()"
+                      :loading="addingReq"
+                      @click="addRequirement"
+                    >
+                      添加
+                    </van-button>
+                  </div>
+                  <div class="flex items-center gap-4 mt-2">
+                    <van-checkbox v-model="newReqHighPriority" shape="square" icon-size="16px">
+                      <span class="text-sm text-gray-500">高优先级</span>
+                    </van-checkbox>
+                  </div>
+                </div>
+              </div>
+            </van-tab>
+
             <!-- Sub-tab: 规划中 -->
             <van-tab title="规划中" :badge="vibePlanning.length || ''">
               <div class="py-3 space-y-2">
@@ -461,15 +623,15 @@
                       </div>
                       <div
                         v-else-if="item.vibe_plan"
-                        class="mt-2 bg-indigo-50 rounded-lg p-2.5 border border-indigo-100 cursor-pointer"
+                        class="mt-2 bg-indigo-50 rounded-lg p-2 border border-indigo-100 cursor-pointer"
                         @dblclick.stop="startEditPlan(item)"
                       >
-                        <div class="flex items-center gap-1 mb-1">
+                        <div class="flex items-center gap-1 mb-0.5">
                           <van-icon name="notes-o" size="12" color="#6366F1" />
                           <span class="text-xs font-medium text-indigo-600">实现计划</span>
                           <span class="text-xs text-gray-400 ml-auto">双击编辑</span>
                         </div>
-                        <div class="text-xs text-gray-600 leading-relaxed vibe-summary-content" v-html="renderMarkdown(item.vibe_plan)"></div>
+                        <div class="text-sm text-gray-600 leading-snug vibe-summary-content" v-html="renderMarkdown(item.vibe_plan)"></div>
                       </div>
                       <div
                         v-else
@@ -519,8 +681,8 @@
             <van-tab title="实现中">
               <div class="py-3 space-y-2">
                 <div v-if="vibePending.length === 0" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400">
-                  <p class="text-sm">暂无待实现的 vibe 任务</p>
-                  <p class="text-xs mt-1">创建以 "vibe:" 开头的任务即可出现在这里</p>
+                  <p class="text-sm">暂无实现中的任务</p>
+                  <p class="text-xs mt-1">在"需求"中创建需求并提交即可开始研发</p>
                 </div>
                 <div v-for="item in vibePending" :key="item.id" class="bg-white rounded-xl shadow-sm p-3">
                   <div class="flex items-center gap-3">
@@ -560,16 +722,7 @@
                 </div>
                 <div v-for="item in vibeVerifying" :key="item.id" class="bg-white rounded-xl shadow-sm p-3">
                   <div class="flex items-start gap-3">
-                    <van-checkbox
-                      v-if="item.vibe_status === 'verifying'"
-                      :model-value="false"
-                      shape="round"
-                      icon-size="20px"
-                      class="mt-0.5"
-                      :disabled="committingId === item.id"
-                      @update:model-value="confirmVibeVerified(item)"
-                    />
-                    <van-loading v-else-if="item.vibe_status === 'committing'" size="20px" class="mt-0.5" />
+                    <van-loading v-if="item.vibe_status === 'committing'" size="20px" class="mt-0.5" />
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
                       <div class="flex items-center gap-2">
                         <span class="text-sm text-gray-800">{{ item.title }}</span>
@@ -579,12 +732,12 @@
                         <van-tag v-else color="#8B5CF6" size="small">待验证</van-tag>
                       </div>
                       <!-- Vibe Summary -->
-                      <div v-if="item.vibe_summary" class="mt-2 bg-purple-50 rounded-lg p-2.5 border border-purple-100">
-                        <div class="flex items-center gap-1 mb-1">
+                      <div v-if="item.vibe_summary" class="mt-2 bg-purple-50 rounded-lg p-2 border border-purple-100">
+                        <div class="flex items-center gap-1 mb-0.5">
                           <van-icon name="description" size="12" color="#8B5CF6" />
                           <span class="text-xs font-medium text-purple-600">变更总结</span>
                         </div>
-                        <div class="text-xs text-gray-600 leading-relaxed vibe-summary-content" v-html="renderMarkdown(item.vibe_summary)"></div>
+                        <div class="text-sm text-gray-600 leading-snug vibe-summary-content" v-html="renderMarkdown(item.vibe_summary)"></div>
                       </div>
                       <p v-else-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-3">{{ item.description }}</p>
                       <div class="flex items-center gap-1 mt-1 flex-wrap">
@@ -598,8 +751,17 @@
                           {{ tag.name }}
                         </van-tag>
                       </div>
-                      <!-- Improve button (only for verifying, not committing) -->
+                      <!-- Action buttons (only for verifying, not committing) -->
                       <div v-if="item.vibe_status === 'verifying'" class="flex items-center gap-2 mt-2">
+                        <van-button
+                          size="small"
+                          type="success"
+                          icon="passed"
+                          :disabled="committingId === item.id"
+                          @click.stop="confirmVibeVerified(item)"
+                        >
+                          已验证
+                        </van-button>
                         <van-button
                           size="small"
                           type="warning"
@@ -635,12 +797,12 @@
                         <van-icon name="label-o" size="12" color="#6B7280" />
                         <code class="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded font-mono">{{ item.vibe_commit_id.slice(0, 7) }}</code>
                       </div>
-                      <div v-if="item.vibe_summary" class="mt-2 bg-green-50 rounded-lg p-2.5 border border-green-100">
-                        <div class="flex items-center gap-1 mb-1">
+                      <div v-if="item.vibe_summary" class="mt-2 bg-green-50 rounded-lg p-2 border border-green-100">
+                        <div class="flex items-center gap-1 mb-0.5">
                           <van-icon name="description" size="12" color="#10B981" />
                           <span class="text-xs font-medium text-green-600">变更总结</span>
                         </div>
-                        <div class="text-xs text-gray-600 leading-relaxed vibe-summary-content" v-html="renderMarkdown(item.vibe_summary)"></div>
+                        <div class="text-sm text-gray-600 leading-snug vibe-summary-content" v-html="renderMarkdown(item.vibe_summary)"></div>
                       </div>
                       <p v-else-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-2">{{ item.description }}</p>
                       <div class="flex items-center gap-1 mt-1 flex-wrap">
@@ -751,21 +913,20 @@
         <!-- Tags -->
         <div v-if="detailItem.tags && detailItem.tags.length">
           <label class="text-xs text-gray-400 mb-1 block">标签</label>
-          <div class="flex gap-1 flex-wrap">
+          <div class="flex gap-1.5 flex-wrap">
             <van-tag
               v-for="tag in detailItem.tags"
               :key="tag.id"
               :color="tag.color"
               size="medium"
-              plain
             >
               {{ tag.name }}
             </van-tag>
           </div>
         </div>
 
-        <!-- Repeat Config -->
-        <div v-if="!detailItem.completed">
+        <!-- Repeat Config (hidden for requirements/vibe items) -->
+        <div v-if="!detailItem.completed && !detailItem.vibe_status">
           <label class="text-xs text-gray-400 mb-1 block">重复配置</label>
           <div class="flex items-center gap-2 flex-wrap">
             <select
@@ -915,13 +1076,25 @@ const analysisThinking = ref('')
 const analysisThinkingPre = ref(null)
 const analysisStreamEl = ref(null)
 
-// Tag filter state
+// Tag filter state (TODO scope)
 const selectedTagIds = ref(new Set())
 const editingTagId = ref(null)
 const editingTagName = ref('')
 const tagEditInput = ref(null)
 const showDeleteTagConfirm = ref(false)
 const deletingTag = ref(null)
+
+// Tag filter state (requirement scope)
+const reqSelectedTagIds = ref(new Set())
+
+// Requirement tag organize state
+const reqOrganizing = ref(false)
+const reqOrganizeStream = ref('')
+const reqThinkingStream = ref('')
+const reqThinkingPre = ref(null)
+const reqOrganizePre = ref(null)
+const reqOrganizeStatus = ref('')
+const reqOrganizeStatusText = ref('')
 
 // Tag organize state
 const organizing = ref(false)
@@ -938,6 +1111,8 @@ function autoScroll(el) {
 }
 watch(thinkingStream, () => autoScroll(thinkingPre.value), { flush: 'post' })
 watch(organizeStream, () => autoScroll(organizePre.value), { flush: 'post' })
+watch(reqThinkingStream, () => autoScroll(reqThinkingPre.value), { flush: 'post' })
+watch(reqOrganizeStream, () => autoScroll(reqOrganizePre.value), { flush: 'post' })
 watch(analysisThinking, () => autoScroll(analysisThinkingPre.value), { flush: 'post' })
 watch(analysisStream, () => autoScroll(analysisStreamEl.value), { flush: 'post' })
 
@@ -972,22 +1147,66 @@ function filterByTags(items) {
   })
 }
 
+// Requirement tag computeds (separate from TODO tags)
+const reqAllTags = computed(() => store.reqTags)
+const reqParentTags = computed(() => reqAllTags.value.filter(t => !t.parent_id && reqAllTags.value.some(c => c.parent_id === t.id)))
+const reqChildTags = computed(() => reqAllTags.value.filter(t => t.parent_id))
+const reqOrphanTags = computed(() => reqAllTags.value.filter(t => !t.parent_id && !reqAllTags.value.some(c => c.parent_id === t.id)))
+const reqTagTree = computed(() => {
+  return reqParentTags.value.map(p => ({
+    ...p,
+    children: reqChildTags.value.filter(c => c.parent_id === p.id),
+  }))
+})
+const reqAllSelected = computed(() => {
+  const leafTags = [...reqChildTags.value, ...reqOrphanTags.value]
+  if (leafTags.length === 0) return true
+  return leafTags.every(t => reqSelectedTagIds.value.has(t.id))
+})
+function filterByReqTags(items) {
+  if (reqAllSelected.value) return items
+  if (reqSelectedTagIds.value.size === 0) return []
+  return items.filter(item => {
+    const tags = item.tags || []
+    if (tags.length === 0) return true
+    return tags.some(tag => reqSelectedTagIds.value.has(tag.id))
+  })
+}
+function reqSelectAll() {
+  const leafs = [...reqChildTags.value, ...reqOrphanTags.value]
+  if (reqAllSelected.value) {
+    reqSelectedTagIds.value = new Set()
+  } else {
+    reqSelectedTagIds.value = new Set(leafs.map(t => t.id))
+  }
+}
+function reqToggleTag(tagId) {
+  const s = new Set(reqSelectedTagIds.value)
+  if (s.has(tagId)) {
+    s.delete(tagId)
+  } else {
+    s.add(tagId)
+  }
+  reqSelectedTagIds.value = s
+}
+
 const filteredPending = computed(() => filterByTags(
-  store.pending.filter(t => !t.vibe_status && !t.title.toLowerCase().startsWith('vibe'))
+  store.pending.filter(t => !t.vibe_status)
 ))
 const filteredCompleted = computed(() => filterByTags(
   store.completed.filter(t => !t.vibe_status)
 ))
 
 // Vibe task computed lists
+const vibeRequirements = computed(() =>
+  store.pending.filter(t => t.vibe_status === 'requirement')
+)
+const filteredRequirements = computed(() => filterByReqTags(vibeRequirements.value))
 const vibePlanning = computed(() =>
   store.pending.filter(t => t.vibe_status === 'planning')
 )
 const vibePending = computed(() =>
-  store.pending.filter(t =>
-    t.title.toLowerCase().startsWith('vibe') &&
-    (!t.vibe_status || t.vibe_status === 'implementing')
-  )
+  store.pending.filter(t => t.vibe_status === 'implementing')
 )
 const vibeVerifying = computed(() =>
   [...store.pending, ...store.completed].filter(t => t.vibe_status === 'verifying' || t.vibe_status === 'committing')
@@ -999,10 +1218,13 @@ const vibeCommitted = computed(() =>
 onMounted(async () => {
   loading.value = true
   try {
-    await Promise.all([store.fetchAll(), store.fetchTags(), loadAnalyses()])
-    // Select all leaf tags
+    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses()])
+    // Select all leaf tags (TODO scope)
     const leafs = allTags.value.filter(t => t.parent_id || !allTags.value.some(c => c.parent_id === t.id))
     selectedTagIds.value = new Set(leafs.map(t => t.id))
+    // Select all leaf tags (requirement scope)
+    const reqLeafs = reqAllTags.value.filter(t => t.parent_id || !reqAllTags.value.some(c => c.parent_id === t.id))
+    reqSelectedTagIds.value = new Set(reqLeafs.map(t => t.id))
     // Auto-check git commits for committed tasks without commit_id
     checkCommitsForAll()
   } finally {
@@ -1270,6 +1492,93 @@ async function organizeTags() {
   }
 }
 
+// --- Requirement tag organize ---
+
+function handleReqSSELine(line) {
+  if (!line.startsWith('data: ')) return
+  try {
+    const data = JSON.parse(line.slice(6))
+    if (data.type === 'thinking') {
+      reqOrganizeStatusText.value = `模型正在思考中... (${data.elapsed}s)`
+    } else if (data.type === 'thinking_chunk') {
+      reqOrganizeStatusText.value = '模型正在思考中...'
+      reqThinkingStream.value += data.content
+    } else if (data.type === 'thinking_done') {
+      reqOrganizeStatusText.value = `思考完成 (${data.elapsed}s)，正在生成分类结果...`
+    } else if (data.type === 'chunk') {
+      reqOrganizeStream.value += data.content
+    } else if (data.type === 'merge') {
+      const count = data.merges.length
+      reqOrganizeStream.value += `\n--- 合并了 ${count} 组相似标签 ---\n` + data.merges.map(m => `  ${m}`).join('\n') + '\n'
+    } else if (data.type === 'done') {
+      store.reqTags = data.tags
+      const leafs = data.tags.filter(t => t.parent_id || !data.tags.some(c => c.parent_id === t.id))
+      reqSelectedTagIds.value = new Set(leafs.map(t => t.id))
+      const parentCount = data.tags.filter(t => !t.parent_id && data.tags.some(c => c.parent_id === t.id)).length
+      reqOrganizeStatus.value = 'done'
+      reqOrganizeStatusText.value = `整理完成：${parentCount} 个分类，${leafs.length} 个标签`
+      setTimeout(() => { reqOrganizeStatus.value = ''; reqOrganizeStream.value = ''; reqThinkingStream.value = '' }, 3000)
+    } else if (data.type === 'error') {
+      reqOrganizeStatus.value = 'error'
+      reqOrganizeStatusText.value = `整理失败：${data.content}`
+      setTimeout(() => { reqOrganizeStatus.value = ''; reqOrganizeStream.value = ''; reqThinkingStream.value = '' }, 5000)
+    }
+  } catch (e) {
+    console.error('SSE parse error:', e, 'line:', line)
+  }
+}
+
+async function organizeReqTags() {
+  reqOrganizing.value = true
+  reqOrganizeStream.value = ''
+  reqThinkingStream.value = ''
+  reqOrganizeStatus.value = 'running'
+  reqOrganizeStatusText.value = `正在分析 ${reqAllTags.value.length} 个标签...`
+
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    const res = await fetch('/api/todos/tags/organize?scope=requirement', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        handleReqSSELine(line)
+      }
+    }
+    if (buffer.trim()) handleReqSSELine(buffer)
+
+    if (reqOrganizeStatus.value === 'running') {
+      await store.fetchReqTags()
+      const leafs = reqAllTags.value.filter(t => t.parent_id || !reqAllTags.value.some(c => c.parent_id === t.id))
+      reqSelectedTagIds.value = new Set(leafs.map(t => t.id))
+      reqOrganizeStatus.value = 'done'
+      reqOrganizeStatusText.value = '整理完成'
+      setTimeout(() => { reqOrganizeStatus.value = ''; reqOrganizeStream.value = ''; reqThinkingStream.value = '' }, 3000)
+    }
+  } catch (e) {
+    reqOrganizeStatus.value = 'error'
+    reqOrganizeStatusText.value = `整理失败：${e.message}`
+    setTimeout(() => { reqOrganizeStatus.value = ''; reqOrganizeStream.value = ''; reqThinkingStream.value = '' }, 5000)
+  } finally {
+    reqOrganizing.value = false
+  }
+}
+
 function openDeadlinePicker(item) {
   editingTodoId.value = item.id
   showEditDeadlinePicker.value = true
@@ -1396,6 +1705,58 @@ async function triggerAnalysis() {
     setTimeout(() => { analysisStatus.value = ''; analysisStatusText.value = '' }, 5000)
   } finally {
     triggeringAnalysis.value = false
+  }
+}
+
+// --- Requirement creation ---
+const newReqTitle = ref('')
+const newReqHighPriority = ref(false)
+const addingReq = ref(false)
+const submittingReqId = ref(null)
+
+async function addRequirement() {
+  if (!newReqTitle.value.trim()) return
+  addingReq.value = true
+  try {
+    await store.createRequirement(newReqTitle.value.trim(), newReqHighPriority.value)
+    newReqTitle.value = ''
+    newReqHighPriority.value = false
+    // Refresh requirement tags in case new ones were auto-created
+    const leafs = reqAllTags.value.filter(t => t.parent_id || !reqAllTags.value.some(c => c.parent_id === t.id))
+    reqSelectedTagIds.value = new Set(leafs.map(t => t.id))
+  } catch (e) {
+    showToast(e.response?.data?.detail || '创建失败')
+  } finally {
+    addingReq.value = false
+  }
+}
+
+async function submitRequirement(item) {
+  try {
+    await showConfirmDialog({
+      title: '提交需求',
+      message: `确认提交「${item.title}」进入研发？Claude 将分析并开始处理。`,
+    })
+    submittingReqId.value = item.id
+    await store.submitRequirement(item.id)
+    showToast('已提交，Claude 正在处理...')
+  } catch (e) {
+    if (e !== 'cancel') showToast(e.response?.data?.detail || '提交失败')
+  } finally {
+    submittingReqId.value = null
+  }
+}
+
+async function deleteRequirement(item) {
+  try {
+    await showConfirmDialog({
+      title: '删除需求',
+      message: `确认删除「${item.title}」？此操作不可撤销。`,
+    })
+    await store.deleteTodo(item.id)
+    showToast('已删除')
+  } catch (e) {
+    // cancelled
   }
 }
 
@@ -1581,11 +1942,12 @@ function renderMarkdown(text) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-gray-800 mt-3 mb-1">$1</h4>')
-    .replace(/^## (.+)$/gm, '<h3 class="font-semibold text-gray-800 mt-3 mb-1">$1</h3>')
-    .replace(/^# (.+)$/gm, '<h3 class="font-bold text-gray-800 mt-3 mb-1">$1</h3>')
-    .replace(/^- (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
-    .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-4 list-decimal">$2</li>')
+    .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-gray-800 mt-1 mb-0">$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3 class="font-semibold text-gray-800 mt-1 mb-0">$1</h3>')
+    .replace(/^# (.+)$/gm, '<h3 class="font-bold text-gray-800 mt-1 mb-0">$1</h3>')
+    .replace(/^- (.+)$/gm, '<li class="ml-3 list-disc">$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-3 list-decimal">$2</li>')
+    .replace(/\n{2,}/g, '<br>')
     .replace(/\n/g, '<br>')
 }
 
@@ -1728,8 +2090,13 @@ function formatDateTime(isoStr) {
   color: #374151;
 }
 .vibe-summary-content :deep(li) {
-  margin-left: 0.75rem;
-  padding-left: 0.25rem;
+  margin-left: 0.5rem;
+  padding-left: 0.125rem;
+  line-height: 1.35;
+}
+.vibe-summary-content :deep(h3),
+.vibe-summary-content :deep(h4) {
+  line-height: 1.25;
 }
 .vibe-summary-content :deep(strong) {
   color: #374151;

@@ -33,8 +33,13 @@ class TodoUpdate(BaseModel):
     repeat_include_weekends: Optional[bool] = None
 
 
+class RequirementCreate(BaseModel):
+    title: str
+    high_priority: bool = False
+
+
 class VibeStatusUpdate(BaseModel):
-    status: Optional[str] = None  # "planning", "implementing", "verifying", "committing", "committed", or null/""
+    status: Optional[str] = None  # "requirement", "planning", "implementing", "verifying", "committing", "committed", or null/""
     summary: Optional[str] = None  # summary of changes when moving to verifying
     plan: Optional[str] = None  # implementation plan
 
@@ -42,6 +47,7 @@ class VibeStatusUpdate(BaseModel):
 class TagCreate(BaseModel):
     name: str
     color: str = "#3B82F6"
+    scope: str = "todo"  # "todo" or "requirement"
 
 
 def _write_queue_file(filename: str, data: dict):
@@ -239,18 +245,6 @@ async def create_todo(body: TodoCreate, db: Session = Depends(get_db)):
     except Exception as e:
         logger.warning(f"Auto-tag failed for todo {item.id}: {e}")
 
-    # Auto-claim if this is a new vibe task
-    if item.title.lower().startswith("vibe"):
-        try:
-            _write_queue_file("claim.json", {
-                "action": "claim",
-                "id": item.id,
-                "title": item.title,
-                "description": item.description or "",
-            })
-        except Exception:
-            pass
-
     return _serialize(item)
 
 
@@ -296,18 +290,6 @@ def update_todo(todo_id: int, body: TodoUpdate, db: Session = Depends(get_db)):
         item.high_priority = True
     db.commit()
     db.refresh(item)
-
-    # Auto-claim if title was changed to vibe prefix and task has no vibe status yet
-    if body.title is not None and item.title.lower().startswith("vibe") and not item.vibe_status:
-        try:
-            _write_queue_file("claim.json", {
-                "action": "claim",
-                "id": item.id,
-                "title": item.title,
-                "description": item.description or "",
-            })
-        except Exception:
-            pass
 
     return _serialize(item)
 
@@ -414,7 +396,7 @@ def update_vibe_status(todo_id: int, body: VibeStatusUpdate, db: Session = Depen
     item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Todo not found")
-    valid = (None, "", "planning", "implementing", "verifying", "committing", "committed")
+    valid = (None, "", "requirement", "planning", "implementing", "verifying", "committing", "committed")
     if body.status not in valid:
         raise HTTPException(status_code=400, detail="Invalid vibe status")
     new_status = body.status if body.status else None
@@ -455,30 +437,6 @@ def update_vibe_status(todo_id: int, body: VibeStatusUpdate, db: Session = Depen
         except Exception:
             pass
 
-    # entering verifying: auto-claim next vibe task
-    if new_status == "verifying":
-        try:
-            next_task = (
-                db.query(TodoItem)
-                .filter(
-                    TodoItem.completed == False,
-                    TodoItem.title.ilike("vibe%"),
-                    TodoItem.vibe_status.is_(None),
-                    TodoItem.id != item.id,
-                )
-                .order_by(TodoItem.high_priority.desc(), TodoItem.created_at.asc())
-                .first()
-            )
-            if next_task:
-                _write_queue_file("claim.json", {
-                    "action": "claim",
-                    "id": next_task.id,
-                    "title": next_task.title,
-                    "description": next_task.description or "",
-                })
-        except Exception:
-            pass
-
     return _serialize(item)
 
 
@@ -508,28 +466,53 @@ class VibeImproveRequest(BaseModel):
     feedback: str
 
 
-@router.post("/vibe-claim")
-def trigger_vibe_claim(db: Session = Depends(get_db)):
-    task = (
-        db.query(TodoItem)
-        .filter(
-            TodoItem.completed == False,
-            TodoItem.title.ilike("vibe%"),
-            TodoItem.vibe_status.is_(None),
-        )
-        .order_by(TodoItem.high_priority.desc(), TodoItem.created_at.asc())
-        .first()
+@router.post("/requirements")
+async def create_requirement(body: RequirementCreate, db: Session = Depends(get_db)):
+    """Create a new development requirement (stays in 需求 until submitted)."""
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    item = TodoItem(
+        title=body.title.strip(),
+        high_priority=body.high_priority,
+        vibe_status="requirement",
     )
-    if not task:
-        raise HTTPException(status_code=404, detail="没有待认领的 vibe 任务")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
 
-    _write_queue_file("claim.json", {
+    # Auto-tag using LLM (requirement scope)
+    try:
+        tag_names = await _auto_tag(item.title)
+        if tag_names:
+            _assign_tags(db, item, tag_names, scope="requirement")
+            db.refresh(item)
+    except Exception as e:
+        logger.warning(f"Auto-tag failed for requirement {item.id}: {e}")
+
+    return _serialize(item)
+
+
+@router.post("/{todo_id}/vibe-submit")
+def submit_requirement(todo_id: int, db: Session = Depends(get_db)):
+    """Submit a requirement to start development (triggers Claude Code)."""
+    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if item.vibe_status != "requirement":
+        raise HTTPException(status_code=400, detail="只有需求状态的任务可以提交")
+
+    item.vibe_status = "implementing"
+    db.commit()
+
+    _write_queue_file(f"claim-{item.id}.json", {
         "action": "claim",
-        "id": task.id,
-        "title": task.title,
-        "description": task.description or "",
+        "id": item.id,
+        "title": item.title,
+        "description": item.description or "",
     })
-    return {"message": f"已发送认领信号: {task.title}", "task": _serialize(task)}
+
+    db.refresh(item)
+    return _serialize(item)
 
 
 @router.post("/{todo_id}/vibe-replan")
@@ -600,8 +583,8 @@ def trigger_vibe_commit(todo_id: int, db: Session = Depends(get_db)):
 # --- Tag endpoints ---
 
 @router.get("/tags/all")
-def list_todo_tags(db: Session = Depends(get_db)):
-    tags = db.query(TodoTag).order_by(TodoTag.name).all()
+def list_todo_tags(scope: str = "todo", db: Session = Depends(get_db)):
+    tags = db.query(TodoTag).filter(TodoTag.scope == scope).order_by(TodoTag.name).all()
     return [
         {"id": t.id, "name": t.name, "color": t.color, "parent_id": t.parent_id}
         for t in tags
@@ -610,10 +593,10 @@ def list_todo_tags(db: Session = Depends(get_db)):
 
 @router.post("/tags")
 def create_todo_tag(body: TagCreate, db: Session = Depends(get_db)):
-    existing = db.query(TodoTag).filter(TodoTag.name == body.name).first()
+    existing = db.query(TodoTag).filter(TodoTag.name == body.name, TodoTag.scope == body.scope).first()
     if existing:
         return {"id": existing.id, "name": existing.name, "color": existing.color}
-    tag = TodoTag(name=body.name, color=body.color)
+    tag = TodoTag(name=body.name, color=body.color, scope=body.scope)
     db.add(tag)
     db.commit()
     db.refresh(tag)
@@ -626,7 +609,7 @@ def update_todo_tag(tag_id: int, body: TagCreate, db: Session = Depends(get_db))
     if not tag:
         raise HTTPException(status_code=404, detail="标签不存在")
     if body.name and body.name != tag.name:
-        dup = db.query(TodoTag).filter(TodoTag.name == body.name, TodoTag.id != tag_id).first()
+        dup = db.query(TodoTag).filter(TodoTag.name == body.name, TodoTag.scope == tag.scope, TodoTag.id != tag_id).first()
         if dup:
             raise HTTPException(status_code=400, detail="标签名已存在")
         tag.name = body.name
@@ -717,8 +700,8 @@ def _merge_todo_tags(db: Session, merges: list[dict]) -> list[str]:
     return descriptions
 
 
-def _apply_todo_tag_hierarchy(db: Session, categories: list[dict]):
-    tags = db.query(TodoTag).all()
+def _apply_todo_tag_hierarchy(db: Session, categories: list[dict], scope: str = "todo"):
+    tags = db.query(TodoTag).filter(TodoTag.scope == scope).all()
     tag_map = {t.name: t for t in tags}
     for t in tags:
         t.parent_id = None
@@ -730,9 +713,9 @@ def _apply_todo_tag_hierarchy(db: Session, categories: list[dict]):
         children_names = cat.get("children", [])
         parent_tag = tag_map.get(parent_name)
         if not parent_tag:
-            parent_tag = db.query(TodoTag).filter(TodoTag.name == parent_name).first()
+            parent_tag = db.query(TodoTag).filter(TodoTag.name == parent_name, TodoTag.scope == scope).first()
         if not parent_tag:
-            parent_tag = TodoTag(name=parent_name, color=parent_color, parent_id=None)
+            parent_tag = TodoTag(name=parent_name, color=parent_color, parent_id=None, scope=scope)
             db.add(parent_tag)
             db.flush()
         else:
@@ -745,7 +728,7 @@ def _apply_todo_tag_hierarchy(db: Session, categories: list[dict]):
                 child_tag.color = "#3B82F6"
     db.flush()
 
-    all_tags = db.query(TodoTag).all()
+    all_tags = db.query(TodoTag).filter(TodoTag.scope == scope).all()
     parent_ids = {t.parent_id for t in all_tags if t.parent_id}
     for t in all_tags:
         if t.parent_id is None and t.id not in parent_ids and len(t.todos) == 0:
@@ -754,13 +737,13 @@ def _apply_todo_tag_hierarchy(db: Session, categories: list[dict]):
 
 
 @router.post("/tags/organize")
-async def organize_todo_tags(db: Session = Depends(get_db)):
+async def organize_todo_tags(scope: str = "todo", db: Session = Depends(get_db)):
     """Use LLM to organize todo tags with SSE streaming."""
     import asyncio
     import time
     from app.services.llm_service import _record_llm_usage
 
-    tags = db.query(TodoTag).all()
+    tags = db.query(TodoTag).filter(TodoTag.scope == scope).all()
     if not tags:
         raise HTTPException(status_code=400, detail="没有标签需要整理")
 
@@ -875,9 +858,9 @@ async def organize_todo_tags(db: Session = Depends(get_db)):
                 yield f"data: {json.dumps({'type': 'error', 'content': '未返回分类结果'}, ensure_ascii=False)}\n\n"
                 return
 
-            _apply_todo_tag_hierarchy(db, categories)
+            _apply_todo_tag_hierarchy(db, categories, scope=scope)
 
-            all_tags = db.query(TodoTag).order_by(TodoTag.name).all()
+            all_tags = db.query(TodoTag).filter(TodoTag.scope == scope).order_by(TodoTag.name).all()
             tag_list = [
                 {"id": t.id, "name": t.name, "color": t.color, "parent_id": t.parent_id}
                 for t in all_tags
@@ -928,12 +911,12 @@ async def _auto_tag(title: str) -> list[str]:
     return []
 
 
-def _assign_tags(db: Session, item: TodoItem, tag_names: list[str]):
+def _assign_tags(db: Session, item: TodoItem, tag_names: list[str], scope: str = "todo"):
     """Create tags if needed and assign them to a todo item."""
     for name in tag_names:
-        tag = db.query(TodoTag).filter(TodoTag.name == name).first()
+        tag = db.query(TodoTag).filter(TodoTag.name == name, TodoTag.scope == scope).first()
         if not tag:
-            tag = TodoTag(name=name)
+            tag = TodoTag(name=name, scope=scope)
             db.add(tag)
             db.flush()
         existing = db.query(TodoItemTag).filter(

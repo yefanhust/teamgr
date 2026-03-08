@@ -14,9 +14,10 @@ class TodoTag(Base):
     __tablename__ = "todo_tags"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(50), unique=True, nullable=False)
+    name = Column(String(50), nullable=False)
     color = Column(String(20), default="#3B82F6")
     parent_id = Column(Integer, ForeignKey("todo_tags.id", ondelete="SET NULL"), nullable=True)
+    scope = Column(String(20), default="todo")  # "todo" or "requirement"
 
     parent = relationship("TodoTag", remote_side="TodoTag.id", backref="children")
     todos = relationship("TodoItem", secondary="todo_item_tags", back_populates="tags")

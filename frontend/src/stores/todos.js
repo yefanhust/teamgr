@@ -6,6 +6,7 @@ export const useTodosStore = defineStore('todos', () => {
   const pending = ref([])
   const completed = ref([])
   const tags = ref([])
+  const reqTags = ref([])
 
   async function fetchAll() {
     const res = await api.get('/api/todos')
@@ -14,8 +15,13 @@ export const useTodosStore = defineStore('todos', () => {
   }
 
   async function fetchTags() {
-    const res = await api.get('/api/todos/tags/all')
+    const res = await api.get('/api/todos/tags/all?scope=todo')
     tags.value = res.data
+  }
+
+  async function fetchReqTags() {
+    const res = await api.get('/api/todos/tags/all?scope=requirement')
+    reqTags.value = res.data
   }
 
   async function createTodo(title, highPriority = false, deadline = null) {
@@ -69,16 +75,35 @@ export const useTodosStore = defineStore('todos', () => {
     completed.value = completed.value.filter(t => t.id !== id)
   }
 
+  async function createRequirement(title, highPriority = false) {
+    const res = await api.post('/api/todos/requirements', { title, high_priority: highPriority })
+    pending.value.unshift(res.data)
+    _sortPending()
+    await fetchReqTags()
+    return res.data
+  }
+
+  async function submitRequirement(id) {
+    const res = await api.post(`/api/todos/${id}/vibe-submit`)
+    const pidx = pending.value.findIndex(t => t.id === id)
+    if (pidx !== -1) pending.value[pidx] = res.data
+    return res.data
+  }
+
   async function updateTag(tagId, name, color) {
     const res = await api.put(`/api/todos/tags/${tagId}`, { name, color })
+    // Update in whichever list it belongs to
     const idx = tags.value.findIndex(t => t.id === tagId)
     if (idx !== -1) tags.value[idx] = res.data
+    const ridx = reqTags.value.findIndex(t => t.id === tagId)
+    if (ridx !== -1) reqTags.value[ridx] = res.data
     return res.data
   }
 
   async function deleteTag(tagId) {
     await api.delete(`/api/todos/tags/${tagId}`)
     tags.value = tags.value.filter(t => t.id !== tagId)
+    reqTags.value = reqTags.value.filter(t => t.id !== tagId)
   }
 
   async function updateVibeStatus(id, status, summary = null, plan = null) {
@@ -120,8 +145,10 @@ export const useTodosStore = defineStore('todos', () => {
     pending,
     completed,
     tags,
+    reqTags,
     fetchAll,
     fetchTags,
+    fetchReqTags,
     createTodo,
     updateTodo,
     completeTodo,
@@ -131,5 +158,7 @@ export const useTodosStore = defineStore('todos', () => {
     deleteTag,
     updateVibeStatus,
     checkCommit,
+    createRequirement,
+    submitRequirement,
   }
 })
