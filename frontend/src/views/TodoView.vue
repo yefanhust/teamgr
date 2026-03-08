@@ -910,18 +910,25 @@
           <p v-else class="text-sm text-gray-500 whitespace-pre-wrap">{{ detailItem.description || '无' }}</p>
         </div>
 
-        <!-- Tags -->
-        <div v-if="detailItem.tags && detailItem.tags.length">
+        <!-- Tags (editable) -->
+        <div>
           <label class="text-xs text-gray-400 mb-1 block">标签</label>
           <div class="flex gap-1.5 flex-wrap">
             <van-tag
-              v-for="tag in detailItem.tags"
+              v-for="tag in detailAvailableTags"
               :key="tag.id"
-              :color="tag.color"
+              :type="detailItemTagIds.has(tag.id) ? 'primary' : 'default'"
+              :color="detailItemTagIds.has(tag.id) ? tag.color : undefined"
+              :plain="!detailItemTagIds.has(tag.id)"
               size="medium"
+              class="cursor-pointer"
+              :closeable="detailItemTagIds.has(tag.id)"
+              @click="toggleDetailTag(tag.id)"
+              @close.stop="toggleDetailTag(tag.id)"
             >
               {{ tag.name }}
             </van-tag>
+            <span v-if="detailAvailableTags.length === 0" class="text-xs text-gray-400">暂无可用标签</span>
           </div>
         </div>
 
@@ -1056,6 +1063,7 @@ const titleEditInput = ref(null)
 // Detail popup
 const showDetail = ref(false)
 const detailItem = ref(null)
+const detailItemTagIds = ref(new Set())
 const detailRepeatRule = ref('')
 const detailRepeatInterval = ref(1)
 const detailRepeatIncludeWeekends = ref(false)
@@ -1337,10 +1345,40 @@ async function finishInlineEdit(item) {
 function openDetail(item) {
   if (inlineEditId.value === item.id) return
   detailItem.value = { ...item }
+  detailItemTagIds.value = new Set((item.tags || []).map(t => t.id))
   detailRepeatRule.value = item.repeat_rule || ''
   detailRepeatInterval.value = item.repeat_interval || 1
   detailRepeatIncludeWeekends.value = !!item.repeat_include_weekends
   showDetail.value = true
+}
+
+// Available tags for the detail popup (based on item's scope)
+const detailAvailableTags = computed(() => {
+  if (!detailItem.value) return []
+  // For vibe items (requirements), use reqTags; otherwise use todo tags
+  if (detailItem.value.vibe_status === 'requirement') {
+    return store.reqTags.filter(t => t.parent_id) // leaf tags only
+      .concat(store.reqTags.filter(t => !t.parent_id && !store.reqTags.some(c => c.parent_id === t.id)))
+  }
+  return store.tags.filter(t => t.parent_id) // leaf tags only
+    .concat(store.tags.filter(t => !t.parent_id && !store.tags.some(c => c.parent_id === t.id)))
+})
+
+async function toggleDetailTag(tagId) {
+  if (!detailItem.value) return
+  const s = new Set(detailItemTagIds.value)
+  if (s.has(tagId)) {
+    s.delete(tagId)
+  } else {
+    s.add(tagId)
+  }
+  detailItemTagIds.value = s
+  try {
+    const updated = await store.updateTodo(detailItem.value.id, { tag_ids: [...s] })
+    detailItem.value = { ...updated }
+  } catch (e) {
+    showToast('标签更新失败')
+  }
 }
 
 async function saveDetail() {

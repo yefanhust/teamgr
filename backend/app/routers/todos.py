@@ -31,6 +31,7 @@ class TodoUpdate(BaseModel):
     repeat_rule: Optional[str] = None  # "daily"/"weekly"/"monthly"/"yearly", "" to clear
     repeat_interval: Optional[int] = None
     repeat_include_weekends: Optional[bool] = None
+    tag_ids: Optional[list] = None  # list of tag IDs to set on this item
 
 
 class RequirementCreate(BaseModel):
@@ -288,6 +289,10 @@ def update_todo(todo_id: int, body: TodoUpdate, db: Session = Depends(get_db)):
     # Auto-promote if deadline is urgent
     if not item.high_priority and _is_deadline_urgent(item.deadline):
         item.high_priority = True
+    # Update tags if provided
+    if body.tag_ids is not None:
+        tags = db.query(TodoTag).filter(TodoTag.id.in_(body.tag_ids)).all()
+        item.tags = tags
     db.commit()
     db.refresh(item)
 
