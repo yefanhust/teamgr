@@ -1,14 +1,32 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
+# NOTE: intentionally NOT using set -e — this is a long-running daemon,
+# individual handler errors should not kill the watcher
 
 REPO_DIR="/home/ubuntu/workspace/teamgr"
 QUEUE_DIR="$REPO_DIR/data/vibe-queue"
 SESSIONS_DIR="$REPO_DIR/data/vibe-sessions"
 API="https://localhost:6443/api/todos"
 CLAUDE="/home/ubuntu/.nvm/versions/node/v20.20.0/bin/claude"
+CLAUDE_PTY="python3 $REPO_DIR/autovibe/claude-pty.py"
 LOG="$REPO_DIR/data/vibe-watcher.log"
 
-log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
+# ANSI colors
+C_RESET='\033[0m'
+C_DIM='\033[2m'
+C_BOLD='\033[1m'
+C_CYAN='\033[36m'
+C_GREEN='\033[32m'
+C_YELLOW='\033[33m'
+C_RED='\033[31m'
+C_MAGENTA='\033[35m'
+C_BLUE='\033[34m'
+
+log()      { echo -e "${C_DIM}[$(date '+%Y-%m-%d %H:%M:%S')]${C_RESET} $*"; }
+log_head() { echo -e "${C_DIM}[$(date '+%Y-%m-%d %H:%M:%S')]${C_RESET} ${C_BOLD}${C_CYAN}=== $* ===${C_RESET}"; }
+log_ok()   { echo -e "${C_DIM}[$(date '+%Y-%m-%d %H:%M:%S')]${C_RESET} ${C_GREEN}✔ $*${C_RESET}"; }
+log_warn() { echo -e "${C_DIM}[$(date '+%Y-%m-%d %H:%M:%S')]${C_RESET} ${C_YELLOW}⚠ $*${C_RESET}"; }
+log_err()  { echo -e "${C_DIM}[$(date '+%Y-%m-%d %H:%M:%S')]${C_RESET} ${C_RED}✘ $*${C_RESET}"; }
 
 # Generate a fresh JWT token using the backend's own secret
 generate_token() {
@@ -45,20 +63,21 @@ end_session() {
     rm -f "$SESSIONS_DIR/$task_id"
 }
 
-# Extract session ID from Claude's output/state
+# Extract session ID from claude-pty.py sidecar file
 get_latest_session_id() {
-    # Claude stores conversations in project dirs
-    local conv_dir
-    conv_dir=$(find ~/.claude/projects/ -name "conversations" -type d 2>/dev/null | head -1)
-    if [ -n "$conv_dir" ] && [ -d "$conv_dir" ]; then
-        ls -t "$conv_dir"/ 2>/dev/null | head -1 | sed 's/\.json$//'
+    local sidecar="${CLAUDE_OUTPUT_FILE}.session"
+    if [ -f "$sidecar" ]; then
+        cat "$sidecar"
+        rm -f "$sidecar"
     fi
 }
 
-# Run Claude, managing session create/resume
-# Usage: run_claude <task_id> <prompt>
-# Uses --output-format stream-json for real-time progress display
-# Final result (assistant text) is returned via stdout for caller capture
+# Run Claude with --output-format stream-json for real-time progress.
+# `claude -p` writes NOTHING to stdout until completion (not even with a tty),
+# but --output-format stream-json streams JSON events line by line as it works.
+# We parse these events via a Python script for human-readable output.
+# Final result saved to $CLAUDE_OUTPUT_FILE for callers (e.g. commit message).
+CLAUDE_OUTPUT_FILE=""
 run_claude() {
     local task_id="$1"
     local prompt="$2"
@@ -67,91 +86,57 @@ run_claude() {
 
     cd "$REPO_DIR"
 
-    # --dangerously-skip-permissions: 非交互模式下必须跳过权限确认，否则进程会卡住
-    local CLAUDE_FLAGS="--dangerously-skip-permissions --output-format stream-json"
-    local tmpout
-    tmpout=$(mktemp)
-
-    # Parse stream-json: display events in real-time, extract final assistant message
-    _stream_and_extract() {
-        "$@" 2>>"$LOG" | while IFS= read -r line; do
-            local type
-            type=$(echo "$line" | jq -r '.type // empty' 2>/dev/null)
-            case "$type" in
-                assistant)
-                    # Extract and display assistant text content
-                    local text
-                    text=$(echo "$line" | jq -r '.message.content[]? | select(.type=="text") | .text // empty' 2>/dev/null)
-                    [ -n "$text" ] && log "[Claude] $text"
-                    ;;
-                content_block_delta)
-                    # Streaming text delta
-                    local delta
-                    delta=$(echo "$line" | jq -r '.delta.text // empty' 2>/dev/null)
-                    [ -n "$delta" ] && printf '%s' "$delta" >&2
-                    ;;
-                content_block_stop)
-                    printf '\n' >&2
-                    ;;
-                result)
-                    # Final result — extract full text, save to tmpout for caller
-                    local result_text
-                    result_text=$(echo "$line" | jq -r '.result // empty' 2>/dev/null)
-                    if [ -n "$result_text" ]; then
-                        echo "$result_text" > "$tmpout"
-                        log "[Claude] === Done ==="
-                    fi
-
-                    # Check for subtype (e.g. tool_use)
-                    local subtype
-                    subtype=$(echo "$line" | jq -r '.subtype // empty' 2>/dev/null)
-                    [ -n "$subtype" ] && log "[Claude event] $subtype"
-                    ;;
-                system)
-                    local sys_msg
-                    sys_msg=$(echo "$line" | jq -r '.message // .subtype // empty' 2>/dev/null)
-                    [ -n "$sys_msg" ] && log "[System] $sys_msg"
-                    ;;
-                *)
-                    # Log other event types for debugging
-                    [ -n "$type" ] && log "[Event] $type"
-                    ;;
-            esac
-        done
-        # Return the pipeline exit status of the Claude process
-        return ${PIPESTATUS[0]}
-    }
+    CLAUDE_OUTPUT_FILE=$(mktemp)
+    local base_flags="--dangerously-skip-permissions --verbose --output-format stream-json"
 
     if [ -n "$session_id" ]; then
-        log "Resume session $session_id for task #$task_id"
-        if _stream_and_extract $CLAUDE --resume "$session_id" $CLAUDE_FLAGS -p "$prompt"; then
-            cat "$tmpout" 2>/dev/null
-        else
-            log "Resume failed, creating new session"
-            _stream_and_extract $CLAUDE $CLAUDE_FLAGS -p "$prompt" || {
-                log "Claude CLI failed: task #$task_id"
-                rm -f "$tmpout"
-                return 1
-            }
-            local new_sid
-            new_sid=$(get_latest_session_id)
-            [ -n "$new_sid" ] && save_session "$task_id" "$new_sid"
-            cat "$tmpout" 2>/dev/null
-        fi
+        log "Resume session ${C_MAGENTA}${session_id:0:8}${C_RESET} for task ${C_BOLD}#$task_id${C_RESET}"
     else
-        log "New session for task #$task_id"
-        _stream_and_extract $CLAUDE $CLAUDE_FLAGS -p "$prompt" || {
-            log "Claude CLI failed: task #$task_id"
-            rm -f "$tmpout"
+        log "New session for task ${C_BOLD}#$task_id${C_RESET}"
+    fi
+
+    _run_stream() {
+        local flags="$1"
+        local rc=0
+        python3 "$REPO_DIR/autovibe/claude-pty.py" --output-file "$CLAUDE_OUTPUT_FILE" -- \
+            $CLAUDE $flags -p "$prompt" 2>>"$LOG" || rc=$?
+        return $rc
+    }
+
+    local session_flag=""
+    [ -n "$session_id" ] && session_flag="--resume $session_id"
+
+    _run_stream "$session_flag $base_flags"
+    local rc=$?
+
+    if [ $rc -ne 0 ] && [ -n "$session_id" ]; then
+        log_warn "Resume failed, creating new session"
+        _run_stream "$base_flags"
+        rc=$?
+        if [ $rc -ne 0 ]; then
+            log_err "Claude CLI failed: task #$task_id"
+            rm -f "$CLAUDE_OUTPUT_FILE"
             return 1
-        }
+        fi
         local new_sid
         new_sid=$(get_latest_session_id)
         [ -n "$new_sid" ] && save_session "$task_id" "$new_sid"
-        cat "$tmpout" 2>/dev/null
+    elif [ $rc -ne 0 ]; then
+        log "Claude CLI failed: task #$task_id"
+        rm -f "$CLAUDE_OUTPUT_FILE"
+        return 1
+    else
+        if [ -z "$session_id" ]; then
+            local new_sid
+            new_sid=$(get_latest_session_id)
+            if [ -n "$new_sid" ]; then
+                save_session "$task_id" "$new_sid"
+                log "Saved session ${C_MAGENTA}${new_sid:0:8}${C_RESET} for task ${C_BOLD}#$task_id${C_RESET}"
+            else
+                log_warn "No session ID captured for task #$task_id"
+            fi
+        fi
     fi
-
-    rm -f "$tmpout"
 }
 
 # ========== Handle claim signal (new task, new session) ==========
@@ -164,7 +149,7 @@ handle_claim() {
     plan=$(jq -r '.vibe_plan // empty' "$file")
     rm -f "$file"
 
-    log "=== Claim task #$task_id: $title ==="
+    log_head "Claim task #$task_id: $title"
 
     if [ -n "$plan" ]; then
         # Has plan → resume session, implement per plan
@@ -212,7 +197,7 @@ $([ -n "$description" ] && echo "描述: $description")
     -d '{\"status\": \"verifying\", \"summary\": \"你的变更总结 (Markdown)\"}'"
     fi
 
-    log "=== Task #$task_id processing complete ==="
+    log_ok "Task #$task_id processing complete"
 }
 
 # ========== Handle replan signal (三思而行, resume session) ==========
@@ -226,7 +211,7 @@ handle_replan() {
     comment=$(jq -r '.comment // empty' "$file")
     rm -f "$file"
 
-    log "=== Replan task #$task_id: $title ==="
+    log_head "Replan task #$task_id: $title"
 
     run_claude "$task_id" "用户对你上一版的实现计划提出了修改意见，请重新思考。
 
@@ -246,7 +231,7 @@ curl -sk -X PUT '$API/$task_id/vibe-status' \\
   -H 'Authorization: Bearer $TOKEN' \\
   -d '{\"status\": \"planning\", \"plan\": \"你的新计划 (Markdown)\"}'"
 
-    log "=== Replan #$task_id complete ==="
+    log_ok "Replan #$task_id complete"
 }
 
 # ========== Handle improve signal (resume session) ==========
@@ -260,7 +245,7 @@ handle_improve() {
     feedback=$(jq -r '.feedback // empty' "$file")
     rm -f "$file"
 
-    log "=== Improve task #$task_id: $title ==="
+    log_head "Improve task #$task_id: $title"
 
     run_claude "$task_id" "用户验证了你之前的实现，提出了改进意见，请修改。
 
@@ -282,7 +267,7 @@ $feedback
      -H 'Authorization: Bearer $TOKEN' \\
      -d '{\"status\": \"verifying\", \"summary\": \"更新后的变更总结 (Markdown)\"}'"
 
-    log "=== Improve #$task_id complete ==="
+    log_ok "Improve #$task_id complete"
 }
 
 # ========== Handle commit signal (resume session, then end it) ==========
@@ -294,13 +279,13 @@ handle_commit() {
     summary=$(jq -r '.summary // empty' "$file")
     rm -f "$file"
 
-    log "=== Commit task #$task_id: $title ==="
+    log_head "Commit task #$task_id: $title"
 
     cd "$REPO_DIR"
 
     # Check if there are changes to commit
     if git diff --quiet HEAD 2>/dev/null && [ -z "$(git status --porcelain)" ]; then
-        log "No changes to commit, marking as committed"
+        log_warn "No changes to commit, marking as committed"
         api_call -X PUT "$API/$task_id/vibe-status" \
             -H "Content-Type: application/json" \
             -d '{"status": "committed"}' > /dev/null
@@ -311,8 +296,7 @@ handle_commit() {
     fi
 
     # Resume session — Claude generates commit message based on git diff
-    local commit_msg
-    commit_msg=$(run_claude "$task_id" "请查看 git status 和 git diff，为这些变更生成 commit message。
+    run_claude "$task_id" "请查看 git status 和 git diff，为这些变更生成 commit message。
 
 相关任务: $title
 变更总结 (仅供参考，请基于实际 diff):
@@ -325,14 +309,20 @@ $summary
 - 空行
 - Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 
-只输出 commit message，不要其他内容，不要代码块。") || {
+只输出 commit message，不要其他内容，不要代码块。"
+
+    local commit_msg
+    if [ -s "$CLAUDE_OUTPUT_FILE" ]; then
+        commit_msg=$(cat "$CLAUDE_OUTPUT_FILE")
+        rm -f "$CLAUDE_OUTPUT_FILE"
+    else
         commit_msg="$title
 
 $summary
 
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
-        log "Claude commit msg generation failed, using fallback"
-    }
+        log_warn "Claude commit msg generation failed, using fallback"
+    fi
 
     git add -A
     git commit -m "$commit_msg"
@@ -340,15 +330,15 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
     if git push origin master; then
         local commit_hash
         commit_hash=$(git rev-parse HEAD)
-        log "Push successful: $commit_hash"
+        log_ok "Push successful: ${C_MAGENTA}${commit_hash:0:8}${C_RESET}"
         api_call -X PUT "$API/$task_id/vibe-status" \
             -H "Content-Type: application/json" \
             -d '{"status": "committed"}' > /dev/null
         api_call -X POST "$API/$task_id/complete" > /dev/null
         api_call -X POST "$API/$task_id/check-commit" > /dev/null
-        log "=== Task #$task_id committed and pushed ==="
+        log_ok "Task #$task_id committed and pushed"
     else
-        log "Push failed, reverting to verifying"
+        log_err "Push failed, reverting to verifying"
         api_call -X PUT "$API/$task_id/vibe-status" \
             -H "Content-Type: application/json" \
             -d '{"status": "verifying"}' > /dev/null
@@ -358,7 +348,7 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 }
 
 # ========== Main Loop ==========
-log "Vibe Watcher started, monitoring $QUEUE_DIR"
+log_head "Vibe Watcher started, monitoring $QUEUE_DIR"
 
 process_file() {
     local filepath="$1"
@@ -366,13 +356,14 @@ process_file() {
     filename=$(basename "$filepath")
     [ -f "$filepath" ] || return
 
+    # Use || true to prevent set -e from killing the watcher on handler errors
     case "$filename" in
-        claim.json)      handle_claim "$filepath" ;;
-        claim-*.json)    handle_claim "$filepath" ;;
-        plan-*.json)     handle_replan "$filepath" ;;
-        improve-*.json)  handle_improve "$filepath" ;;
-        commit-*.json)   handle_commit "$filepath" ;;
-        *)               log "Ignoring: $filename" ;;
+        claim.json)      handle_claim "$filepath"   || log_err "handle_claim failed (rc=$?)" ;;
+        claim-*.json)    handle_claim "$filepath"    || log_err "handle_claim failed (rc=$?)" ;;
+        plan-*.json)     handle_replan "$filepath"   || log_err "handle_replan failed (rc=$?)" ;;
+        improve-*.json)  handle_improve "$filepath"  || log_err "handle_improve failed (rc=$?)" ;;
+        commit-*.json)   handle_commit "$filepath"   || log_err "handle_commit failed (rc=$?)" ;;
+        *)               log "Ignoring: ${C_DIM}$filename${C_RESET}" ;;
     esac
 }
 
@@ -382,8 +373,8 @@ for f in "$QUEUE_DIR"/*.json; do
     process_file "$f"
 done
 
-# Continuous monitoring
-inotifywait -m "$QUEUE_DIR" -e create -e moved_to --format '%f' 2>/dev/null | while read filename; do
+# Continuous monitoring (process substitution avoids subshell stdout buffering)
+while read filename; do
     sleep 0.5
     process_file "$QUEUE_DIR/$filename"
-done
+done < <(inotifywait -m "$QUEUE_DIR" -e create -e moved_to --format '%f' 2>/dev/null)
