@@ -5,6 +5,7 @@
       <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
         <h1 class="text-lg font-bold text-gray-800">Studio</h1>
         <div class="flex gap-2">
+          <van-button size="small" icon="fire-o" @click="$router.push('/ideas')">灵感</van-button>
           <van-button size="small" icon="friends-o" @click="$router.push('/talent-cards')">人才卡</van-button>
           <van-button size="small" icon="setting-o" @click="$router.push('/settings')">设置</van-button>
         </div>
@@ -221,13 +222,14 @@
 
           <!-- Input Section -->
           <div class="bg-white rounded-xl shadow-sm p-4">
-            <div class="flex gap-2">
+            <div class="flex gap-2 items-center">
               <van-field
                 v-model="newTitle"
                 placeholder="添加新任务..."
                 class="todo-input flex-1"
                 @keyup.enter="addTodo"
               />
+              <VoiceInputButton v-model="newTitle" />
               <van-button
                 type="primary"
                 icon="plus"
@@ -597,13 +599,14 @@
 
                 <!-- Requirement input -->
                 <div class="bg-white rounded-xl shadow-sm p-4">
-                  <div class="flex gap-2">
+                  <div class="flex gap-2 items-center">
                     <van-field
                       v-model="newReqTitle"
                       placeholder="添加新需求..."
                       class="todo-input flex-1"
                       @keyup.enter="addRequirement"
                     />
+                    <VoiceInputButton v-model="newReqTitle" />
                     <van-button
                       type="primary"
                       icon="plus"
@@ -707,7 +710,7 @@
             </van-tab>
 
             <!-- Sub-tab: 实现中 -->
-            <van-tab title="实现中">
+            <van-tab title="实现中" :badge="vibePending.length || ''">
               <div class="py-3 space-y-2">
                 <div v-if="vibePending.length === 0" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400">
                   <p class="text-sm">暂无实现中的任务</p>
@@ -736,6 +739,17 @@
                           {{ tag.name }}
                         </van-tag>
                         <span class="text-xs text-gray-400">{{ formatDateTime(item.created_at) }}</span>
+                      </div>
+                      <div class="flex items-center gap-2 mt-2">
+                        <van-button
+                          size="small"
+                          plain
+                          icon="delete-o"
+                          type="danger"
+                          @click.stop="deleteVibeTask(item)"
+                        >
+                          删除
+                        </van-button>
                       </div>
                     </div>
                   </div>
@@ -925,7 +939,10 @@
 
         <!-- Description -->
         <div>
-          <label class="text-xs text-gray-400 mb-1 block">详情描述</label>
+          <div class="flex items-center gap-1 mb-1">
+            <label class="text-xs text-gray-400">详情描述</label>
+            <VoiceInputButton v-if="!detailItem.completed" v-model="detailItem.description" :size="14" />
+          </div>
           <van-field
             v-if="!detailItem.completed"
             v-model="detailItem.description"
@@ -966,7 +983,7 @@
                 {{ tag.name }}
               </van-tag>
             </template>
-            <div class="detail-tag-add-wrapper" style="position: relative;" @click.stop>
+            <div class="detail-tag-add-wrapper" @click.stop>
               <van-tag
                 plain
                 type="primary"
@@ -974,19 +991,23 @@
                 class="cursor-pointer"
                 @click="showDetailTagPicker = !showDetailTagPicker"
               >+</van-tag>
-              <div v-if="showDetailTagPicker" class="detail-tag-picker">
-                <div v-if="detailUnassignedTags.length === 0" class="text-xs text-gray-400 px-2 py-1.5">暂无更多标签</div>
-                <div
-                  v-for="tag in detailUnassignedTags"
-                  :key="tag.id"
-                  class="detail-tag-picker-item"
-                  @click="addDetailTag(tag.id)"
-                >
-                  <van-tag size="medium" :color="tag.color" type="primary">{{ tag.name }}</van-tag>
-                </div>
-              </div>
             </div>
             <span v-if="detailAssignedTags.length === 0 && !showDetailTagPicker" class="text-xs text-gray-400">点击 + 添加标签</span>
+          </div>
+          <div v-if="showDetailTagPicker" class="flex gap-1.5 flex-wrap mt-1.5" @click.stop>
+            <div v-if="detailUnassignedTags.length === 0" class="text-xs text-gray-400">暂无更多标签</div>
+            <van-tag
+              v-for="tag in detailUnassignedTags"
+              :key="tag.id"
+              size="medium"
+              :color="tag.color"
+              type="primary"
+              plain
+              class="cursor-pointer"
+              @click="addDetailTag(tag.id)"
+            >
+              {{ tag.name }}
+            </van-tag>
           </div>
         </div>
 
@@ -1100,6 +1121,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useTodosStore } from '../stores/todos'
 import { showToast, showConfirmDialog } from 'vant'
 import api from '../api'
+import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 const store = useTodosStore()
 
@@ -1965,6 +1987,19 @@ async function deleteRequirement(item) {
   }
 }
 
+async function deleteVibeTask(item) {
+  try {
+    await showConfirmDialog({
+      title: '删除任务',
+      message: `确认删除「${item.title}」？关联的 Claude session 也会一并删除，此操作不可撤销。`,
+    })
+    await store.deleteTodo(item.id)
+    showToast('已删除')
+  } catch (e) {
+    // cancelled
+  }
+}
+
 // --- Vibe planning ---
 const editingPlanId = ref(null)
 const editingPlanContent = ref('')
@@ -2272,29 +2307,6 @@ function formatDateTime(isoStr) {
 }
 .detail-tag-add-wrapper {
   display: inline-block;
-}
-.detail-tag-picker {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-  z-index: 10;
-  max-height: 200px;
-  overflow-y: auto;
-  min-width: 120px;
-  padding: 4px 0;
-}
-.detail-tag-picker-item {
-  padding: 6px 10px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.detail-tag-picker-item:hover {
-  background: #f3f4f6;
 }
 .line-clamp-2 {
   display: -webkit-box;

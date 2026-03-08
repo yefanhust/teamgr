@@ -16,12 +16,16 @@
 
     <!-- Quick Search (Mobile) -->
     <div class="px-4 pt-3 md:hidden">
-      <van-search
-        v-model="quickSearchQuery"
-        placeholder="搜索姓名/拼音..."
-        shape="round"
-        @update:model-value="handleQuickSearch"
-      />
+      <div class="flex items-center gap-1">
+        <van-search
+          v-model="quickSearchQuery"
+          placeholder="搜索姓名/拼音..."
+          shape="round"
+          class="flex-1"
+          @update:model-value="handleQuickSearch"
+        />
+        <VoiceInputButton v-model="quickSearchQuery" mode="replace" />
+      </div>
     </div>
 
     <!-- Tag Filter -->
@@ -243,6 +247,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useTalentStore } from '../stores/talent'
 import { showToast } from 'vant'
 import ChatQueryPanel from '../components/ChatQueryPanel.vue'
+import VoiceInputButton from '../components/VoiceInputButton.vue'
 import api from '../api'
 
 const store = useTalentStore()

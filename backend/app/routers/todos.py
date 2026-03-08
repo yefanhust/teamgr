@@ -348,6 +348,17 @@ def delete_todo(todo_id: int, db: Session = Depends(get_db)):
     item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Todo not found")
+    # Clean up vibe session and queue files
+    if item.vibe_status and item.vibe_status not in ("requirement", "committed"):
+        data_dir = os.environ.get("TEAMGR_DATA_DIR", "/app/data")
+        session_file = os.path.join(data_dir, "vibe-sessions", str(todo_id))
+        if os.path.exists(session_file):
+            os.remove(session_file)
+        queue_dir = os.path.join(data_dir, "vibe-queue")
+        if os.path.isdir(queue_dir):
+            for f in os.listdir(queue_dir):
+                if f.endswith(f"-{todo_id}.json"):
+                    os.remove(os.path.join(queue_dir, f))
     db.delete(item)
     db.commit()
     return {"ok": True}

@@ -118,15 +118,18 @@
             @keypress.enter.exact.prevent="submitEntry"
             @paste="handlePaste"
           />
-          <van-button
-            type="primary"
-            icon="guide-o"
-            :disabled="!canSubmit"
-            @click="submitEntry"
-            class="send-btn"
-          >
-            发送
-          </van-button>
+          <div class="flex flex-col gap-1 items-center">
+            <VoiceInputButton v-model="inputText" />
+            <van-button
+              type="primary"
+              icon="guide-o"
+              :disabled="!canSubmit"
+              @click="submitEntry"
+              class="send-btn"
+            >
+              发送
+            </van-button>
+          </div>
         </div>
       </div>
 
@@ -213,6 +216,7 @@ import { useRoute } from 'vue-router'
 import { useTalentStore } from '../stores/talent'
 import { showToast, showImagePreview } from 'vant'
 import api from '../api'
+import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 const route = useRoute()
 const store = useTalentStore()

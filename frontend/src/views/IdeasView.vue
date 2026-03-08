@@ -208,7 +208,8 @@
             placeholder="写下你此刻的灵感、想法、碎片思考..."
             class="idea-input"
           />
-          <div class="flex justify-end mt-3">
+          <div class="flex justify-between items-center mt-3">
+            <VoiceInputButton v-model="inputText" />
             <van-button
               type="primary"
               icon="guide-o"
@@ -310,6 +311,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useIdeasStore } from '../stores/ideas'
 import { showToast, showConfirmDialog } from 'vant'
+import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 const store = useIdeasStore()
 

@@ -13,7 +13,10 @@
           @search="handleSearch"
         >
           <template #action>
-            <div @click="handleSearch" class="text-blue-500">搜索</div>
+            <div class="flex items-center gap-2">
+              <VoiceInputButton v-model="searchQuery" mode="replace" />
+              <div @click="handleSearch" class="text-blue-500">搜索</div>
+            </div>
           </template>
         </van-search>
       </div>
@@ -96,6 +99,7 @@
 import { ref } from 'vue'
 import { useTalentStore } from '../stores/talent'
 import { showToast } from 'vant'
+import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 const store = useTalentStore()
 

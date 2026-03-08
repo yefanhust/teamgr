@@ -129,6 +129,7 @@
           class="flex-1 chat-input"
           @keypress.enter.exact.prevent="submitQuery"
         />
+        <VoiceInputButton v-model="inputText" />
         <van-button
           type="primary"
           icon="guide-o"
@@ -158,6 +159,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { showToast } from 'vant'
 import api from '../api'
+import VoiceInputButton from './VoiceInputButton.vue'
 
 const presetQuestions = ref([])
 const editingPresetId = ref(null)
