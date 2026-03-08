@@ -56,9 +56,9 @@ export const useTodosStore = defineStore('todos', () => {
 
   async function restartTodo(id) {
     const res = await api.post(`/api/todos/${id}/restart`)
-    // Keep completed item in place (update it), add new clone to pending
+    // Remove completed item from list, add new clone to pending
     const cidx = completed.value.findIndex(t => t.id === id)
-    if (cidx !== -1) completed.value[cidx] = res.data.completed
+    if (cidx !== -1) completed.value.splice(cidx, 1)
     pending.value.unshift(res.data.new)
     _sortPending()
     return res.data

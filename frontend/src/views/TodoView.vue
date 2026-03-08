@@ -145,10 +145,10 @@
                         />
                         <span
                           v-else
-                          class="text-sm text-gray-800"
+                          class="text-sm text-gray-800 truncate min-w-0"
                           @dblclick.stop="startInlineEdit(item)"
                         >{{ item.title }}</span>
-                        <van-tag v-if="item.high_priority" type="danger" size="small">高优</van-tag>
+                        <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
                       </div>
                       <div class="flex items-center gap-1 mt-1 flex-wrap">
                         <van-tag
@@ -320,8 +320,8 @@
                 />
                 <div class="flex-1 min-w-0" @click="openDetail(item)">
                   <div class="flex items-center gap-2">
-                    <span class="text-sm text-gray-500 line-through">{{ item.title }}</span>
-                    <van-tag v-if="item.high_priority" type="danger" size="small" plain>高优</van-tag>
+                    <span class="text-sm text-gray-500 line-through truncate min-w-0">{{ item.title }}</span>
+                    <van-tag v-if="item.high_priority" type="danger" size="small" plain class="flex-shrink-0">高优</van-tag>
                   </div>
                   <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-2">{{ item.description }}</p>
                   <div class="flex items-center gap-1 mt-1 flex-wrap">
@@ -534,8 +534,8 @@
                     />
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
                       <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-800 font-medium">{{ item.title }}</span>
-                        <van-tag v-if="item.high_priority" type="danger" size="small">高优</van-tag>
+                        <span class="text-sm text-gray-800 font-medium truncate min-w-0">{{ item.title }}</span>
+                        <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
                       </div>
                       <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-3">{{ item.description }}</p>
                       <div class="flex items-center gap-1 mt-1 flex-wrap">
@@ -630,9 +630,9 @@
                     </div>
                     <div class="flex-1 min-w-0">
                       <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-800 font-medium">{{ item.title }}</span>
-                        <van-tag color="#6366F1" size="small">规划中</van-tag>
-                        <van-tag v-if="item.high_priority" type="danger" size="small">高优</van-tag>
+                        <span class="text-sm text-gray-800 font-medium truncate min-w-0">{{ item.title }}</span>
+                        <van-tag color="#6366F1" size="small" class="flex-shrink-0">规划中</van-tag>
+                        <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
                       </div>
                       <!-- Plan content -->
                       <div v-if="editingPlanId === item.id" class="mt-2">
@@ -715,9 +715,9 @@
                     </div>
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
                       <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-800 font-medium">{{ item.title }}</span>
-                        <van-tag v-if="item.high_priority" type="danger" size="small">高优</van-tag>
-                        <van-tag v-if="item.vibe_status === 'implementing'" color="#F59E0B" size="small">实现中</van-tag>
+                        <span class="text-sm text-gray-800 font-medium truncate min-w-0">{{ item.title }}</span>
+                        <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
+                        <van-tag v-if="item.vibe_status === 'implementing'" color="#F59E0B" size="small" class="flex-shrink-0">实现中</van-tag>
                       </div>
                       <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-3">{{ item.description }}</p>
                       <div class="flex items-center gap-1 mt-1 flex-wrap">
@@ -1364,6 +1364,7 @@ async function handleComplete(id) {
 async function handleRestart(id) {
   try {
     await store.restartTodo(id)
+    showToast('已恢复到TODO')
   } catch (e) {
     showToast('操作失败')
   }
@@ -2358,5 +2359,9 @@ function formatDateTime(isoStr) {
 }
 .vibe-summary-content :deep(strong) {
   color: #374151;
+}
+:deep(.van-tag) {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 </style>
