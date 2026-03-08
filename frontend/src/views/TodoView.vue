@@ -784,7 +784,7 @@
                 <div v-if="vibeCommitted.length === 0" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400">
                   <p class="text-sm">暂无已提交的任务</p>
                 </div>
-                <div v-for="item in vibeCommitted" :key="item.id" class="bg-white rounded-xl shadow-sm p-3" :class="item.vibe_commit_id ? 'opacity-70' : ''">
+                <div v-for="item in vibeCommitted" :key="item.id" class="bg-white rounded-xl shadow-sm p-3" :class="item.completed ? 'opacity-70' : ''">
                   <div class="flex items-center gap-3">
                     <van-icon name="passed" size="20" color="#10B981" />
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
@@ -820,9 +820,9 @@
                     <div class="flex flex-col gap-1.5 flex-shrink-0">
                       <van-button
                         size="small"
-                        :type="item.vibe_commit_id ? 'default' : 'warning'"
-                        :disabled="!!item.vibe_commit_id"
-                        :plain="!!item.vibe_commit_id"
+                        :type="item.completed ? 'default' : 'warning'"
+                        :disabled="item.completed"
+                        :plain="item.completed"
                         @click.stop="revertToVerifying(item)"
                       >
                         返回验证

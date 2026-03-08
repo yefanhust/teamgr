@@ -88,15 +88,45 @@ def _migrate_schema():
                 logger.info(f"Migration: added {table}.{column}")
 
     # Drop unique constraint on todo_tags.name (allow same name in different scopes)
+    # SQLite autoindex for UNIQUE(name) can't be dropped with DROP INDEX,
+    # so we rebuild the table without the constraint, then fix FK references.
     if "todo_tags" in inspector.get_table_names():
-        indexes = inspector.get_indexes("todo_tags")
-        unique_name_idx = [idx for idx in indexes if idx.get("unique") and idx.get("column_names") == ["name"]]
-        if unique_name_idx:
-            with engine.connect() as conn:
-                for idx in unique_name_idx:
-                    conn.execute(text(f'DROP INDEX IF EXISTS "{idx["name"]}"'))
+        with engine.connect() as conn:
+            ddl = conn.execute(text(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='todo_tags'"
+            )).scalar() or ""
+            if "UNIQUE (name)" in ddl or "UNIQUE(name)" in ddl:
+                conn.execute(text("PRAGMA foreign_keys=OFF"))
+                cols = [c["name"] for c in inspector.get_columns("todo_tags")]
+                col_list = ", ".join(cols)
+                conn.execute(text("ALTER TABLE todo_tags RENAME TO _todo_tags_old"))
+                conn.execute(text("""
+                    CREATE TABLE todo_tags (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(50) NOT NULL,
+                        color VARCHAR(20),
+                        parent_id INTEGER REFERENCES todo_tags(id) ON DELETE SET NULL,
+                        scope TEXT DEFAULT 'todo'
+                    )
+                """))
+                conn.execute(text(f"INSERT INTO todo_tags ({col_list}) SELECT {col_list} FROM _todo_tags_old"))
+                conn.execute(text("DROP TABLE _todo_tags_old"))
+                # Rebuild todo_item_tags to fix FK pointing at old table
+                conn.execute(text("ALTER TABLE todo_item_tags RENAME TO _todo_item_tags_old"))
+                conn.execute(text("""
+                    CREATE TABLE todo_item_tags (
+                        todo_id INTEGER NOT NULL,
+                        tag_id INTEGER NOT NULL,
+                        PRIMARY KEY (todo_id, tag_id),
+                        FOREIGN KEY(todo_id) REFERENCES todo_items(id) ON DELETE CASCADE,
+                        FOREIGN KEY(tag_id) REFERENCES todo_tags(id) ON DELETE CASCADE
+                    )
+                """))
+                conn.execute(text("INSERT INTO todo_item_tags SELECT * FROM _todo_item_tags_old"))
+                conn.execute(text("DROP TABLE _todo_item_tags_old"))
+                conn.execute(text("PRAGMA foreign_keys=ON"))
                 conn.commit()
-                logger.info("Migration: dropped unique constraint on todo_tags.name")
+                logger.info("Migration: rebuilt todo_tags without UNIQUE(name) constraint")
 
 
 def _seed_default_dimensions():
