@@ -4,10 +4,30 @@
     <div class="bg-white shadow-sm sticky top-0 z-10">
       <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
         <h1 class="text-lg font-bold text-gray-800">Studio</h1>
-        <div class="flex gap-2">
-          <van-button size="small" icon="fire-o" @click="$router.push('/ideas')">灵感</van-button>
-          <van-button size="small" icon="friends-o" @click="$router.push('/talent-cards')">人才卡</van-button>
-          <van-button size="small" icon="setting-o" @click="$router.push('/settings')">设置</van-button>
+        <van-icon name="setting-o" size="20" class="text-gray-500 cursor-pointer" @click="$router.push('/settings')" />
+      </div>
+      <!-- Navigation -->
+      <div class="max-w-3xl mx-auto px-4 pb-3 flex gap-3">
+        <div
+          class="nav-card flex-1 flex items-center gap-2 px-3 py-2.5 bg-orange-50 rounded-lg cursor-pointer"
+          @click="$router.push('/ideas')"
+        >
+          <van-icon name="fire-o" size="18" color="#F97316" />
+          <span class="text-sm font-medium text-orange-700">灵感</span>
+        </div>
+        <div
+          class="nav-card flex-1 flex items-center gap-2 px-3 py-2.5 bg-blue-50 rounded-lg cursor-pointer"
+          @click="$router.push('/talent-cards')"
+        >
+          <van-icon name="friends-o" size="18" color="#3B82F6" />
+          <span class="text-sm font-medium text-blue-700">人才卡</span>
+        </div>
+        <div
+          class="nav-card flex-1 flex items-center gap-2 px-3 py-2.5 bg-emerald-50 rounded-lg cursor-pointer"
+          @click="$router.push('/stats')"
+        >
+          <van-icon name="chart-trending-o" size="18" color="#10B981" />
+          <span class="text-sm font-medium text-emerald-700">统计</span>
         </div>
       </div>
     </div>
@@ -2225,6 +2245,13 @@ function formatDateTime(isoStr) {
 </script>
 
 <style scoped>
+.nav-card {
+  transition: all 0.15s ease;
+}
+.nav-card:active {
+  transform: scale(0.97);
+  opacity: 0.8;
+}
 .todo-tabs :deep(.van-tabs__nav) {
   background: #fff;
 }

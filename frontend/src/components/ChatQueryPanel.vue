@@ -190,11 +190,15 @@ onMounted(() => {
   fetchPresets()
 })
 
+const allDefaults = ref({})
+
 async function fetchModelSettings() {
   try {
-    const res = await api.get('/api/settings/model')
-    currentModel.value = res.data.current_model
+    const res = await api.get('/api/settings/model-defaults')
     availableModels.value = res.data.available_models
+    allDefaults.value = { ...res.data.defaults }
+    // Show the model configured for chat queries (chat-answer), fallback to global
+    currentModel.value = res.data.defaults['chat-answer'] || res.data.defaults['chat-analyze'] || res.data.global_model
   } catch (e) {
     // ignore
   }
@@ -204,7 +208,10 @@ async function onModelSelect(action) {
   const model = action.name
   if (model === currentModel.value) return
   try {
-    await api.put('/api/settings/model', { model })
+    // Update per-call-type defaults for both chat query steps
+    const newDefaults = { ...allDefaults.value, 'chat-analyze': model, 'chat-answer': model }
+    const res = await api.put('/api/settings/model-defaults', { defaults: newDefaults })
+    allDefaults.value = { ...res.data.defaults }
     currentModel.value = model
     showToast(`已切换到 ${model}`)
   } catch (e) {
