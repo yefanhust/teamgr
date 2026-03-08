@@ -1,35 +1,10 @@
 <template>
   <div class="min-h-screen bg-gray-100">
-    <!-- Header -->
-    <div class="bg-white shadow-sm sticky top-0 z-10">
-      <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-        <h1 class="text-lg font-bold text-gray-800">Studio</h1>
-        <van-icon name="setting-o" size="20" class="text-gray-500 cursor-pointer" @click="$router.push('/settings')" />
-      </div>
-      <!-- Navigation -->
-      <div class="max-w-3xl mx-auto px-4 pb-3 flex gap-3">
-        <div
-          class="nav-card flex-1 flex items-center gap-2 px-3 py-2.5 bg-orange-50 rounded-lg cursor-pointer"
-          @click="$router.push('/ideas')"
-        >
-          <van-icon name="fire-o" size="18" color="#F97316" />
-          <span class="text-sm font-medium text-orange-700">灵感</span>
-        </div>
-        <div
-          class="nav-card flex-1 flex items-center gap-2 px-3 py-2.5 bg-blue-50 rounded-lg cursor-pointer"
-          @click="$router.push('/talent-cards')"
-        >
-          <van-icon name="friends-o" size="18" color="#3B82F6" />
-          <span class="text-sm font-medium text-blue-700">人才卡</span>
-        </div>
-        <div
-          class="nav-card flex-1 flex items-center gap-2 px-3 py-2.5 bg-emerald-50 rounded-lg cursor-pointer"
-          @click="$router.push('/stats')"
-        >
-          <van-icon name="chart-trending-o" size="18" color="#10B981" />
-          <span class="text-sm font-medium text-emerald-700">统计</span>
-        </div>
-      </div>
+    <!-- Top Navigation -->
+    <TopNavBar />
+    <!-- Settings -->
+    <div class="max-w-3xl mx-auto px-4 py-1 flex justify-end">
+      <van-icon name="setting-o" size="20" class="text-gray-500 cursor-pointer" @click="$router.push('/settings')" />
     </div>
 
     <!-- Main Tabs -->
@@ -668,9 +643,10 @@
                         <textarea
                           ref="planEditArea"
                           v-model="editingPlanContent"
-                          class="w-full text-xs text-gray-700 bg-indigo-50 border border-indigo-200 rounded-lg p-2.5 leading-relaxed resize-y min-h-[80px] outline-none focus:border-indigo-400"
+                          class="w-full text-xs text-gray-700 bg-indigo-50 border border-indigo-200 rounded-lg p-2.5 leading-relaxed resize-y min-h-[200px] max-h-[70vh] outline-none focus:border-indigo-400"
                           @blur="finishEditPlan(item)"
                           @keydown.escape="cancelEditPlan"
+                          @input="autoResizePlanTextarea"
                         ></textarea>
                       </div>
                       <div
@@ -1142,6 +1118,7 @@ import { useTodosStore } from '../stores/todos'
 import { showToast, showConfirmDialog } from 'vant'
 import api from '../api'
 import VoiceInputButton from '../components/VoiceInputButton.vue'
+import TopNavBar from '../components/TopNavBar.vue'
 
 const store = useTodosStore()
 
@@ -2035,6 +2012,17 @@ const improveItem = ref(null)
 const improveFeedback = ref('')
 const committingId = ref(null)
 
+function autoResizePlanTextarea() {
+  const el = planEditArea.value
+  if (el) {
+    const textarea = Array.isArray(el) ? el[0] : el
+    if (textarea) {
+      textarea.style.height = 'auto'
+      textarea.style.height = textarea.scrollHeight + 'px'
+    }
+  }
+}
+
 function startEditPlan(item) {
   editingPlanId.value = item.id
   editingPlanContent.value = item.vibe_plan || ''
@@ -2042,7 +2030,11 @@ function startEditPlan(item) {
     const el = planEditArea.value
     if (el) {
       const textarea = Array.isArray(el) ? el[0] : el
-      if (textarea) textarea.focus()
+      if (textarea) {
+        textarea.focus()
+        textarea.style.height = 'auto'
+        textarea.style.height = textarea.scrollHeight + 'px'
+      }
     }
   })
 }

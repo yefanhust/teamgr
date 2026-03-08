@@ -1,26 +1,20 @@
 <template>
   <div class="min-h-screen bg-gray-100">
-    <!-- Header -->
-    <div class="bg-white shadow-sm sticky top-0 z-10">
-      <div class="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-        <div class="flex items-center gap-3">
-          <van-icon name="arrow-left" size="20" class="cursor-pointer" @click="$router.push('/')" />
-          <h1 class="text-lg font-bold text-gray-800">灵感空间</h1>
-        </div>
-        <div class="flex gap-2">
-          <van-button
-            size="mini"
-            icon="fire-o"
-            :loading="generatingInsights"
-            @click="generateInsights"
-          >
-            生成洞见
-          </van-button>
-        </div>
-      </div>
+    <!-- Top Navigation -->
+    <TopNavBar />
+    <div class="max-w-3xl mx-auto px-4 py-1 flex items-center justify-between">
+      <h1 class="text-sm font-bold text-gray-500">灵感空间</h1>
+      <van-button
+        size="mini"
+        icon="fire-o"
+        :loading="generatingInsights"
+        @click="generateInsights"
+      >
+        生成洞见
+      </van-button>
     </div>
 
-    <van-tabs v-model:active="activeTab" shrink sticky offset-top="49" class="ideas-tabs" @change="onTabChange">
+    <van-tabs v-model:active="activeTab" shrink sticky offset-top="52" class="ideas-tabs" @change="onTabChange">
       <van-tab title="灵感洞见">
     <div class="max-w-3xl mx-auto px-4 py-4 space-y-6">
 
@@ -312,6 +306,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useIdeasStore } from '../stores/ideas'
 import { showToast, showConfirmDialog } from 'vant'
 import VoiceInputButton from '../components/VoiceInputButton.vue'
+import TopNavBar from '../components/TopNavBar.vue'
 
 const store = useIdeasStore()
 

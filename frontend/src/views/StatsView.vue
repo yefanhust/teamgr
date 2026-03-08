@@ -1,11 +1,9 @@
 <template>
   <div class="min-h-screen bg-gray-100">
-    <!-- Header -->
-    <div class="bg-white shadow-sm sticky top-0 z-10">
-      <div class="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
-        <van-icon name="arrow-left" size="20" class="cursor-pointer" @click="$router.back()" />
-        <h1 class="text-lg font-bold text-gray-800">LLM 调用统计</h1>
-      </div>
+    <!-- Top Navigation -->
+    <TopNavBar />
+    <div class="max-w-3xl mx-auto px-4 py-1">
+      <h1 class="text-sm font-bold text-gray-500">LLM 调用统计</h1>
     </div>
 
     <div class="max-w-3xl mx-auto px-4 py-4">
@@ -95,6 +93,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import api from '../api'
+import TopNavBar from '../components/TopNavBar.vue'
 import { showToast } from 'vant'
 
 const loading = ref(true)
