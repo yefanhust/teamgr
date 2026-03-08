@@ -7,8 +7,6 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-SCHEDULED_MODEL = "gemini-2.5-pro"
-
 
 def _build_name_mapping(names: list[str]) -> tuple[dict, dict]:
     charset = string.ascii_letters + string.digits
@@ -56,7 +54,7 @@ async def _run_single_query(question: str) -> str:
         # Step 1: Analyze dimensions
         dims = db.query(CardDimension).order_by(CardDimension.sort_order).all()
         dimensions = [{"key": d.key, "label": d.label, "schema": d.schema} for d in dims]
-        analysis = await analyze_query_dimensions(question, dimensions, model_override=SCHEDULED_MODEL)
+        analysis = await analyze_query_dimensions(question, dimensions)
         relevant_dims = analysis.get("relevant_dimensions", [])
 
         if not relevant_dims:
@@ -94,7 +92,7 @@ async def _run_single_query(question: str) -> str:
             context_json = context_json[:30000]
 
         result = await answer_talent_query(
-            question, context_json, dimension_keys, model_override=SCHEDULED_MODEL
+            question, context_json, dimension_keys
         )
         raw_answer = result.get("answer", "")
         return _restore_names(raw_answer, pseudo_to_name)
@@ -125,11 +123,14 @@ def run_scheduled_queries():
                 db.query(ScheduledQueryResult).filter(
                     ScheduledQueryResult.preset_question_id == preset.id
                 ).delete()
+                from app.config import get_model_defaults
+                from app.services.llm_service import get_current_model_name
+                effective_model = get_model_defaults().get("chat-answer") or get_current_model_name()
                 result = ScheduledQueryResult(
                     preset_question_id=preset.id,
                     question_snapshot=preset.question,
                     answer=answer,
-                    model_name=SCHEDULED_MODEL,
+                    model_name=effective_model,
                     generated_at=datetime.utcnow(),
                 )
                 db.add(result)
