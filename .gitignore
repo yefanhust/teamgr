@@ -1,8 +1,5 @@
 config/config.yaml
-data/*.db
-data/*.db-journal
-data/*.db-shm
-data/*.db-wal
+data/
 ssl/
 __pycache__/
 *.pyc
