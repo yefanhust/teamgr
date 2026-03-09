@@ -168,7 +168,7 @@
                           :class="item.deadline_urgent ? 'bg-red-50 text-red-500 font-medium' : 'bg-gray-50 text-gray-500'"
                           @click.stop="openDeadlinePicker(item)"
                         >
-                          截止 {{ item.deadline }}
+                          截止 {{ item.deadline }}{{ item.deadline_time ? ' ' + item.deadline_time : '' }}
                         </span>
                         <span
                           v-else
@@ -240,12 +240,12 @@
                 :class="newDeadline ? 'text-blue-500' : 'text-gray-400'"
                 @click="showNewDeadlinePicker = true"
               >
-                {{ newDeadline ? '截止 ' + newDeadline : '+ 截止日期' }}
+                {{ newDeadline ? '截止 ' + newDeadline + (newDeadlineTime ? ' ' + newDeadlineTime : '') : '+ 截止日期' }}
               </span>
               <span
                 v-if="newDeadline"
                 class="text-xs text-gray-400 cursor-pointer"
-                @click="newDeadline = ''"
+                @click="newDeadline = ''; newDeadlineTime = ''"
               >
                 清除
               </span>
@@ -341,7 +341,7 @@
                       耗时 {{ formatDuration(item.created_at, item.completed_at) }}
                     </span>
                     <span v-if="item.deadline" class="text-xs text-gray-400">
-                      截止 {{ item.deadline }}
+                      截止 {{ item.deadline }}{{ item.deadline_time ? ' ' + item.deadline_time : '' }}
                     </span>
                     <span v-if="item.repeat_rule" class="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-400">
                       {{ repeatLabel(item) }}
@@ -922,6 +922,39 @@
       </template>
     </van-calendar>
 
+    <!-- Time picker after date selection -->
+    <van-popup v-model:show="showTimePicker" position="bottom" round>
+      <div class="p-4 space-y-4">
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium text-gray-700">选择截止时间</span>
+          <span class="text-sm text-gray-400 cursor-pointer" @click="onTimePickerSkip">不设时间</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="flex-1">
+            <label class="text-xs text-gray-400 mb-1 block">开始时间</label>
+            <input
+              type="time"
+              v-model="timeStartVal"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-base focus:outline-none focus:border-blue-400"
+            />
+          </div>
+          <span class="text-gray-400 mt-5">—</span>
+          <div class="flex-1">
+            <label class="text-xs text-gray-400 mb-1 block">结束时间（可选）</label>
+            <input
+              type="time"
+              v-model="timeEndVal"
+              class="w-full border border-gray-200 rounded-lg px-3 py-2 text-base focus:outline-none focus:border-blue-400"
+            />
+          </div>
+        </div>
+        <div class="flex gap-3">
+          <van-button block plain type="default" size="small" @click="onTimePickerSkip">不设时间</van-button>
+          <van-button block type="primary" size="small" @click="onTimePickerConfirm">确定</van-button>
+        </div>
+      </div>
+    </van-popup>
+
     <!-- Detail Popup -->
     <van-popup
       v-model:show="showDetail"
@@ -1082,7 +1115,7 @@
         <div class="flex items-center gap-4 text-xs text-gray-400">
           <span>创建于 {{ formatDateTime(detailItem.created_at) }}</span>
           <span v-if="detailItem.deadline">
-            截止 {{ detailItem.deadline }}
+            截止 {{ detailItem.deadline }}{{ detailItem.deadline_time ? ' ' + detailItem.deadline_time : '' }}
           </span>
           <span v-if="detailItem.completed_at">
             完成于 {{ formatDateTime(detailItem.completed_at) }}
@@ -1137,6 +1170,7 @@ const vibeTab = ref(0)
 const newTitle = ref('')
 const newHighPriority = ref(false)
 const newDeadline = ref('')
+const newDeadlineTime = ref('')
 const loading = ref(false)
 const adding = ref(false)
 
@@ -1158,6 +1192,13 @@ const calendarMinDate = new Date()
 const showNewDeadlinePicker = ref(false)
 const showEditDeadlinePicker = ref(false)
 const editingTodoId = ref(null)
+
+// Time picker
+const showTimePicker = ref(false)
+const timePickerTarget = ref('')  // 'new' or 'edit'
+const pendingDate = ref('')  // date string waiting for time selection
+const timeStartVal = ref('12:00')
+const timeEndVal = ref('')
 
 // Analysis
 const analyses = ref([])
@@ -1374,10 +1415,11 @@ async function addTodo() {
   if (!newTitle.value.trim()) return
   adding.value = true
   try {
-    await store.createTodo(newTitle.value.trim(), newHighPriority.value, newDeadline.value || null)
+    await store.createTodo(newTitle.value.trim(), newHighPriority.value, newDeadline.value || null, newDeadlineTime.value || null)
     newTitle.value = ''
     newHighPriority.value = false
     newDeadline.value = ''
+    newDeadlineTime.value = ''
     const leafs = allTags.value.filter(t => t.parent_id || !allTags.value.some(c => c.parent_id === t.id))
     selectedTagIds.value = new Set(leafs.map(t => t.id))
   } catch (e) {
@@ -1803,15 +1845,61 @@ function openDeadlinePicker(item) {
 }
 
 function onNewDeadlineConfirm(date) {
-  newDeadline.value = formatDate(date)
   showNewDeadlinePicker.value = false
+  pendingDate.value = formatDate(date)
+  timePickerTarget.value = 'new'
+  timeStartVal.value = '12:00'
+  timeEndVal.value = ''
+  showTimePicker.value = true
 }
 
-async function onEditDeadlineConfirm(date) {
+function onEditDeadlineConfirm(date) {
   showEditDeadlinePicker.value = false
   if (!editingTodoId.value) return
+  pendingDate.value = formatDate(date)
+  timePickerTarget.value = 'edit'
+  // Pre-fill with existing time if editing a todo that already has time
+  const todo = store.pending.find(t => t.id === editingTodoId.value) || store.completed.find(t => t.id === editingTodoId.value)
+  if (todo && todo.deadline_time) {
+    const parts = todo.deadline_time.split('-')
+    timeStartVal.value = parts[0] || '12:00'
+    timeEndVal.value = parts[1] || ''
+  } else {
+    timeStartVal.value = '12:00'
+    timeEndVal.value = ''
+  }
+  showTimePicker.value = true
+}
+
+function onTimePickerConfirm() {
+  const start = timeStartVal.value
+  if (!start) { onTimePickerSkip(); return }
+  const timeStr = timeEndVal.value ? `${start}-${timeEndVal.value}` : start
+  showTimePicker.value = false
+  if (timePickerTarget.value === 'new') {
+    newDeadline.value = pendingDate.value
+    newDeadlineTime.value = timeStr
+  } else if (timePickerTarget.value === 'edit') {
+    applyEditDeadline(pendingDate.value, timeStr)
+  }
+}
+
+function onTimePickerSkip() {
+  showTimePicker.value = false
+  if (timePickerTarget.value === 'new') {
+    newDeadline.value = pendingDate.value
+    newDeadlineTime.value = ''
+  } else if (timePickerTarget.value === 'edit') {
+    applyEditDeadline(pendingDate.value, '')
+  }
+}
+
+async function applyEditDeadline(dateStr, timeStr) {
+  if (!editingTodoId.value) return
   try {
-    await store.updateTodo(editingTodoId.value, { deadline: formatDate(date) })
+    const data = { deadline: dateStr }
+    data.deadline_time = timeStr || ''
+    await store.updateTodo(editingTodoId.value, data)
   } catch (e) {
     showToast('设置失败')
   }
@@ -2102,7 +2190,9 @@ async function finishEditPlan(item) {
 }
 
 async function approvePlan(item) {
-  await store.updateVibeStatus(item.id, 'implementing')
+  const comment = rethinkComments[item.id]?.trim() || null
+  await store.updateVibeStatus(item.id, 'implementing', null, null, comment)
+  if (comment) rethinkComments[item.id] = ''
   showToast('已进入实现阶段')
 }
 

@@ -168,11 +168,12 @@ rebuild_service() {
 # ========== Handle claim signal (new task, new session) ==========
 handle_claim() {
     local file="$1"
-    local task_id title description plan
+    local task_id title description plan comment
     task_id=$(jq -r '.id' "$file")
     title=$(jq -r '.title' "$file")
     description=$(jq -r '.description // empty' "$file")
     plan=$(jq -r '.vibe_plan // empty' "$file")
+    comment=$(jq -r '.comment // empty' "$file")
     rm -f "$file"
 
     log_head "Claim task #$task_id: $title"
@@ -185,6 +186,7 @@ handle_claim() {
 $([ -n "$description" ] && echo "描述: $description")
 实现计划:
 $plan
+$([ -n "$comment" ] && printf '\n用户补充意见:\n%s' "$comment")
 
 请按照计划实现这个任务。完成后:
 1. 确保代码能正常工作

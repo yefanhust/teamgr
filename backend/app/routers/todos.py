@@ -21,6 +21,7 @@ class TodoCreate(BaseModel):
     title: str
     high_priority: bool = False
     deadline: Optional[str] = None  # "YYYY-MM-DD" or null
+    deadline_time: Optional[str] = None  # "HH:MM" or null
 
 
 class TodoUpdate(BaseModel):
@@ -28,6 +29,7 @@ class TodoUpdate(BaseModel):
     description: Optional[str] = None
     high_priority: Optional[bool] = None
     deadline: Optional[str] = None  # "YYYY-MM-DD", "" to clear, or null to skip
+    deadline_time: Optional[str] = None  # "HH:MM", "" to clear, or null to skip
     repeat_rule: Optional[str] = None  # "daily"/"weekly"/"monthly"/"yearly", "" to clear
     repeat_interval: Optional[int] = None
     repeat_include_weekends: Optional[bool] = None
@@ -44,6 +46,7 @@ class VibeStatusUpdate(BaseModel):
     summary: Optional[str] = None  # summary of changes when moving to verifying
     plan: Optional[str] = None  # implementation plan
     commit_id: Optional[str] = None  # git commit hash (passed from vibe-watcher)
+    comment: Optional[str] = None  # user comment when approving plan
 
 
 class TagCreate(BaseModel):
@@ -67,6 +70,7 @@ def _serialize(item: TodoItem) -> dict:
         "description": item.description or "",
         "high_priority": item.high_priority,
         "deadline": item.deadline.isoformat() if item.deadline else None,
+        "deadline_time": item.deadline_time or None,
         "deadline_urgent": _is_deadline_urgent(item.deadline),
         "completed": item.completed,
         "completed_at": item.completed_at.isoformat() if item.completed_at else None,
@@ -233,7 +237,8 @@ async def create_todo(body: TodoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Title cannot be empty")
     dl = _parse_deadline(body.deadline)
     high = body.high_priority or (dl is not None and _is_deadline_urgent(dl))
-    item = TodoItem(title=body.title.strip(), high_priority=high, deadline=dl)
+    dl_time = body.deadline_time if body.deadline_time and dl else None
+    item = TodoItem(title=body.title.strip(), high_priority=high, deadline=dl, deadline_time=dl_time)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -262,8 +267,14 @@ def update_todo(todo_id: int, body: TodoUpdate, db: Session = Depends(get_db)):
     if body.deadline is not None:
         if body.deadline == "":
             item.deadline = None
+            item.deadline_time = None
         else:
             item.deadline = _parse_deadline(body.deadline)
+    if body.deadline_time is not None:
+        if body.deadline_time == "" or not item.deadline:
+            item.deadline_time = None
+        else:
+            item.deadline_time = body.deadline_time
     if body.high_priority is not None:
         item.high_priority = body.high_priority
     # Repeat config
@@ -445,13 +456,16 @@ def update_vibe_status(todo_id: int, body: VibeStatusUpdate, db: Session = Depen
     # planning → implementing: trigger claim-{id} (resume session, implement plan)
     if old_status == "planning" and new_status == "implementing":
         try:
-            _write_queue_file(f"claim-{item.id}.json", {
+            payload = {
                 "action": "claim",
                 "id": item.id,
                 "title": item.title,
                 "description": item.description or "",
                 "vibe_plan": item.vibe_plan or "",
-            })
+            }
+            if body.comment and body.comment.strip():
+                payload["comment"] = body.comment.strip()
+            _write_queue_file(f"claim-{item.id}.json", payload)
         except Exception:
             pass
 

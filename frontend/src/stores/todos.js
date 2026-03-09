@@ -24,8 +24,8 @@ export const useTodosStore = defineStore('todos', () => {
     reqTags.value = res.data
   }
 
-  async function createTodo(title, highPriority = false, deadline = null) {
-    const res = await api.post('/api/todos', { title, high_priority: highPriority, deadline })
+  async function createTodo(title, highPriority = false, deadline = null, deadlineTime = null) {
+    const res = await api.post('/api/todos', { title, high_priority: highPriority, deadline, deadline_time: deadlineTime })
     pending.value.unshift(res.data)
     _sortPending()
     // Refresh tags in case new ones were auto-created
@@ -111,10 +111,11 @@ export const useTodosStore = defineStore('todos', () => {
     reqTags.value = reqTags.value.filter(t => t.id !== tagId)
   }
 
-  async function updateVibeStatus(id, status, summary = null, plan = null) {
+  async function updateVibeStatus(id, status, summary = null, plan = null, comment = null) {
     const payload = { status }
     if (summary !== null) payload.summary = summary
     if (plan !== null) payload.plan = plan
+    if (comment !== null) payload.comment = comment
     const res = await api.put(`/api/todos/${id}/vibe-status`, payload)
     const pidx = pending.value.findIndex(t => t.id === id)
     const cidx = completed.value.findIndex(t => t.id === id)

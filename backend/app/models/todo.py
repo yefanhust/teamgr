@@ -31,6 +31,7 @@ class TodoItem(Base):
     description = Column(Text, default="")
     high_priority = Column(Boolean, default=False)
     deadline = Column(Date, nullable=True)
+    deadline_time = Column(String(11), nullable=True)  # "HH:MM" or "HH:MM-HH:MM" or null
     # Repeat config: rule is "daily"/"weekly"/"monthly"/"yearly", interval is N units
     repeat_rule = Column(String(20), nullable=True)   # null = not repeating
     repeat_interval = Column(Integer, default=1)       # every N days/weeks/months/years

@@ -62,6 +62,7 @@ def _migrate_schema():
         ("entry_logs", "status", "TEXT DEFAULT 'done'"),
         ("tags", "parent_id", "INTEGER REFERENCES tags(id) ON DELETE SET NULL"),
         ("todo_items", "deadline", "DATE"),
+        ("todo_items", "deadline_time", "TEXT"),  # "HH:MM"
         ("todo_items", "description", "TEXT DEFAULT ''"),
         ("todo_items", "repeat_rule", "TEXT"),
         ("todo_items", "repeat_interval", "INTEGER DEFAULT 1"),
