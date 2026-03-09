@@ -47,7 +47,7 @@ def init_db():
         CardDimension, LLMUsageLog, PresetQuestion, ScheduledQueryResult,
         IdeaFragment, IdeaInputLog, IdeaInsight,
     )
-    from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis  # noqa
+    from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis, TodoDurationStats  # noqa
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _seed_default_dimensions()
@@ -77,6 +77,7 @@ def _migrate_schema():
         ("todo_tags", "scope", "TEXT DEFAULT 'todo'"),
         ("todo_analyses", "model_name", "TEXT"),
         ("idea_insights", "model_name", "TEXT DEFAULT ''"),
+        ("entry_logs", "model_name", "TEXT DEFAULT ''"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in migrations:

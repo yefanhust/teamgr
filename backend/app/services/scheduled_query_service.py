@@ -108,6 +108,7 @@ def run_scheduled_queries():
     from app.models.talent import PresetQuestion, ScheduledQueryResult
 
     db = SessionLocal()
+    results_summary = []
     try:
         scheduled = db.query(PresetQuestion).filter(PresetQuestion.is_scheduled == True).all()
         if not scheduled:
@@ -136,10 +137,19 @@ def run_scheduled_queries():
                 db.add(result)
                 db.commit()
                 logger.info(f"Scheduled query completed: '{preset.question[:30]}...'")
+                # Collect for notification
+                results_summary.append(f"**Q: {preset.question}**\n{answer}")
             except Exception as e:
                 logger.error(f"Scheduled query failed for '{preset.question[:30]}...': {e}")
                 db.rollback()
     finally:
         db.close()
+
+    # Send notification
+    if results_summary:
+        from app.services.notification_service import is_trigger_enabled, send_notification_sync
+        if is_trigger_enabled("scheduled_query"):
+            content = "\n\n---\n\n".join(results_summary)
+            send_notification_sync("每日定时查询", content)
 
     logger.info("Scheduled query job finished.")

@@ -158,6 +158,17 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Todo analysis job registered: daily at 03:30")
 
+        # Duration stats: daily at 3:35 AM
+        from app.routers.todos import run_daily_duration_stats
+        _scheduler.add_job(
+            run_daily_duration_stats,
+            "cron",
+            hour=3,
+            minute=35,
+            id="daily_duration_stats",
+        )
+        logger.info("Duration stats job registered: daily at 03:35")
+
         # Repeat todo check: every hour
         from app.routers.todos import check_and_spawn_repeat_todos_sync
         _scheduler.add_job(
@@ -168,6 +179,18 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Repeat todo check job registered: every hour")
 
+        # Deadline reminder: daily at 8:00 AM
+        from app.services.notification_service import is_trigger_enabled
+        if is_trigger_enabled("todo_deadline"):
+            _scheduler.add_job(
+                _send_deadline_reminders,
+                "cron",
+                hour=8,
+                minute=0,
+                id="deadline_reminder",
+            )
+            logger.info("Deadline reminder job registered: daily at 08:00")
+
     logger.info("TeaMgr server started successfully")
 
     yield
@@ -176,6 +199,44 @@ async def lifespan(app: FastAPI):
     if _scheduler:
         _scheduler.shutdown(wait=False)
     logger.info("TeaMgr server shutting down")
+
+
+def _send_deadline_reminders():
+    """Send notification for todos with deadlines today or overdue."""
+    from datetime import date
+    from app.database import SessionLocal
+    from app.models.todo import TodoItem
+    from app.services.notification_service import send_notification_sync
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        items = (
+            db.query(TodoItem)
+            .filter(TodoItem.completed == False, TodoItem.deadline <= today)
+            .order_by(TodoItem.deadline)
+            .all()
+        )
+        if not items:
+            return
+
+        overdue = [i for i in items if i.deadline < today]
+        due_today = [i for i in items if i.deadline == today]
+
+        lines = []
+        if overdue:
+            lines.append(f"**已逾期 ({len(overdue)})**")
+            for item in overdue:
+                lines.append(f"- {item.title}（截止 {item.deadline}）")
+        if due_today:
+            lines.append(f"**今日截止 ({len(due_today)})**")
+            for item in due_today:
+                time_str = f" {item.deadline_time}" if item.deadline_time else ""
+                lines.append(f"- {item.title}{time_str}")
+
+        send_notification_sync("任务截止提醒", "\n".join(lines))
+    finally:
+        db.close()
 
 
 app = FastAPI(

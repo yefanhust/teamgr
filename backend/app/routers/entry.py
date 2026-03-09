@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
 from app.models.talent import Talent, Tag, TalentTag, EntryLog, CardDimension
 from app.middleware.auth_middleware import require_auth
-from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content
+from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content, get_current_model_name
 from app.services.pdf_service import extract_text_from_pdf, pdf_to_images
 from app.services.pinyin_service import get_pinyin_data
 
@@ -228,6 +228,7 @@ async def _process_pdf_entry_bg(entry_log_id: int, talent_id: int,
         if entry_log:
             entry_log.llm_response = json.dumps(result, ensure_ascii=False)
             entry_log.status = "done"
+            entry_log.model_name = get_current_model_name()
 
         t1 = time.monotonic()
         db.commit()
@@ -434,6 +435,7 @@ async def _process_image_entry_bg(entry_log_id: int, talent_id: int,
         if entry_log:
             entry_log.llm_response = json.dumps(result, ensure_ascii=False)
             entry_log.status = "done"
+            entry_log.model_name = get_current_model_name()
 
         db.commit()
         logger.info(f"Image LLM processing done for talent {talent_id}, entry {entry_log_id}, total: {time.monotonic() - t_start:.1f}s")
@@ -565,6 +567,7 @@ async def get_entry_logs(
             "content": log.content,
             "source": log.source,
             "status": log.status or "done",
+            "model_name": log.model_name or "",
             "created_at": log.created_at.isoformat() if log.created_at else "",
         }
         for log in logs

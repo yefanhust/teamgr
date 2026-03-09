@@ -98,6 +98,11 @@ def get_backup_config() -> dict:
     return cfg.get("backup", {"enabled": False, "cron_hour": 3, "cron_minute": 0})
 
 
+def get_notification_config() -> dict:
+    cfg = get_config()
+    return cfg.get("notification", {"enabled": False})
+
+
 # All LLM call types and their display labels
 LLM_CALL_TYPES = {
     "text-entry": "信息录入（文本）",

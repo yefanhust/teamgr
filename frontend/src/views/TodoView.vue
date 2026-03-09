@@ -371,6 +371,24 @@
       <!-- ==================== Tab 3: 效率分析 ==================== -->
       <van-tab title="效率分析">
         <div class="max-w-3xl mx-auto px-4 py-4 space-y-3">
+          <!-- Duration Stats Chart -->
+          <div v-if="durationStats.length > 0" class="bg-white rounded-xl shadow-sm p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm font-medium text-gray-700">各类任务平均耗时</span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-400">{{ durationStats[0]?.generated_date }}</span>
+                <van-button size="mini" plain type="primary" :loading="generatingStats" @click="triggerDurationStats">刷新</van-button>
+              </div>
+            </div>
+            <div class="duration-chart-container" :style="{ height: Math.max(180, durationStats.length * 40 + 60) + 'px' }">
+              <canvas ref="durationChartCanvas"></canvas>
+            </div>
+          </div>
+          <div v-else-if="!analysisStatus" class="bg-white rounded-xl shadow-sm p-4 text-center">
+            <p class="text-gray-400 text-sm mb-3">暂无耗时统计数据</p>
+            <van-button size="small" plain type="primary" icon="chart-trending-o" :loading="generatingStats" @click="triggerDurationStats">生成耗时图表</van-button>
+          </div>
+
           <!-- Streaming / status -->
           <div v-if="analysisStatus" class="bg-gray-50 rounded-lg p-3 text-sm">
             <div class="flex items-center gap-2 mb-1">
@@ -382,19 +400,15 @@
             <div v-if="analysisStream" ref="analysisStreamEl" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(analysisStream)"></div>
           </div>
 
-          <!-- Saved analyses -->
-          <div
-            v-for="(a, idx) in analyses"
-            :key="a.id"
-            class="bg-white rounded-xl shadow-sm p-4"
-          >
+          <!-- Latest analysis (only show 1) -->
+          <div v-if="analyses.length > 0" class="bg-white rounded-xl shadow-sm p-4">
             <div class="flex items-center justify-between mb-2">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs text-purple-500 font-medium">{{ formatDateTime(a.created_at) }}</span>
-                <van-tag v-if="a.model_name" color="#8B5CF6" size="small" plain>{{ a.model_name }}</van-tag>
+                <span class="text-xs text-purple-500 font-medium">{{ formatDateTime(analyses[0].created_at) }}</span>
+                <van-tag v-if="analyses[0].model_name" color="#8B5CF6" size="small" plain>{{ analyses[0].model_name }}</van-tag>
               </div>
               <van-button
-                v-if="idx === 0 && !triggeringAnalysis"
+                v-if="!triggeringAnalysis"
                 size="mini"
                 plain
                 type="primary"
@@ -403,7 +417,7 @@
                 重新生成
               </van-button>
             </div>
-            <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(a.content)"></div>
+            <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(analyses[0].content)"></div>
           </div>
 
           <!-- No analyses yet -->
@@ -1158,7 +1172,10 @@ import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from
 import { useTodosStore } from '../stores/todos'
 import { showToast, showConfirmDialog } from 'vant'
 import api from '../api'
+import { Chart, BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js'
 import VoiceInputButton from '../components/VoiceInputButton.vue'
+
+Chart.register(BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 import TopNavBar from '../components/TopNavBar.vue'
 
 const store = useTodosStore()
@@ -1209,6 +1226,10 @@ const analysisStream = ref('')
 const analysisThinking = ref('')
 const analysisThinkingPre = ref(null)
 const analysisStreamEl = ref(null)
+const durationStats = ref([])
+const durationChartCanvas = ref(null)
+const generatingStats = ref(false)
+let durationChartInstance = null
 
 // Tag filter state (TODO scope)
 const selectedTagIds = ref(new Set())
@@ -1357,7 +1378,7 @@ const vibeCommitted = computed(() =>
 onMounted(async () => {
   loading.value = true
   try {
-    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses()])
+    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats()])
     // Select all leaf tags (TODO scope)
     const leafs = allTags.value.filter(t => t.parent_id || !allTags.value.some(c => c.parent_id === t.id))
     selectedTagIds.value = new Set(leafs.map(t => t.id))
@@ -1389,6 +1410,10 @@ onUnmounted(() => {
   if (vibePollingTimer) {
     clearInterval(vibePollingTimer)
     vibePollingTimer = null
+  }
+  if (durationChartInstance) {
+    durationChartInstance.destroy()
+    durationChartInstance = null
   }
 })
 
@@ -1950,6 +1975,95 @@ async function loadAnalyses() {
   }
 }
 
+async function loadDurationStats() {
+  try {
+    const res = await api.get('/api/todos/duration-stats')
+    durationStats.value = res.data
+    await nextTick()
+    renderDurationChart()
+  } catch (e) {
+    // silent
+  }
+}
+
+async function triggerDurationStats() {
+  generatingStats.value = true
+  try {
+    await api.post('/api/todos/duration-stats/trigger')
+    await loadDurationStats()
+  } catch (e) {
+    showToast('生成失败')
+  } finally {
+    generatingStats.value = false
+  }
+}
+
+function renderDurationChart() {
+  if (!durationChartCanvas.value || durationStats.value.length === 0) return
+
+  if (durationChartInstance) {
+    durationChartInstance.destroy()
+    durationChartInstance = null
+  }
+
+  const stats = [...durationStats.value].sort((a, b) => a.avg_duration_minutes - b.avg_duration_minutes)
+  const labels = stats.map(s => `${s.tag_name} (${s.task_count})`)
+
+  // Convert minutes to hours for display
+  const avgHours = stats.map(s => +(s.avg_duration_minutes / 60).toFixed(1))
+  const stdHours = stats.map(s => +(s.std_dev_minutes / 60).toFixed(1))
+
+  durationChartInstance = new Chart(durationChartCanvas.value, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: '平均耗时 (小时)',
+          data: avgHours,
+          backgroundColor: 'rgba(139, 92, 246, 0.6)',
+          borderColor: 'rgba(139, 92, 246, 1)',
+          borderWidth: 1,
+        },
+        {
+          label: '标准差 (小时)',
+          data: stdHours,
+          backgroundColor: 'rgba(59, 130, 246, 0.4)',
+          borderColor: 'rgba(59, 130, 246, 1)',
+          borderWidth: 1,
+        },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { font: { size: 11 } } },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const v = ctx.raw
+              if (v < 1) return `${ctx.dataset.label}: ${Math.round(v * 60)}分钟`
+              return `${ctx.dataset.label}: ${v}小时`
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          beginAtZero: true,
+          title: { display: true, text: '小时', font: { size: 11 } },
+          ticks: { font: { size: 11 } },
+        },
+        y: {
+          ticks: { font: { size: 11 } },
+        },
+      },
+    },
+  })
+}
+
 async function triggerAnalysis() {
   triggeringAnalysis.value = true
   analysisStream.value = ''
@@ -2496,6 +2610,10 @@ function formatDateTime(isoStr) {
 }
 .analysis-content :deep(strong) {
   color: #374151;
+}
+.duration-chart-container {
+  position: relative;
+  width: 100%;
 }
 .vibe-summary-content :deep(li) {
   margin-left: 0.5rem;

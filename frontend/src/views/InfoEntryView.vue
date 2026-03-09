@@ -54,7 +54,20 @@
       </div>
 
       <!-- Chat Dialog Area -->
-      <div class="flex-1 bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-col min-h-[300px]">
+      <div
+        class="flex-1 bg-white rounded-xl shadow-sm p-4 mb-4 flex flex-col min-h-[300px] relative"
+        @dragover.prevent="onDragOver"
+        @dragenter.prevent="onDragEnter"
+        @dragleave.prevent="onDragLeave"
+        @drop.prevent="handleDrop"
+      >
+        <!-- Drop overlay -->
+        <div
+          v-if="isDragging"
+          class="absolute inset-0 z-30 rounded-xl bg-blue-500/10 border-2 border-dashed border-blue-400 flex items-center justify-center pointer-events-none"
+        >
+          <span class="text-blue-500 text-sm font-medium">松开以上传图片</span>
+        </div>
         <div class="flex-1 overflow-auto space-y-3 mb-4" ref="chatContainer">
           <div v-if="messages.length === 0" class="text-center text-gray-400 py-4">
             <p class="text-sm">选择一个候选人后，输入关于TA的信息</p>
@@ -113,7 +126,7 @@
             v-model="inputText"
             type="textarea"
             :autosize="{ minHeight: 100 }"
-            placeholder="输入候选人的信息（支持粘贴图片）..."
+            placeholder="输入候选人的信息（支持粘贴/拖拽图片）..."
             class="flex-1 entry-input"
             @keypress.enter.exact.prevent="submitEntry"
             @paste="handlePaste"
@@ -236,6 +249,10 @@ const showModelPicker = ref(false)
 const currentModel = ref('')
 const availableModels = ref([])
 
+// Drag-and-drop state
+const isDragging = ref(false)
+let dragCounter = 0
+
 // Track pending entry IDs for polling
 const pendingEntries = ref(new Map()) // entryId -> msgIndex
 let pollTimer = null
@@ -276,7 +293,12 @@ async function onModelSelect(action) {
   }
 }
 
+// Prevent browser default: opening dropped files as a new page
+function preventDragDefault(e) { e.preventDefault() }
+
 onMounted(async () => {
+  document.addEventListener('dragover', preventDragDefault)
+  document.addEventListener('drop', preventDragDefault)
   fetchModelSettings()
   await store.fetchTalents({ page_size: 200 })
 
@@ -293,6 +315,8 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  document.removeEventListener('dragover', preventDragDefault)
+  document.removeEventListener('drop', preventDragDefault)
 })
 
 if (typeof document !== 'undefined') {
@@ -478,6 +502,94 @@ function handlePaste(event) {
   messages.value.push({
     role: 'user',
     content: `粘贴了 ${imageFiles.length} 张图片`,
+    images: imageUrls,
+  })
+
+  const processingIdx = messages.value.length
+  messages.value.push({
+    role: 'assistant',
+    status: 'processing',
+    content: '图片解析中...',
+  })
+
+  nextTick().then(() => scrollToBottom())
+
+  store.uploadImage(selectedTalent.value.id, imageFiles)
+    .then(result => {
+      pendingEntries.value.set(result.entry_id, processingIdx)
+      startPolling()
+    })
+    .catch(e => {
+      messages.value[processingIdx] = {
+        role: 'assistant',
+        status: 'failed',
+        content: '图片上传失败: ' + (e.response?.data?.detail || '未知错误'),
+      }
+    })
+    .finally(() => {
+      uploadingImage.value = false
+    })
+}
+
+function onDragOver(event) {
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragEnter() {
+  dragCounter++
+  isDragging.value = true
+}
+
+function onDragLeave() {
+  dragCounter--
+  if (dragCounter <= 0) {
+    dragCounter = 0
+    isDragging.value = false
+  }
+}
+
+function isImageFile(file) {
+  if (file.type && file.type.startsWith('image/')) return true
+  // Some external apps don't set MIME type — check extension
+  if (/\.(jpe?g|png|gif|webp|bmp|tiff?)$/i.test(file.name)) return true
+  return false
+}
+
+function handleDrop(event) {
+  dragCounter = 0
+  isDragging.value = false
+
+  if (!selectedTalent.value) {
+    showToast('请先选择候选人')
+    return
+  }
+
+  let imageFiles = []
+
+  // Strategy 1: dataTransfer.files
+  if (event.dataTransfer?.files?.length) {
+    for (const f of event.dataTransfer.files) {
+      if (isImageFile(f)) imageFiles.push(f)
+    }
+  }
+
+  // Strategy 2: dataTransfer.items (some apps/browsers only populate items)
+  if (imageFiles.length === 0 && event.dataTransfer?.items) {
+    for (const item of event.dataTransfer.items) {
+      if (item.kind === 'file') {
+        const file = item.getAsFile()
+        if (file && (isImageFile(file) || !file.type)) imageFiles.push(file)
+      }
+    }
+  }
+
+  if (imageFiles.length === 0) return
+
+  uploadingImage.value = true
+  const imageUrls = imageFiles.map(f => URL.createObjectURL(f))
+  messages.value.push({
+    role: 'user',
+    content: `拖入了 ${imageFiles.length} 张图片`,
     images: imageUrls,
   })
 

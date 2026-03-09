@@ -179,12 +179,13 @@
         <div v-else class="space-y-3">
           <div v-for="log in entryLogs" :key="log.id" class="border-l-2 border-gray-200 pl-3 py-1">
             <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-2 text-xs text-gray-400">
-                <van-tag size="small" :type="log.source === 'pdf' ? 'warning' : 'primary'">
-                  {{ log.source === 'pdf' ? 'PDF' : '手动' }}
+              <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+                <van-tag size="small" :type="log.source === 'pdf' ? 'warning' : log.source === 'image' ? 'success' : 'primary'">
+                  {{ log.source === 'pdf' ? 'PDF' : log.source === 'image' ? '图片' : '手动' }}
                 </van-tag>
                 <van-tag v-if="log.status === 'processing'" size="small" type="warning" plain>整理中</van-tag>
                 <van-tag v-if="log.status === 'failed'" size="small" type="danger" plain>失败</van-tag>
+                <van-tag v-if="log.model_name && (log.source === 'pdf' || log.source === 'image')" size="small" plain class="model-tag">{{ log.model_name }}</van-tag>
                 {{ formatDate(log.created_at) }}
               </div>
               <van-icon
@@ -515,5 +516,11 @@ onUnmounted(() => {
 }
 .edit-value-input-wide {
   width: 100%;
+}
+.model-tag {
+  color: #8b5cf6 !important;
+  border-color: #c4b5fd !important;
+  font-family: monospace;
+  font-size: 10px !important;
 }
 </style>

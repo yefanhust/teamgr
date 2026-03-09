@@ -47,6 +47,20 @@ server:
   host: "0.0.0.0"
   port: 8000
 
+# 消息推送配置
+notification:
+  enabled: false
+  channels:
+    wecom_webhook:  # 企业微信群机器人
+      enabled: false
+      webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+  # 推送时机
+  triggers:
+    scheduled_query: true   # 每日定时查询完成后推送
+    idea_insight: true      # 灵感洞见生成后推送
+    todo_analysis: true     # 任务效率分析后推送
+    todo_deadline: true     # 任务截止日期提醒
+
 # 备份调度
 backup:
   enabled: false

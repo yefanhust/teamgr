@@ -47,6 +47,8 @@ export const useTalentStore = defineStore('talent', () => {
 
   async function deleteTalent(id) {
     await api.delete(`/api/talents/${id}`)
+    talents.value = talents.value.filter(t => t.id !== id)
+    total.value = Math.max(0, total.value - 1)
   }
 
   async function searchTalents(q) {

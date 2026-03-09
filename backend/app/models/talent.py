@@ -50,8 +50,9 @@ class EntryLog(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     talent_id = Column(Integer, ForeignKey("talents.id", ondelete="CASCADE"), nullable=False)
     content = Column(Text, nullable=False)
-    source = Column(String(20), default="manual")  # manual / pdf / import
+    source = Column(String(20), default="manual")  # manual / pdf / image / import
     status = Column(String(20), default="done")  # processing / done / failed
+    model_name = Column(String(100), default="")  # LLM model used for parsing (pdf/image)
     llm_response = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
 

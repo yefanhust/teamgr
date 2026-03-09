@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis
+from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis, TodoDurationStats
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/todos", tags=["todos"])
@@ -997,6 +997,13 @@ async def run_daily_todo_analysis():
         db.add(TodoAnalysis(content=result, generated_date=today, model_name=effective_model))
         db.commit()
         logger.info(f"Todo analysis generated for {today} ({count} tasks)")
+
+        # Send notification
+        from app.services.notification_service import is_trigger_enabled, send_notification
+        if is_trigger_enabled("todo_analysis"):
+            # Truncate for notification
+            summary = result[:500] if len(result) > 500 else result
+            await send_notification("任务效率分析", summary)
     except Exception as e:
         logger.error(f"Todo analysis failed: {e}")
     finally:
@@ -1016,15 +1023,97 @@ def run_daily_todo_analysis_sync():
         asyncio.run(run_daily_todo_analysis())
 
 
+# ---- Duration Stats (3:35 AM) ----
+
+def compute_duration_stats(db: Session):
+    """Compute average duration & std-dev per tag from completed todos in last 30 days."""
+    import statistics
+
+    month_ago = datetime.utcnow() - timedelta(days=30)
+    completed_items = (
+        db.query(TodoItem)
+        .filter(TodoItem.completed == True, TodoItem.completed_at >= month_ago,
+                TodoItem.created_at.isnot(None))
+        .all()
+    )
+    if not completed_items:
+        return
+
+    # Group durations (in minutes) by tag name
+    tag_durations: dict[str, list[float]] = {}
+    for item in completed_items:
+        if not item.completed_at or not item.created_at:
+            continue
+        dur_min = (item.completed_at - item.created_at).total_seconds() / 60.0
+        if dur_min < 0:
+            continue
+        tag_names = [t.name for t in item.tags] if item.tags else ["无标签"]
+        for tn in tag_names:
+            tag_durations.setdefault(tn, []).append(dur_min)
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+
+    # Clear old stats
+    db.query(TodoDurationStats).delete()
+
+    for tag_name, durations in tag_durations.items():
+        avg = statistics.mean(durations)
+        std = statistics.stdev(durations) if len(durations) >= 2 else 0.0
+        db.add(TodoDurationStats(
+            tag_name=tag_name,
+            avg_duration_minutes=round(avg, 1),
+            std_dev_minutes=round(std, 1),
+            task_count=len(durations),
+            generated_date=today,
+        ))
+    db.commit()
+    logger.info(f"Duration stats computed for {today}: {len(tag_durations)} tags")
+
+
+def run_daily_duration_stats():
+    """Run by scheduler at 3:35 AM."""
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        compute_duration_stats(db)
+    except Exception as e:
+        logger.error(f"Duration stats computation failed: {e}")
+    finally:
+        db.close()
+
+
 # ---- Analysis API Endpoints ----
+
+@router.get("/duration-stats")
+def get_duration_stats(db: Session = Depends(get_db)):
+    """Get latest duration statistics per tag."""
+    stats = db.query(TodoDurationStats).order_by(TodoDurationStats.avg_duration_minutes.desc()).all()
+    return [
+        {
+            "tag_name": s.tag_name,
+            "avg_duration_minutes": s.avg_duration_minutes,
+            "std_dev_minutes": s.std_dev_minutes,
+            "task_count": s.task_count,
+            "generated_date": s.generated_date,
+        }
+        for s in stats
+    ]
+
+
+@router.post("/duration-stats/trigger")
+def trigger_duration_stats(db: Session = Depends(get_db)):
+    """Manually trigger duration stats computation."""
+    compute_duration_stats(db)
+    return {"ok": True}
+
 
 @router.get("/analysis")
 def get_analyses(db: Session = Depends(get_db)):
-    """Get recent todo analyses."""
+    """Get the latest todo analysis."""
     analyses = (
         db.query(TodoAnalysis)
         .order_by(TodoAnalysis.created_at.desc())
-        .limit(7)
+        .limit(1)
         .all()
     )
     return [

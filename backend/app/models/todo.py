@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, Date, ForeignKey
+from sqlalchemy import Column, Integer, Float, String, Text, Boolean, DateTime, Date, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -59,4 +59,17 @@ class TodoAnalysis(Base):
     content = Column(Text, nullable=False)
     generated_date = Column(String(10), nullable=False)  # "2026-03-06"
     model_name = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TodoDurationStats(Base):
+    """Pre-computed task duration statistics by tag, generated nightly."""
+    __tablename__ = "todo_duration_stats"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tag_name = Column(String(50), nullable=False)
+    avg_duration_minutes = Column(Float, nullable=False)
+    std_dev_minutes = Column(Float, nullable=False, default=0.0)
+    task_count = Column(Integer, nullable=False)
+    generated_date = Column(String(10), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
