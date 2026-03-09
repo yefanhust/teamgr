@@ -798,6 +798,7 @@
                           <van-loading size="10" class="mr-1" />提交中
                         </van-tag>
                         <van-tag v-else color="#8B5CF6" size="small">待验证</van-tag>
+                        <span v-if="item.vibe_verified_at" class="text-xs text-gray-400">{{ formatDateTime(item.vibe_verified_at) }}</span>
                       </div>
                       <!-- Vibe Summary -->
                       <div v-if="item.vibe_summary" class="mt-2 bg-purple-50 rounded-lg p-2 border border-purple-100">
@@ -1302,7 +1303,7 @@ function filterByTags(items) {
   if (selectedTagIds.value.size === 0) return []
   return items.filter(item => {
     const tags = item.tags || []
-    if (tags.length === 0) return true
+    if (tags.length === 0) return false
     return tags.some(tag => selectedTagIds.value.has(tag.id))
   })
 }
@@ -1328,7 +1329,7 @@ function filterByReqTags(items) {
   if (reqSelectedTagIds.value.size === 0) return []
   return items.filter(item => {
     const tags = item.tags || []
-    if (tags.length === 0) return true
+    if (tags.length === 0) return false
     return tags.some(tag => reqSelectedTagIds.value.has(tag.id))
   })
 }
@@ -1369,7 +1370,13 @@ const vibePending = computed(() =>
   store.pending.filter(t => t.vibe_status === 'implementing')
 )
 const vibeVerifying = computed(() =>
-  [...store.pending, ...store.completed].filter(t => t.vibe_status === 'verifying' || t.vibe_status === 'committing')
+  [...store.pending, ...store.completed]
+    .filter(t => t.vibe_status === 'verifying' || t.vibe_status === 'committing')
+    .sort((a, b) => {
+      const ta = a.vibe_verified_at ? new Date(a.vibe_verified_at).getTime() : 0
+      const tb = b.vibe_verified_at ? new Date(b.vibe_verified_at).getTime() : 0
+      return tb - ta
+    })
 )
 const vibeCommitted = computed(() =>
   [...store.pending, ...store.completed].filter(t => t.vibe_status === 'committed')
@@ -2015,20 +2022,24 @@ const errorBarPlugin = {
       const std = stdData[i]
       if (!std) return
       const avg = chart.data.datasets[0].data[i]
-      const xEnd = xScale.getPixelForValue(avg + std)
-      const xStart = xScale.getPixelForValue(avg)
-      // horizontal bar: bar.y is center, bar.height is bar thickness
+      const xLo = xScale.getPixelForValue(Math.max(0, avg - std))
+      const xHi = xScale.getPixelForValue(avg + std)
       const yCenter = bar.y
       const capH = Math.min(bar.height * 0.4, 8)
-      // line from bar end to avg+std
+      // horizontal line from avg-std to avg+std, centered on bar end
       ctx.beginPath()
-      ctx.moveTo(xStart, yCenter)
-      ctx.lineTo(xEnd, yCenter)
+      ctx.moveTo(xLo, yCenter)
+      ctx.lineTo(xHi, yCenter)
       ctx.stroke()
-      // cap at the end
+      // cap at low end
       ctx.beginPath()
-      ctx.moveTo(xEnd, yCenter - capH)
-      ctx.lineTo(xEnd, yCenter + capH)
+      ctx.moveTo(xLo, yCenter - capH)
+      ctx.lineTo(xLo, yCenter + capH)
+      ctx.stroke()
+      // cap at high end
+      ctx.beginPath()
+      ctx.moveTo(xHi, yCenter - capH)
+      ctx.lineTo(xHi, yCenter + capH)
       ctx.stroke()
     })
     ctx.restore()
@@ -2075,7 +2086,7 @@ function renderDurationChart() {
               const avg = ctx.raw
               const std = stdHours[ctx.dataIndex]
               const fmtVal = v => v < 1 ? `${Math.round(v * 60)}分钟` : `${v}小时`
-              return `平均: ${fmtVal(avg)}` + (std ? ` ± ${fmtVal(std)}` : '')
+              return `平均: ${fmtVal(avg)}` + (std ? ` ± ${fmtVal(std)}` : ' (仅1条，无方差)')
             },
           },
         },

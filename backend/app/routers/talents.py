@@ -573,6 +573,7 @@ async def organize_tags(
             from google import genai
             from google.genai import types as genai_types
             from app.config import get_gemini_config, get_model_defaults
+            from app.services.llm_service import get_current_model_name
 
             cfg = get_gemini_config()
             api_key = cfg.get("api_key", "")
@@ -580,7 +581,7 @@ async def organize_tags(
                 yield f"data: {json.dumps({'type': 'error', 'content': 'LLM模型不可用'}, ensure_ascii=False)}\n\n"
                 return
 
-            organize_model = get_model_defaults().get("organize-tags", "gemini-2.5-pro")
+            organize_model = get_model_defaults().get("organize-tags") or get_current_model_name()
             client = genai.Client(api_key=api_key)
 
             # Use queue + thread to avoid blocking the event loop

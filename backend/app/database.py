@@ -74,6 +74,7 @@ def _migrate_schema():
         ("todo_items", "vibe_plan", "TEXT"),
         ("todo_items", "vibe_commit_id", "TEXT"),
         ("todo_items", "vibe_session_id", "TEXT"),
+        ("todo_items", "vibe_verified_at", "DATETIME"),
         ("todo_tags", "scope", "TEXT DEFAULT 'todo'"),
         ("todo_analyses", "model_name", "TEXT"),
         ("idea_insights", "model_name", "TEXT DEFAULT ''"),

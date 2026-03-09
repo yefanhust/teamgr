@@ -43,6 +43,7 @@ class TodoItem(Base):
     vibe_summary = Column(Text, nullable=True)  # summary of changes when moving to verifying
     vibe_commit_id = Column(String(40), nullable=True)  # git commit hash
     vibe_session_id = Column(String(100), nullable=True)  # Claude Code session ID
+    vibe_verified_at = Column(DateTime, nullable=True)  # last time transitioned to "verifying"
     completed = Column(Boolean, default=False)
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

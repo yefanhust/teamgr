@@ -179,7 +179,7 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Repeat todo check job registered: every hour")
 
-        # Deadline reminder: daily at 8:00 AM
+        # Notification jobs: daily at 8:00 AM
         from app.services.notification_service import is_trigger_enabled
         if is_trigger_enabled("todo_deadline"):
             _scheduler.add_job(
@@ -190,6 +190,16 @@ async def lifespan(app: FastAPI):
                 id="deadline_reminder",
             )
             logger.info("Deadline reminder job registered: daily at 08:00")
+
+        if is_trigger_enabled("todo_daily_list"):
+            _scheduler.add_job(
+                _send_daily_task_list,
+                "cron",
+                hour=8,
+                minute=5,
+                id="daily_task_list",
+            )
+            logger.info("Daily task list job registered: daily at 08:05")
 
     logger.info("TeaMgr server started successfully")
 
@@ -235,6 +245,57 @@ def _send_deadline_reminders():
                 lines.append(f"- {item.title}{time_str}")
 
         send_notification_sync("任务截止提醒", "\n".join(lines))
+    finally:
+        db.close()
+
+
+def _send_daily_task_list():
+    """Send a daily summary of all incomplete tasks."""
+    from datetime import date
+    from app.database import SessionLocal
+    from app.models.todo import TodoItem
+    from app.services.notification_service import send_notification_sync
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        items = (
+            db.query(TodoItem)
+            .filter(TodoItem.completed == False)
+            .order_by(TodoItem.high_priority.desc(), TodoItem.deadline.asc().nullslast(), TodoItem.created_at.desc())
+            .all()
+        )
+        if not items:
+            send_notification_sync("每日任务清单", "当前没有待办任务")
+            return
+
+        high_priority = [i for i in items if i.high_priority]
+        due_today = [i for i in items if i.deadline == today and not i.high_priority]
+        others = [i for i in items if not i.high_priority and i.deadline != today]
+
+        lines = [f"共 **{len(items)}** 项待办\n"]
+
+        if high_priority:
+            lines.append(f"**高优先级 ({len(high_priority)})**")
+            for item in high_priority:
+                dl = f"（截止 {item.deadline}）" if item.deadline else ""
+                lines.append(f"- {item.title}{dl}")
+
+        if due_today:
+            lines.append(f"\n**今日截止 ({len(due_today)})**")
+            for item in due_today:
+                time_str = f" {item.deadline_time}" if item.deadline_time else ""
+                lines.append(f"- {item.title}{time_str}")
+
+        if others:
+            lines.append(f"\n**其他待办 ({len(others)})**")
+            for item in others[:15]:
+                dl = f"（截止 {item.deadline}）" if item.deadline else ""
+                lines.append(f"- {item.title}{dl}")
+            if len(others) > 15:
+                lines.append(f"- ... 还有 {len(others) - 15} 项")
+
+        send_notification_sync("每日任务清单", "\n".join(lines))
     finally:
         db.close()
 

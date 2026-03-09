@@ -86,6 +86,7 @@ def _serialize(item: TodoItem) -> dict:
         "vibe_summary": item.vibe_summary or "",
         "vibe_commit_id": item.vibe_commit_id or "",
         "vibe_session_id": item.vibe_session_id or "",
+        "vibe_verified_at": item.vibe_verified_at.isoformat() if item.vibe_verified_at else None,
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in item.tags],
     }
 
@@ -439,6 +440,8 @@ def update_vibe_status(todo_id: int, body: VibeStatusUpdate, db: Session = Depen
         item.completed_at = None
     old_status = item.vibe_status
     item.vibe_status = new_status
+    if new_status == "verifying":
+        item.vibe_verified_at = datetime.utcnow()
     if body.plan is not None:
         item.vibe_plan = body.plan
     if body.summary is not None:
@@ -791,7 +794,7 @@ async def organize_todo_tags(scope: str = "todo", db: Session = Depends(get_db))
                 yield f"data: {json.dumps({'type': 'error', 'content': 'LLM模型不可用'}, ensure_ascii=False)}\n\n"
                 return
 
-            organize_model = get_model_defaults().get("todo-organize-tags", get_model_defaults().get("organize-tags", "gemini-2.5-pro"))
+            organize_model = get_model_defaults().get("todo-organize-tags") or get_model_defaults().get("organize-tags") or get_current_model_name()
             client = genai.Client(api_key=api_key)
 
             queue = asyncio.Queue()
@@ -1029,6 +1032,9 @@ def compute_duration_stats(db: Session):
     """Compute average duration & std-dev per tag from completed todos in last 30 days."""
     import statistics
 
+    # Expire cached ORM state so we pick up any tag renames/reorganisations
+    db.expire_all()
+
     month_ago = datetime.utcnow() - timedelta(days=30)
     completed_items = (
         db.query(TodoItem)
@@ -1039,6 +1045,12 @@ def compute_duration_stats(db: Session):
     if not completed_items:
         return
 
+    # Only include tags that are part of the active hierarchy (child or parent),
+    # excluding orphan tags left after one-click organize/manual deletion.
+    all_tags = db.query(TodoTag).all()
+    parent_ids = {t.parent_id for t in all_tags if t.parent_id}
+    active_tag_names = {t.name for t in all_tags if t.parent_id is not None or t.id in parent_ids}
+
     # Group durations (in minutes) by tag name
     tag_durations: dict[str, list[float]] = {}
     for item in completed_items:
@@ -1047,7 +1059,9 @@ def compute_duration_stats(db: Session):
         dur_min = (item.completed_at - item.created_at).total_seconds() / 60.0
         if dur_min < 0:
             continue
-        tag_names = [t.name for t in item.tags] if item.tags else ["无标签"]
+        tag_names = [t.name for t in item.tags if t.name in active_tag_names] if item.tags else []
+        if not tag_names:
+            tag_names = ["无标签"]
         for tn in tag_names:
             tag_durations.setdefault(tn, []).append(dur_min)
 
@@ -1178,7 +1192,7 @@ async def trigger_analysis_stream(db: Session = Depends(get_db)):
     import asyncio
     import time
     import threading
-    from app.services.llm_service import _record_llm_usage, _get_local_model_config
+    from app.services.llm_service import _record_llm_usage, _get_local_model_config, get_current_model_name
     from app.config import get_gemini_config, get_model_defaults
 
     prompt, count = _build_analysis_prompt(db)
@@ -1193,7 +1207,7 @@ async def trigger_analysis_stream(db: Session = Depends(get_db)):
         t0 = time.monotonic()
 
         # Determine model
-        model_name = get_model_defaults().get("todo-analysis") or get_gemini_config().get("current_model", "gemini-2.5-flash")
+        model_name = get_model_defaults().get("todo-analysis") or get_current_model_name()
         local_cfg = _get_local_model_config(model_name)
 
         try:

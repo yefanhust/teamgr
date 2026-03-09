@@ -60,6 +60,7 @@ notification:
     idea_insight: true      # 灵感洞见生成后推送
     todo_analysis: true     # 任务效率分析后推送
     todo_deadline: true     # 任务截止日期提醒
+    todo_daily_list: true   # 每日任务清单（待办事项汇总）
 
 # 备份调度
 backup:
