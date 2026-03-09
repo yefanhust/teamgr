@@ -43,6 +43,7 @@ class VibeStatusUpdate(BaseModel):
     status: Optional[str] = None  # "requirement", "planning", "implementing", "verifying", "committing", "committed", or null/""
     summary: Optional[str] = None  # summary of changes when moving to verifying
     plan: Optional[str] = None  # implementation plan
+    commit_id: Optional[str] = None  # git commit hash (passed from vibe-watcher)
 
 
 class TagCreate(BaseModel):
@@ -431,11 +432,14 @@ def update_vibe_status(todo_id: int, body: VibeStatusUpdate, db: Session = Depen
         item.vibe_plan = body.plan
     if body.summary is not None:
         item.vibe_summary = body.summary
-    # Auto-detect git commit when marking as committed
+    # Set git commit hash when marking as committed
     if new_status == "committed" and not item.vibe_commit_id:
-        commit_hash, _ = _check_git_commit()
-        if commit_hash:
-            item.vibe_commit_id = commit_hash
+        if body.commit_id:
+            item.vibe_commit_id = body.commit_id
+        else:
+            commit_hash, _ = _check_git_commit()
+            if commit_hash:
+                item.vibe_commit_id = commit_hash
     # Clear commit_id when reverting from committed
     if new_status != "committed":
         item.vibe_commit_id = None

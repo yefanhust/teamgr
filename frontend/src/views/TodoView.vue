@@ -694,6 +694,15 @@
                         >
                           三思而行
                         </van-button>
+                        <van-button
+                          size="small"
+                          plain
+                          icon="delete-o"
+                          type="danger"
+                          @click="deleteVibeTask(item)"
+                        >
+                          删除
+                        </van-button>
                       </div>
                     </div>
                   </div>
@@ -1046,6 +1055,12 @@
         <div v-else-if="detailItem.repeat_rule">
           <label class="text-xs text-gray-400 mb-1 block">重复配置</label>
           <span class="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-400">{{ repeatLabel(detailItem) }}</span>
+        </div>
+
+        <!-- Commit ID -->
+        <div v-if="detailItem.vibe_commit_id" class="flex items-center gap-1.5">
+          <span class="text-xs text-gray-400">Commit</span>
+          <code class="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded font-mono">{{ detailItem.vibe_commit_id.slice(0, 7) }}</code>
         </div>
 
         <!-- Meta -->

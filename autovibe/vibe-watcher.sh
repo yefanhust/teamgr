@@ -139,6 +139,32 @@ run_claude() {
     fi
 }
 
+# ========== Service rebuild ==========
+
+has_code_changes() {
+    cd "$REPO_DIR"
+    # Check tracked file modifications
+    if ! git diff --quiet HEAD 2>/dev/null; then
+        return 0
+    fi
+    # Check untracked files (excluding gitignored)
+    if [ -n "$(git ls-files --others --exclude-standard 2>/dev/null)" ]; then
+        return 0
+    fi
+    return 1
+}
+
+rebuild_service() {
+    log_head "Rebuilding service"
+    cd "$REPO_DIR"
+    local dc="docker-compose -f docker/docker-compose.yml"
+    if $dc rm -sf teamgr && $dc up -d --build teamgr && sleep 2 && $dc exec -T teamgr /workspace/scripts/start_web.sh; then
+        log_ok "Service rebuilt successfully"
+    else
+        log_err "Service rebuild failed"
+    fi
+}
+
 # ========== Handle claim signal (new task, new session) ==========
 handle_claim() {
     local file="$1"
@@ -195,6 +221,10 @@ $([ -n "$description" ] && echo "描述: $description")
     -H 'Content-Type: application/json' \\
     -H 'Authorization: Bearer $TOKEN' \\
     -d '{\"status\": \"verifying\", \"summary\": \"你的变更总结 (Markdown)\"}'"
+    fi
+
+    if has_code_changes; then
+        rebuild_service
     fi
 
     log_ok "Task #$task_id processing complete"
@@ -267,6 +297,10 @@ $feedback
      -H 'Authorization: Bearer $TOKEN' \\
      -d '{\"status\": \"verifying\", \"summary\": \"更新后的变更总结 (Markdown)\"}'"
 
+    if has_code_changes; then
+        rebuild_service
+    fi
+
     log_ok "Improve #$task_id complete"
 }
 
@@ -286,11 +320,12 @@ handle_commit() {
     # Check if there are changes to commit
     if git diff --quiet HEAD 2>/dev/null && [ -z "$(git status --porcelain)" ]; then
         log_warn "No changes to commit, marking as committed"
+        local commit_hash
+        commit_hash=$(git rev-parse HEAD)
         api_call -X PUT "$API/$task_id/vibe-status" \
             -H "Content-Type: application/json" \
-            -d '{"status": "committed"}' > /dev/null
+            -d "{\"status\": \"committed\", \"commit_id\": \"$commit_hash\"}" > /dev/null
         api_call -X POST "$API/$task_id/complete" > /dev/null
-        api_call -X POST "$API/$task_id/check-commit" > /dev/null
         end_session "$task_id"
         return 0
     fi
@@ -333,9 +368,8 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
         log_ok "Push successful: ${C_MAGENTA}${commit_hash:0:8}${C_RESET}"
         api_call -X PUT "$API/$task_id/vibe-status" \
             -H "Content-Type: application/json" \
-            -d '{"status": "committed"}' > /dev/null
+            -d "{\"status\": \"committed\", \"commit_id\": \"$commit_hash\"}" > /dev/null
         api_call -X POST "$API/$task_id/complete" > /dev/null
-        api_call -X POST "$API/$task_id/check-commit" > /dev/null
         log_ok "Task #$task_id committed and pushed"
     else
         log_err "Push failed, reverting to verifying"
@@ -373,8 +407,19 @@ for f in "$QUEUE_DIR"/*.json; do
     process_file "$f"
 done
 
-# Continuous monitoring (process substitution avoids subshell stdout buffering)
-while read filename; do
+# Drain any files that arrived while we were busy processing
+drain_queue() {
+    for f in "$QUEUE_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        log "Draining backlog: $(basename "$f")"
+        process_file "$f"
+    done
+}
+
+# Continuous monitoring — use fd 3 so child processes (docker-compose, claude)
+# don't accidentally consume inotifywait events from stdin
+while read -u 3 filename; do
     sleep 0.5
     process_file "$QUEUE_DIR/$filename"
-done < <(inotifywait -m "$QUEUE_DIR" -e create -e moved_to --format '%f' 2>/dev/null)
+    drain_queue
+done 3< <(inotifywait -m "$QUEUE_DIR" -e create -e moved_to --format '%f' 2>/dev/null)
