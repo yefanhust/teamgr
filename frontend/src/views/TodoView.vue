@@ -274,32 +274,58 @@
               <div v-for="group in tagTree" :key="group.id" class="mb-2">
                 <div class="flex gap-2 flex-wrap items-center">
                   <span class="text-xs text-gray-500 font-medium flex-shrink-0" :style="{ color: group.color }">{{ group.name }}</span>
-                  <van-tag
-                    v-for="tag in group.children"
-                    :key="tag.id"
-                    :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
-                    :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
-                    size="medium"
-                    class="cursor-pointer"
-                    @click="toggleTag(tag.id)"
-                  >
-                    {{ tag.name }}
-                  </van-tag>
+                  <template v-for="tag in group.children" :key="tag.id">
+                    <input
+                      v-if="editingTagId === tag.id"
+                      v-model="editingTagName"
+                      class="edit-tag-input"
+                      @blur="finishEditTag(tag)"
+                      @keypress.enter="finishEditTag(tag)"
+                      @keydown.escape="cancelEditTag"
+                      ref="tagEditInput"
+                    />
+                    <van-tag
+                      v-else
+                      :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
+                      :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
+                      size="medium"
+                      class="cursor-pointer tag-closeable"
+                      closeable
+                      @click="toggleTag(tag.id)"
+                      @dblclick.stop="startEditTag(tag)"
+                      @close.stop="confirmDeleteTag(tag)"
+                    >
+                      {{ tag.name }}
+                    </van-tag>
+                  </template>
                 </div>
               </div>
             </template>
             <div v-if="orphanTags.length > 0" class="flex gap-2 flex-wrap items-center">
-              <van-tag
-                v-for="tag in orphanTags"
-                :key="tag.id"
-                :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
-                :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
-                size="medium"
-                class="cursor-pointer"
-                @click="toggleTag(tag.id)"
-              >
-                {{ tag.name }}
-              </van-tag>
+              <template v-for="tag in orphanTags" :key="tag.id">
+                <input
+                  v-if="editingTagId === tag.id"
+                  v-model="editingTagName"
+                  class="edit-tag-input"
+                  @blur="finishEditTag(tag)"
+                  @keypress.enter="finishEditTag(tag)"
+                  @keydown.escape="cancelEditTag"
+                  ref="tagEditInput"
+                />
+                <van-tag
+                  v-else
+                  :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
+                  :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
+                  size="medium"
+                  class="cursor-pointer tag-closeable"
+                  closeable
+                  @click="toggleTag(tag.id)"
+                  @dblclick.stop="startEditTag(tag)"
+                  @close.stop="confirmDeleteTag(tag)"
+                >
+                  {{ tag.name }}
+                </van-tag>
+              </template>
             </div>
           </div>
 
