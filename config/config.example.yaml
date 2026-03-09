@@ -47,20 +47,48 @@ server:
   host: "0.0.0.0"
   port: 8000
 
-# 消息推送配置
+# 消息推送配置（龙图阁）
 notification:
   enabled: false
-  channels:
-    wecom_webhook:  # 企业微信群机器人
-      enabled: false
+  bots:
+    - id: "default"
+      name: "工作通知"
+      channel: "wecom"                # 渠道类型：wecom
       webhook_url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
-  # 推送时机
-  triggers:
-    scheduled_query: true   # 每日定时查询完成后推送
-    idea_insight: true      # 灵感洞见生成后推送
-    todo_analysis: true     # 任务效率分析后推送
-    todo_deadline: true     # 任务截止日期提醒
-    todo_daily_list: true   # 每日任务清单（待办事项汇总）
+      enabled: false
+      functions:                      # 已订阅的推送功能
+        - trigger: "scheduled_query"  # 每日定时查询
+          cron_hour: 5
+          cron_minute: 0
+        - trigger: "idea_insight"     # 灵感洞见
+          cron_hour: 3
+          cron_minute: 30
+        - trigger: "todo_analysis"    # 任务效率分析
+          cron_hour: 4
+          cron_minute: 0
+        - trigger: "todo_deadline"    # 任务截止提醒
+          cron_hour: 8
+          cron_minute: 0
+        - trigger: "todo_daily_list"  # 每日任务清单
+          cron_hour: 8
+          cron_minute: 5
+
+# 定时任务调度配置
+schedulers:
+  daily_scheduled_queries:     # 每日定时查询（数据生成）
+    cron_hour: 5
+    cron_minute: 0
+  daily_idea_aggregation:      # 灵感洞见聚合
+    cron_hour: 3
+    cron_minute: 0
+  daily_todo_analysis:         # 任务效率分析
+    cron_hour: 3
+    cron_minute: 30
+  daily_duration_stats:        # 任务耗时统计
+    cron_hour: 3
+    cron_minute: 35
+  repeat_todo_check:           # 重复任务检查
+    interval_hours: 1
 
 # 备份调度
 backup:

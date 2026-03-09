@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from app.config import load_config, get_auth_password, get_gemini_config
 from app.database import init_db, SessionLocal
-from app.routers import auth, talents, entry, stats, chat, ideas, todos
+from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification
 from app.services.backup_service import setup_backup_scheduler
 
 # ANSI color codes
@@ -117,7 +117,8 @@ async def lifespan(app: FastAPI):
     # Setup backup scheduler
     _scheduler = setup_backup_scheduler()
 
-    # Setup scheduled query job (daily at 5:00 AM)
+    # Setup scheduled jobs using config
+    from app.config import get_scheduler_config
     from app.services.scheduled_query_service import run_scheduled_queries
     if _scheduler is None:
         try:
@@ -127,79 +128,64 @@ async def lifespan(app: FastAPI):
         except ImportError:
             logger.warning("APScheduler not installed. Scheduled queries disabled.")
     if _scheduler:
+        sc = get_scheduler_config()
+
+        sq = sc.get("daily_scheduled_queries", {})
         _scheduler.add_job(
             run_scheduled_queries,
             "cron",
-            hour=5,
-            minute=0,
+            hour=sq.get("cron_hour", 5),
+            minute=sq.get("cron_minute", 0),
             id="daily_scheduled_queries",
         )
-        logger.info("Scheduled query job registered: daily at 05:00")
+        logger.info(f"Scheduled query job registered: daily at {sq.get('cron_hour', 5):02d}:{sq.get('cron_minute', 0):02d}")
 
-        # Idea insight aggregation: daily at 3:00 AM
         from app.routers.ideas import run_daily_idea_aggregation_sync
+        ia = sc.get("daily_idea_aggregation", {})
         _scheduler.add_job(
             run_daily_idea_aggregation_sync,
             "cron",
-            hour=3,
-            minute=0,
+            hour=ia.get("cron_hour", 3),
+            minute=ia.get("cron_minute", 0),
             id="daily_idea_aggregation",
         )
-        logger.info("Idea aggregation job registered: daily at 03:00")
+        logger.info(f"Idea aggregation job registered: daily at {ia.get('cron_hour', 3):02d}:{ia.get('cron_minute', 0):02d}")
 
-        # Todo efficiency analysis: daily at 3:30 AM
         from app.routers.todos import run_daily_todo_analysis_sync
+        ta = sc.get("daily_todo_analysis", {})
         _scheduler.add_job(
             run_daily_todo_analysis_sync,
             "cron",
-            hour=3,
-            minute=30,
+            hour=ta.get("cron_hour", 3),
+            minute=ta.get("cron_minute", 30),
             id="daily_todo_analysis",
         )
-        logger.info("Todo analysis job registered: daily at 03:30")
+        logger.info(f"Todo analysis job registered: daily at {ta.get('cron_hour', 3):02d}:{ta.get('cron_minute', 30):02d}")
 
-        # Duration stats: daily at 3:35 AM
         from app.routers.todos import run_daily_duration_stats
+        ds = sc.get("daily_duration_stats", {})
         _scheduler.add_job(
             run_daily_duration_stats,
             "cron",
-            hour=3,
-            minute=35,
+            hour=ds.get("cron_hour", 3),
+            minute=ds.get("cron_minute", 35),
             id="daily_duration_stats",
         )
-        logger.info("Duration stats job registered: daily at 03:35")
+        logger.info(f"Duration stats job registered: daily at {ds.get('cron_hour', 3):02d}:{ds.get('cron_minute', 35):02d}")
 
-        # Repeat todo check: every hour
         from app.routers.todos import check_and_spawn_repeat_todos_sync
+        rt = sc.get("repeat_todo_check", {})
         _scheduler.add_job(
             check_and_spawn_repeat_todos_sync,
             "interval",
-            hours=1,
+            hours=rt.get("interval_hours", 1),
             id="repeat_todo_check",
         )
-        logger.info("Repeat todo check job registered: every hour")
+        logger.info(f"Repeat todo check job registered: every {rt.get('interval_hours', 1)} hour(s)")
 
-        # Notification jobs: daily at 8:00 AM
-        from app.services.notification_service import is_trigger_enabled
-        if is_trigger_enabled("todo_deadline"):
-            _scheduler.add_job(
-                _send_deadline_reminders,
-                "cron",
-                hour=8,
-                minute=0,
-                id="deadline_reminder",
-            )
-            logger.info("Deadline reminder job registered: daily at 08:00")
-
-        if is_trigger_enabled("todo_daily_list"):
-            _scheduler.add_job(
-                _send_daily_task_list,
-                "cron",
-                hour=8,
-                minute=5,
-                id="daily_task_list",
-            )
-            logger.info("Daily task list job registered: daily at 08:05")
+        # Notification delivery jobs (龙图阁 — per-bot per-function scheduling)
+        from app.services.notification_scheduler import refresh_notification_jobs
+        refresh_notification_jobs(_scheduler)
 
     logger.info("TeaMgr server started successfully")
 
@@ -209,95 +195,6 @@ async def lifespan(app: FastAPI):
     if _scheduler:
         _scheduler.shutdown(wait=False)
     logger.info("TeaMgr server shutting down")
-
-
-def _send_deadline_reminders():
-    """Send notification for todos with deadlines today or overdue."""
-    from datetime import date
-    from app.database import SessionLocal
-    from app.models.todo import TodoItem
-    from app.services.notification_service import send_notification_sync
-
-    db = SessionLocal()
-    try:
-        today = date.today()
-        items = (
-            db.query(TodoItem)
-            .filter(TodoItem.completed == False, TodoItem.deadline <= today)
-            .order_by(TodoItem.deadline)
-            .all()
-        )
-        if not items:
-            return
-
-        overdue = [i for i in items if i.deadline < today]
-        due_today = [i for i in items if i.deadline == today]
-
-        lines = []
-        if overdue:
-            lines.append(f"**已逾期 ({len(overdue)})**")
-            for item in overdue:
-                lines.append(f"- {item.title}（截止 {item.deadline}）")
-        if due_today:
-            lines.append(f"**今日截止 ({len(due_today)})**")
-            for item in due_today:
-                time_str = f" {item.deadline_time}" if item.deadline_time else ""
-                lines.append(f"- {item.title}{time_str}")
-
-        send_notification_sync("任务截止提醒", "\n".join(lines))
-    finally:
-        db.close()
-
-
-def _send_daily_task_list():
-    """Send a daily summary of all incomplete tasks."""
-    from datetime import date
-    from app.database import SessionLocal
-    from app.models.todo import TodoItem
-    from app.services.notification_service import send_notification_sync
-
-    db = SessionLocal()
-    try:
-        today = date.today()
-        items = (
-            db.query(TodoItem)
-            .filter(TodoItem.completed == False)
-            .order_by(TodoItem.high_priority.desc(), TodoItem.deadline.asc().nullslast(), TodoItem.created_at.desc())
-            .all()
-        )
-        if not items:
-            send_notification_sync("每日任务清单", "当前没有待办任务")
-            return
-
-        high_priority = [i for i in items if i.high_priority]
-        due_today = [i for i in items if i.deadline == today and not i.high_priority]
-        others = [i for i in items if not i.high_priority and i.deadline != today]
-
-        lines = [f"共 **{len(items)}** 项待办\n"]
-
-        if high_priority:
-            lines.append(f"**高优先级 ({len(high_priority)})**")
-            for item in high_priority:
-                dl = f"（截止 {item.deadline}）" if item.deadline else ""
-                lines.append(f"- {item.title}{dl}")
-
-        if due_today:
-            lines.append(f"\n**今日截止 ({len(due_today)})**")
-            for item in due_today:
-                time_str = f" {item.deadline_time}" if item.deadline_time else ""
-                lines.append(f"- {item.title}{time_str}")
-
-        if others:
-            lines.append(f"\n**其他待办 ({len(others)})**")
-            for item in others[:15]:
-                dl = f"（截止 {item.deadline}）" if item.deadline else ""
-                lines.append(f"- {item.title}{dl}")
-            if len(others) > 15:
-                lines.append(f"- ... 还有 {len(others) - 15} 项")
-
-        send_notification_sync("每日任务清单", "\n".join(lines))
-    finally:
-        db.close()
 
 
 app = FastAPI(
@@ -323,6 +220,7 @@ app.include_router(stats.router)
 app.include_router(chat.router)
 app.include_router(ideas.router)
 app.include_router(todos.router)
+app.include_router(notification.router)
 
 
 # Settings API for model switching
@@ -398,6 +296,39 @@ async def update_model_defaults_api(body: dict):
     filtered = {k: v for k, v in defaults.items() if k in LLM_CALL_TYPES}
     set_model_defaults(filtered)
     return {"defaults": filtered}
+
+
+@app.get("/api/settings/schedulers")
+async def get_scheduler_settings():
+    from app.config import SCHEDULER_TYPES, get_scheduler_config
+    return {
+        "scheduler_types": SCHEDULER_TYPES,
+        "schedulers": get_scheduler_config(),
+    }
+
+
+@app.put("/api/settings/schedulers")
+async def update_scheduler_settings(body: dict):
+    from app.config import SCHEDULER_TYPES, save_scheduler_config, get_scheduler_config
+    schedulers = body.get("schedulers", {})
+    # Only keep valid scheduler types
+    filtered = {k: v for k, v in schedulers.items() if k in SCHEDULER_TYPES}
+    save_scheduler_config(filtered)
+
+    # Reschedule running jobs
+    if _scheduler:
+        sc = get_scheduler_config()
+        for job_id, cfg in sc.items():
+            try:
+                if "interval_hours" in cfg:
+                    _scheduler.reschedule_job(job_id, trigger="interval", hours=cfg["interval_hours"])
+                else:
+                    _scheduler.reschedule_job(job_id, trigger="cron", hour=cfg["cron_hour"], minute=cfg["cron_minute"])
+                logger.info(f"Rescheduled job {job_id}: {cfg}")
+            except Exception as e:
+                logger.warning(f"Failed to reschedule {job_id}: {e}")
+
+    return {"schedulers": get_scheduler_config()}
 
 
 # Serve frontend static files

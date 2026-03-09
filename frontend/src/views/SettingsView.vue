@@ -15,9 +15,61 @@
       </div>
 
       <template v-else>
+        <!-- Scheduler Config -->
+        <div class="mb-6" v-if="Object.keys(schedulerTypes).length">
+          <h2 class="text-sm font-bold text-gray-600 mb-1 flex items-center gap-1.5">
+            <span class="inline-block w-1 h-4 rounded-full bg-emerald-500"></span>
+            定时任务
+          </h2>
+          <p class="text-xs text-gray-400 mb-3">配置各定时任务的执行时间，修改后即时生效</p>
+
+          <div class="space-y-2">
+            <div
+              v-for="(label, key) in schedulerTypes"
+              :key="key"
+              class="bg-white rounded-xl shadow-sm p-3 flex items-center justify-between gap-3"
+            >
+              <div class="flex-1 min-w-0">
+                <div class="text-sm font-medium text-gray-800">{{ label }}</div>
+                <div class="text-xs text-gray-400">{{ key }}</div>
+              </div>
+              <!-- Interval type -->
+              <template v-if="schedulers[key]?.interval_hours !== undefined">
+                <div class="flex items-center gap-1">
+                  <span class="text-xs text-gray-500">每</span>
+                  <input
+                    type="number"
+                    :value="schedulers[key].interval_hours"
+                    @change="schedulers[key].interval_hours = Math.max(1, Number($event.target.value) || 1)"
+                    class="w-14 text-sm text-center border border-gray-200 rounded-lg px-1 py-1.5 bg-gray-50"
+                    min="1"
+                    max="24"
+                  />
+                  <span class="text-xs text-gray-500">小时</span>
+                </div>
+              </template>
+              <!-- Cron type -->
+              <template v-else>
+                <span
+                  class="text-sm text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-2 py-1 rounded"
+                  @click="openSchedulerTimePicker(key)"
+                >{{ formatTime(schedulers[key]?.cron_hour, schedulers[key]?.cron_minute) }}</span>
+              </template>
+            </div>
+          </div>
+
+          <div class="mt-4 flex justify-end">
+            <van-button type="primary" size="small" :loading="savingSchedulers" @click="saveSchedulers">Save</van-button>
+          </div>
+        </div>
+
         <!-- Model Defaults -->
         <div class="mb-4">
-          <p class="text-xs text-gray-400 mb-4">Choose a model for each task. Blank means use the global default ({{ globalModel }}).</p>
+          <h2 class="text-sm font-bold text-gray-600 mb-1 flex items-center gap-1.5">
+            <span class="inline-block w-1 h-4 rounded-full bg-violet-500"></span>
+            模型配置
+          </h2>
+          <p class="text-xs text-gray-400 mb-3">Choose a model for each task. Blank means use the global default ({{ globalModel }}).</p>
 
           <div v-for="group in pageGroups" :key="group.page" class="mb-5">
             <h3 class="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-1.5">
@@ -57,6 +109,17 @@
         </div>
       </template>
     </div>
+
+    <!-- Time Picker Popup -->
+    <van-popup v-model:show="showTimePicker" position="bottom" round>
+      <van-time-picker
+        v-model="timePickerValue"
+        title="选择执行时间"
+        :columns-type="['hour', 'minute']"
+        @confirm="onTimeConfirm"
+        @cancel="showTimePicker = false"
+      />
+    </van-popup>
   </div>
 </template>
 
@@ -91,6 +154,14 @@ const defaults = ref({})
 const globalModel = ref('')
 const availableModels = ref([])
 
+// Scheduler config
+const schedulerTypes = ref({})
+const schedulers = ref({})
+const savingSchedulers = ref(false)
+const showTimePicker = ref(false)
+const timePickerValue = ref(['08', '00'])
+const timePickerKey = ref(null)
+
 const networkModels = computed(() => availableModels.value.filter(m => m.location === 'network'))
 const localModels = computed(() => availableModels.value.filter(m => m.location === 'local'))
 
@@ -114,13 +185,41 @@ const pageGroups = computed(() => {
   return result
 })
 
+function formatTime(h, m) {
+  return `${String(h ?? 0).padStart(2, '0')}:${String(m ?? 0).padStart(2, '0')}`
+}
+
+function openSchedulerTimePicker(key) {
+  const cfg = schedulers.value[key] || {}
+  timePickerValue.value = [
+    String(cfg.cron_hour ?? 0).padStart(2, '0'),
+    String(cfg.cron_minute ?? 0).padStart(2, '0'),
+  ]
+  timePickerKey.value = key
+  showTimePicker.value = true
+}
+
+function onTimeConfirm({ selectedValues }) {
+  showTimePicker.value = false
+  const key = timePickerKey.value
+  if (!key || !schedulers.value[key]) return
+  const [hour, minute] = selectedValues.map(Number)
+  schedulers.value[key].cron_hour = hour
+  schedulers.value[key].cron_minute = minute
+}
+
 onMounted(async () => {
   try {
-    const res = await api.get('/api/settings/model-defaults')
-    callTypes.value = res.data.call_types
-    defaults.value = { ...res.data.defaults }
-    globalModel.value = res.data.global_model
-    availableModels.value = res.data.available_models
+    const [modelRes, schedulerRes] = await Promise.all([
+      api.get('/api/settings/model-defaults'),
+      api.get('/api/settings/schedulers'),
+    ])
+    callTypes.value = modelRes.data.call_types
+    defaults.value = { ...modelRes.data.defaults }
+    globalModel.value = modelRes.data.global_model
+    availableModels.value = modelRes.data.available_models
+    schedulerTypes.value = schedulerRes.data.scheduler_types || {}
+    schedulers.value = JSON.parse(JSON.stringify(schedulerRes.data.schedulers || {}))
   } catch (e) {
     showToast('Failed to load settings')
   } finally {
@@ -146,6 +245,19 @@ async function saveDefaults() {
     showToast('Save failed')
   } finally {
     saving.value = false
+  }
+}
+
+async function saveSchedulers() {
+  savingSchedulers.value = true
+  try {
+    const res = await api.put('/api/settings/schedulers', { schedulers: JSON.parse(JSON.stringify(schedulers.value)) })
+    schedulers.value = JSON.parse(JSON.stringify(res.data.schedulers || {}))
+    showToast('Saved')
+  } catch (e) {
+    showToast('Save failed')
+  } finally {
+    savingSchedulers.value = false
   }
 }
 </script>

@@ -1,9 +1,10 @@
 import asyncio
 import logging
+from datetime import date
 
 import httpx
 
-from app.config import get_notification_config
+from app.config import get_notification_config, get_notification_bots
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +32,64 @@ async def send_wecom_webhook(webhook_url: str, title: str, content: str):
             logger.warning(f"WeCom webhook error: {data}")
 
 
+async def send_to_bot(bot: dict, title: str, content: str):
+    """Send a message to a specific bot."""
+    channel = bot.get("channel", "wecom")
+    webhook_url = bot.get("webhook_url", "")
+    if not webhook_url:
+        return
+    if channel == "wecom":
+        await send_wecom_webhook(webhook_url, title, content)
+        logger.info(f"Notification sent to bot '{bot.get('name', bot.get('id'))}': {title}")
+
+
 async def send_notification(title: str, content: str):
+    """Send to all enabled bots (backward compatible)."""
     cfg = get_notification_config()
     if not cfg.get("enabled"):
         return
 
-    channels = cfg.get("channels", {})
-
-    # WeCom webhook
-    wecom = channels.get("wecom_webhook", {})
-    if wecom.get("enabled") and wecom.get("webhook_url"):
+    bots = get_notification_bots()
+    for bot in bots:
+        if not bot.get("enabled"):
+            continue
         try:
-            await send_wecom_webhook(wecom["webhook_url"], title, content)
-            logger.info(f"Notification sent via WeCom: {title}")
+            await send_to_bot(bot, title, content)
         except Exception as e:
-            logger.error(f"WeCom notification failed: {e}")
+            logger.error(f"Notification to bot '{bot.get('name')}' failed: {e}")
+
+
+async def send_notification_for_trigger(trigger_name: str, title: str, content: str):
+    """Send only to bots that have subscribed to this trigger."""
+    cfg = get_notification_config()
+    if not cfg.get("enabled"):
+        return
+
+    bots = get_notification_bots()
+    for bot in bots:
+        if not bot.get("enabled"):
+            continue
+        funcs = bot.get("functions", [])
+        if any(f.get("trigger") == trigger_name for f in funcs):
+            try:
+                await send_to_bot(bot, title, content)
+            except Exception as e:
+                logger.error(f"Trigger notification '{trigger_name}' to bot '{bot.get('name')}' failed: {e}")
 
 
 def is_trigger_enabled(trigger_name: str) -> bool:
+    """Check if any bot has subscribed to this trigger."""
     cfg = get_notification_config()
     if not cfg.get("enabled"):
         return False
-    return cfg.get("triggers", {}).get(trigger_name, False)
+    bots = get_notification_bots()
+    for bot in bots:
+        if not bot.get("enabled"):
+            continue
+        funcs = bot.get("functions", [])
+        if any(f.get("trigger") == trigger_name for f in funcs):
+            return True
+    return False
 
 
 def send_notification_sync(title: str, content: str):
@@ -66,3 +103,184 @@ def send_notification_sync(title: str, content: str):
             loop.run_until_complete(send_notification(title, content))
     except RuntimeError:
         asyncio.run(send_notification(title, content))
+
+
+def send_notification_for_trigger_sync(trigger_name: str, title: str, content: str):
+    if not get_notification_config().get("enabled"):
+        return
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(send_notification_for_trigger(trigger_name, title, content))
+        else:
+            loop.run_until_complete(send_notification_for_trigger(trigger_name, title, content))
+    except RuntimeError:
+        asyncio.run(send_notification_for_trigger(trigger_name, title, content))
+
+
+# ---------------------------------------------------------------------------
+# Content generators for each trigger type
+# ---------------------------------------------------------------------------
+
+def generate_deadline_content() -> tuple[str, str] | None:
+    """Generate deadline reminder content. Returns (title, content) or None."""
+    from app.database import SessionLocal
+    from app.models.todo import TodoItem
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        items = (
+            db.query(TodoItem)
+            .filter(TodoItem.completed == False, TodoItem.deadline <= today)
+            .order_by(TodoItem.deadline)
+            .all()
+        )
+        if not items:
+            return None
+
+        overdue = [i for i in items if i.deadline < today]
+        due_today = [i for i in items if i.deadline == today]
+
+        lines = []
+        if overdue:
+            lines.append(f"**已逾期 ({len(overdue)})**")
+            for item in overdue:
+                lines.append(f"- {item.title}（截止 {item.deadline}）")
+        if due_today:
+            lines.append(f"**今日截止 ({len(due_today)})**")
+            for item in due_today:
+                time_str = f" {item.deadline_time}" if item.deadline_time else ""
+                lines.append(f"- {item.title}{time_str}")
+
+        return "任务截止提醒", "\n".join(lines)
+    finally:
+        db.close()
+
+
+def generate_daily_list_content() -> tuple[str, str] | None:
+    """Generate daily task list content. Returns (title, content) or None."""
+    from app.database import SessionLocal
+    from app.models.todo import TodoItem
+
+    db = SessionLocal()
+    try:
+        today = date.today()
+        items = (
+            db.query(TodoItem)
+            .filter(TodoItem.completed == False)
+            .order_by(TodoItem.high_priority.desc(), TodoItem.deadline.asc().nullslast(), TodoItem.created_at.desc())
+            .all()
+        )
+        if not items:
+            return "每日任务清单", "当前没有待办任务"
+
+        high_priority = [i for i in items if i.high_priority]
+        due_today = [i for i in items if i.deadline == today and not i.high_priority]
+        others = [i for i in items if not i.high_priority and i.deadline != today]
+
+        lines = [f"共 **{len(items)}** 项待办\n"]
+
+        if high_priority:
+            lines.append(f"**高优先级 ({len(high_priority)})**")
+            for item in high_priority:
+                dl = f"（截止 {item.deadline}）" if item.deadline else ""
+                lines.append(f"- {item.title}{dl}")
+
+        if due_today:
+            lines.append(f"\n**今日截止 ({len(due_today)})**")
+            for item in due_today:
+                time_str = f" {item.deadline_time}" if item.deadline_time else ""
+                lines.append(f"- {item.title}{time_str}")
+
+        if others:
+            lines.append(f"\n**其他待办 ({len(others)})**")
+            for item in others[:15]:
+                dl = f"（截止 {item.deadline}）" if item.deadline else ""
+                lines.append(f"- {item.title}{dl}")
+            if len(others) > 15:
+                lines.append(f"- ... 还有 {len(others) - 15} 项")
+
+        return "每日任务清单", "\n".join(lines)
+    finally:
+        db.close()
+
+
+def generate_trigger_content(trigger_name: str) -> tuple[str, str] | None:
+    """Generate content for a given trigger. Returns (title, content) or None."""
+    if trigger_name == "todo_deadline":
+        return generate_deadline_content()
+    elif trigger_name == "todo_daily_list":
+        return generate_daily_list_content()
+    elif trigger_name == "scheduled_query":
+        return _fetch_latest_scheduled_query()
+    elif trigger_name == "idea_insight":
+        return _fetch_latest_idea_insight()
+    elif trigger_name == "todo_analysis":
+        return _fetch_latest_todo_analysis()
+    return None
+
+
+def _fetch_latest_scheduled_query() -> tuple[str, str] | None:
+    from app.database import SessionLocal
+    from app.models.talent import ScheduledQueryResult
+    from datetime import datetime, timedelta
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=1)
+        results = (
+            db.query(ScheduledQueryResult)
+            .filter(ScheduledQueryResult.generated_at >= cutoff)
+            .order_by(ScheduledQueryResult.generated_at.desc())
+            .all()
+        )
+        if not results:
+            return None
+        summaries = []
+        for r in results:
+            summaries.append(f"**Q: {r.question_snapshot}**\n{r.answer}")
+        content = "\n\n---\n\n".join(summaries)
+        return "每日定时查询", content
+    finally:
+        db.close()
+
+
+def _fetch_latest_idea_insight() -> tuple[str, str] | None:
+    from app.database import SessionLocal
+    from app.models.talent import IdeaInsight
+
+    db = SessionLocal()
+    try:
+        insights = (
+            db.query(IdeaInsight)
+            .order_by(IdeaInsight.created_at.desc())
+            .limit(5)
+            .all()
+        )
+        if not insights:
+            return None
+        lines = [ins.content[:200] for ins in insights if ins.content]
+        content = "\n".join(f"- {line}" for line in lines if line)
+        return "灵感洞见", content
+    finally:
+        db.close()
+
+
+def _fetch_latest_todo_analysis() -> tuple[str, str] | None:
+    from app.database import SessionLocal
+    from app.models.todo import TodoAnalysis
+
+    db = SessionLocal()
+    try:
+        analysis = (
+            db.query(TodoAnalysis)
+            .order_by(TodoAnalysis.created_at.desc())
+            .first()
+        )
+        if not analysis:
+            return None
+        summary = analysis.content[:500] if len(analysis.content) > 500 else analysis.content
+        return "任务效率分析", summary
+    finally:
+        db.close()

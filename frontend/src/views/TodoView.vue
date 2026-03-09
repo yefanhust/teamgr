@@ -937,6 +937,11 @@
           </van-tabs>
         </div>
       </van-tab>
+
+      <!-- ==================== Tab 5: 龙图阁 ==================== -->
+      <van-tab title="龙图阁">
+        <MessageHubTab />
+      </van-tab>
     </van-tabs>
 
     <!-- Calendar for new todo deadline -->
@@ -1204,6 +1209,7 @@ import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 Chart.register(BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 import TopNavBar from '../components/TopNavBar.vue'
+import MessageHubTab from '../components/MessageHubTab.vue'
 
 const store = useTodosStore()
 

@@ -44,14 +44,28 @@
       <div class="bg-white rounded-xl shadow-sm p-5">
         <h2 class="text-xl font-bold text-gray-800">{{ talent.name }}</h2>
         <div v-if="talent.tags.length" class="flex gap-1 flex-wrap mt-2">
-          <van-tag
-            v-for="tag in talent.tags"
-            :key="tag.id"
-            :color="tag.color"
-            size="medium"
-          >
-            {{ tag.name }}
-          </van-tag>
+          <template v-for="tag in talent.tags" :key="tag.id">
+            <input
+              v-if="editingTagId === tag.id"
+              v-model="editingTagName"
+              class="edit-tag-input"
+              @blur="finishEditTag(tag)"
+              @keypress.enter="finishEditTag(tag)"
+              @keydown.escape="cancelEditTag"
+              ref="tagEditInput"
+            />
+            <van-tag
+              v-else
+              :color="tag.color"
+              size="medium"
+              class="cursor-pointer tag-closeable"
+              closeable
+              @dblclick.stop="startEditTag(tag)"
+              @close.stop="confirmRemoveTag(tag)"
+            >
+              {{ tag.name }}
+            </van-tag>
+          </template>
         </div>
         <p v-if="talent.summary" class="text-sm text-blue-600 mt-2 italic">
           "{{ talent.summary }}"
@@ -239,6 +253,15 @@
       show-cancel-button
       @confirm="handleDeleteLog"
     />
+
+    <!-- Remove Tag Confirm -->
+    <van-dialog
+      v-model:show="showRemoveTagConfirm"
+      title="移除标签"
+      :message="`确定从该人才卡移除标签「${removingTag?.name}」？`"
+      show-cancel-button
+      @confirm="handleRemoveTag"
+    />
   </div>
 </template>
 
@@ -265,6 +288,11 @@ const updateAvailable = ref(false)
 const editing = ref(null) // { dimKey, path: [], isArray: false }
 const editValue = ref('')
 const editInput = ref(null)
+const editingTagId = ref(null)
+const editingTagName = ref('')
+const tagEditInput = ref(null)
+const showRemoveTagConfirm = ref(false)
+const removingTag = ref(null)
 let pollTimer = null
 
 const actions = [
@@ -458,6 +486,53 @@ async function finishEdit() {
   }
 }
 
+async function startEditTag(tag) {
+  editingTagId.value = tag.id
+  editingTagName.value = tag.name
+  await nextTick()
+  const inputs = tagEditInput.value
+  if (inputs) {
+    const el = Array.isArray(inputs) ? inputs[0] : inputs
+    el?.focus()
+    el?.select()
+  }
+}
+
+function cancelEditTag() {
+  editingTagId.value = null
+  editingTagName.value = ''
+}
+
+async function finishEditTag(tag) {
+  const newName = editingTagName.value.trim()
+  editingTagId.value = null
+  if (!newName || newName === tag.name) return
+  try {
+    await store.updateTag(tag.id, newName, tag.color)
+    talent.value = await store.getTalent(talent.value.id)
+    showToast('标签已更新')
+  } catch (e) {
+    showToast(e.response?.data?.detail || '更新失败')
+  }
+}
+
+function confirmRemoveTag(tag) {
+  removingTag.value = tag
+  showRemoveTagConfirm.value = true
+}
+
+async function handleRemoveTag() {
+  try {
+    const remainingTagIds = talent.value.tags
+      .filter(t => t.id !== removingTag.value.id)
+      .map(t => t.id)
+    talent.value = await store.updateTalent(talent.value.id, { tag_ids: remainingTagIds })
+    showToast('标签已移除')
+  } catch (e) {
+    showToast('移除失败')
+  }
+}
+
 function startPolling() {
   if (pollTimer) return
   pollTimer = setInterval(pollProcessingEntries, 3000)
@@ -522,5 +597,25 @@ onUnmounted(() => {
   border-color: #c4b5fd !important;
   font-family: monospace;
   font-size: 10px !important;
+}
+.tag-closeable :deep(.van-tag__close) {
+  opacity: 0;
+  width: 0;
+  margin-left: 0;
+  transition: all 0.2s;
+}
+.tag-closeable:hover :deep(.van-tag__close) {
+  opacity: 1;
+  width: 12px;
+  margin-left: 2px;
+}
+.edit-tag-input {
+  border: 1.5px solid #3b82f6;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 13px;
+  width: 80px;
+  outline: none;
+  background: #fff;
 }
 </style>

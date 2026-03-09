@@ -93,6 +93,72 @@ def get_local_models_config() -> list:
     return cfg.get("local_models", [])
 
 
+# All scheduler job types with display labels
+SCHEDULER_TYPES = {
+    "daily_scheduled_queries": "每日定时查询（数据生成）",
+    "daily_idea_aggregation": "灵感洞见聚合",
+    "daily_todo_analysis": "任务效率分析",
+    "daily_duration_stats": "任务耗时统计",
+    "repeat_todo_check": "重复任务检查",
+    "daily_backup": "数据库备份",
+}
+
+_SCHEDULER_DEFAULTS = {
+    "daily_scheduled_queries": {"cron_hour": 5, "cron_minute": 0},
+    "daily_idea_aggregation": {"cron_hour": 3, "cron_minute": 0},
+    "daily_todo_analysis": {"cron_hour": 3, "cron_minute": 30},
+    "daily_duration_stats": {"cron_hour": 3, "cron_minute": 35},
+    "repeat_todo_check": {"interval_hours": 1},
+    "daily_backup": {"cron_hour": 3, "cron_minute": 0},
+}
+
+
+def get_scheduler_config() -> dict:
+    """Get scheduler config, merging saved values with defaults."""
+    cfg = get_config()
+    saved = cfg.get("schedulers", {})
+    result = {}
+    for key, defaults in _SCHEDULER_DEFAULTS.items():
+        if key == "daily_backup":
+            backup = cfg.get("backup", {})
+            result[key] = {
+                "cron_hour": backup.get("cron_hour", 3),
+                "cron_minute": backup.get("cron_minute", 0),
+            }
+        else:
+            result[key] = {**defaults, **saved.get(key, {})}
+    return result
+
+
+def save_scheduler_config(schedulers: dict):
+    """Save scheduler config to memory and file."""
+    cfg = get_config()
+
+    # Separate backup config
+    backup_data = schedulers.pop("daily_backup", None)
+    cfg["schedulers"] = schedulers
+
+    if backup_data:
+        backup = cfg.setdefault("backup", {"enabled": False})
+        backup["cron_hour"] = backup_data.get("cron_hour", 3)
+        backup["cron_minute"] = backup_data.get("cron_minute", 0)
+
+    actual_path = _get_config_file_path()
+    if actual_path:
+        try:
+            with open(actual_path, "r", encoding="utf-8") as f:
+                file_cfg = yaml.safe_load(f) or {}
+            file_cfg["schedulers"] = schedulers
+            if backup_data:
+                file_backup = file_cfg.setdefault("backup", {})
+                file_backup["cron_hour"] = backup_data.get("cron_hour", 3)
+                file_backup["cron_minute"] = backup_data.get("cron_minute", 0)
+            with open(actual_path, "w", encoding="utf-8") as f:
+                yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
+        except OSError:
+            pass
+
+
 def get_backup_config() -> dict:
     cfg = get_config()
     return cfg.get("backup", {"enabled": False, "cron_hour": 3, "cron_minute": 0})
@@ -101,6 +167,101 @@ def get_backup_config() -> dict:
 def get_notification_config() -> dict:
     cfg = get_config()
     return cfg.get("notification", {"enabled": False})
+
+
+# Default cron times for triggers (used when migrating old format)
+_DEFAULT_TRIGGER_TIMES = {
+    "scheduled_query": (5, 0),
+    "idea_insight": (3, 30),
+    "todo_analysis": (4, 0),
+    "todo_deadline": (8, 0),
+    "todo_daily_list": (8, 5),
+}
+
+# All available trigger types with display labels
+TRIGGER_TYPES = {
+    "scheduled_query": "每日定时查询",
+    "idea_insight": "灵感洞见推送",
+    "todo_analysis": "任务效率分析",
+    "todo_deadline": "任务截止提醒",
+    "todo_daily_list": "每日任务清单",
+}
+
+
+def get_notification_bots() -> list:
+    """Get notification bots list, with backward compatibility for old format."""
+    cfg = get_notification_config()
+    if not cfg.get("enabled"):
+        return []
+
+    # New format: bots list
+    if "bots" in cfg:
+        return cfg.get("bots", [])
+
+    # Old format: channels + triggers → convert to bots
+    channels = cfg.get("channels", {})
+    triggers = cfg.get("triggers", {})
+    wecom = channels.get("wecom_webhook", {})
+    if wecom.get("enabled") and wecom.get("webhook_url"):
+        functions = []
+        for trigger_name, enabled in triggers.items():
+            if enabled:
+                h, m = _DEFAULT_TRIGGER_TIMES.get(trigger_name, (0, 0))
+                functions.append({
+                    "trigger": trigger_name,
+                    "cron_hour": h,
+                    "cron_minute": m,
+                })
+        return [{
+            "id": "default",
+            "name": "工作通知",
+            "channel": "wecom",
+            "webhook_url": wecom["webhook_url"],
+            "enabled": True,
+            "functions": functions,
+        }]
+
+    return []
+
+
+def _get_config_file_path() -> str | None:
+    """Return the actual config file path, or None if not found."""
+    config_path = os.environ.get("TEAMGR_CONFIG", "/app/config/config.yaml")
+    local_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config", "config.yaml"
+    )
+    if os.path.exists(config_path):
+        return config_path
+    if os.path.exists(local_path):
+        return local_path
+    return None
+
+
+def save_notification_bots(bots: list):
+    """Save notification bots to config (in memory + persist to file)."""
+    cfg = get_config()
+    notif = cfg.setdefault("notification", {"enabled": True})
+    notif["bots"] = bots
+    # Remove old format keys if present
+    notif.pop("channels", None)
+    notif.pop("triggers", None)
+    notif["enabled"] = True
+
+    actual_path = _get_config_file_path()
+    if actual_path:
+        try:
+            with open(actual_path, "r", encoding="utf-8") as f:
+                file_cfg = yaml.safe_load(f) or {}
+            file_notif = file_cfg.setdefault("notification", {})
+            file_notif["enabled"] = True
+            file_notif["bots"] = bots
+            file_notif.pop("channels", None)
+            file_notif.pop("triggers", None)
+            with open(actual_path, "w", encoding="utf-8") as f:
+                yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
+        except OSError:
+            pass
 
 
 # All LLM call types and their display labels
