@@ -675,6 +675,15 @@
                           {{ tag.name }}
                         </van-tag>
                       </div>
+                      <!-- User suggestion input -->
+                      <div class="mt-2">
+                        <textarea
+                          v-model="rethinkComments[item.id]"
+                          class="w-full text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed resize-y min-h-[48px] max-h-[200px] outline-none focus:border-amber-400"
+                          placeholder="输入你对计划的修改建议..."
+                          rows="2"
+                        ></textarea>
+                      </div>
                       <!-- Action buttons -->
                       <div class="flex items-center gap-2 mt-2">
                         <van-button
@@ -691,6 +700,7 @@
                           icon="replay"
                           @click="rethinkPlan(item)"
                           :loading="rethinkingId === item.id"
+                          :disabled="!rethinkComments[item.id]?.trim()"
                         >
                           三思而行
                         </van-button>
@@ -995,8 +1005,13 @@
             </div>
             <span v-if="detailAssignedTags.length === 0 && !showDetailTagPicker" class="text-xs text-gray-400">点击 + 添加标签</span>
           </div>
-          <div v-if="showDetailTagPicker" class="flex gap-1.5 flex-wrap mt-1.5" @click.stop>
-            <div v-if="detailUnassignedTags.length === 0" class="text-xs text-gray-400">暂无更多标签</div>
+          <div v-if="showDetailTagPicker" class="flex gap-1.5 flex-wrap mt-1.5 items-center" @click.stop>
+            <input
+              v-model="newTagName"
+              class="new-tag-input"
+              placeholder="新标签..."
+              @keypress.enter="createAndAddDetailTag"
+            />
             <van-tag
               v-for="tag in detailUnassignedTags"
               :key="tag.id"
@@ -1085,24 +1100,6 @@
       @confirm="handleDeleteTag"
     />
 
-    <!-- Rethink Plan Dialog -->
-    <van-dialog
-      v-model:show="showRethinkDialog"
-      title="三思而行"
-      show-cancel-button
-      confirm-button-text="提交"
-      @confirm="submitRethink"
-    >
-      <div class="px-4 py-3">
-        <p class="text-sm text-gray-500 mb-2">请输入对当前计划的修改意见，Claude 将重新思考：</p>
-        <textarea
-          v-model="rethinkComment"
-          class="w-full border border-gray-300 rounded-lg p-2 text-sm resize-y min-h-[80px] outline-none focus:border-indigo-400"
-          placeholder="你的修改意见..."
-        ></textarea>
-      </div>
-    </van-dialog>
-
     <!-- Improve Dialog -->
     <van-dialog
       v-model:show="showImproveDialog"
@@ -1124,7 +1121,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useTodosStore } from '../stores/todos'
 import { showToast, showConfirmDialog } from 'vant'
 import api from '../api'
@@ -1183,6 +1180,7 @@ const deletingTag = ref(null)
 // Detail tag picker
 const showDetailTagPicker = ref(false)
 const detailTagEditInput = ref(null)
+const newTagName = ref('')
 
 // Tag filter state (requirement scope)
 const reqSelectedTagIds = ref(new Set())
@@ -1332,6 +1330,27 @@ onMounted(async () => {
   }
 })
 
+// Poll for status changes when there are implementing tasks
+let vibePollingTimer = null
+
+watch(vibePending, (tasks) => {
+  if (tasks.length > 0 && !vibePollingTimer) {
+    vibePollingTimer = setInterval(() => {
+      store.fetchAll()
+    }, 5000)
+  } else if (tasks.length === 0 && vibePollingTimer) {
+    clearInterval(vibePollingTimer)
+    vibePollingTimer = null
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  if (vibePollingTimer) {
+    clearInterval(vibePollingTimer)
+    vibePollingTimer = null
+  }
+})
+
 function selectAll() {
   const leafs = [...childTags.value, ...orphanTags.value]
   if (allSelected.value) {
@@ -1443,6 +1462,7 @@ function openDetail(item) {
   detailRepeatInterval.value = item.repeat_interval || 1
   detailRepeatIncludeWeekends.value = !!item.repeat_include_weekends
   showDetailTagPicker.value = false
+  newTagName.value = ''
   showDetail.value = true
 }
 
@@ -1482,6 +1502,25 @@ async function addDetailTag(tagId) {
     detailItem.value = { ...updated }
   } catch (e) {
     showToast('标签添加失败')
+  }
+}
+
+async function createAndAddDetailTag() {
+  const name = newTagName.value.trim()
+  if (!name || !detailItem.value) return
+  const scope = detailItem.value.vibe_status ? 'requirement' : 'todo'
+  try {
+    const tag = await store.createTag(name, scope)
+    newTagName.value = ''
+    await addDetailTag(tag.id)
+    // Refresh tag filter selection to include new tag
+    if (scope === 'requirement') {
+      reqSelectedTagIds.value = new Set([...reqSelectedTagIds.value, tag.id])
+    } else {
+      selectedTagIds.value = new Set([...selectedTagIds.value, tag.id])
+    }
+  } catch (e) {
+    showToast('标签创建失败')
   }
 }
 
@@ -2014,9 +2053,7 @@ const editingPlanId = ref(null)
 const editingPlanContent = ref('')
 const planEditArea = ref(null)
 const rethinkingId = ref(null)
-const showRethinkDialog = ref(false)
-const rethinkComment = ref('')
-const rethinkItem = ref(null)
+const rethinkComments = reactive({})
 
 // --- Vibe improve ---
 const showImproveDialog = ref(false)
@@ -2070,21 +2107,15 @@ async function approvePlan(item) {
 }
 
 async function rethinkPlan(item) {
-  rethinkComment.value = ''
-  rethinkItem.value = item
-  showRethinkDialog.value = true
-}
-
-async function submitRethink() {
-  if (!rethinkComment.value.trim()) {
+  const comment = rethinkComments[item.id]?.trim()
+  if (!comment) {
     showToast('请输入修改意见')
     return
   }
-  const item = rethinkItem.value
-  showRethinkDialog.value = false
   rethinkingId.value = item.id
   try {
-    await api.post(`/api/todos/${item.id}/vibe-replan`, { comment: rethinkComment.value.trim() })
+    await api.post(`/api/todos/${item.id}/vibe-replan`, { comment })
+    rethinkComments[item.id] = ''
     showToast('Claude 正在重新思考...')
     // Poll for plan update
     const oldPlan = item.vibe_plan
@@ -2326,6 +2357,19 @@ function formatDateTime(isoStr) {
 }
 .repeat-interval-input:focus {
   border-color: #8b5cf6;
+}
+.new-tag-input {
+  border: 1px dashed #9ca3af;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  width: 80px;
+  outline: none;
+  background: #fff;
+}
+.new-tag-input:focus {
+  border-color: #3b82f6;
+  border-style: solid;
 }
 .edit-tag-input {
   border: 1.5px solid #3b82f6;

@@ -85,6 +85,16 @@ export const useTodosStore = defineStore('todos', () => {
     return res.data
   }
 
+  async function createTag(name, scope = 'todo', color = '#3B82F6') {
+    const res = await api.post('/api/todos/tags', { name, color, scope })
+    if (scope === 'requirement') {
+      reqTags.value.push(res.data)
+    } else {
+      tags.value.push(res.data)
+    }
+    return res.data
+  }
+
   async function updateTag(tagId, name, color) {
     const res = await api.put(`/api/todos/tags/${tagId}`, { name, color })
     // Update in whichever list it belongs to
@@ -149,6 +159,7 @@ export const useTodosStore = defineStore('todos', () => {
     completeTodo,
     restartTodo,
     deleteTodo,
+    createTag,
     updateTag,
     deleteTag,
     updateVibeStatus,
