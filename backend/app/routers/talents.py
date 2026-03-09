@@ -60,11 +60,25 @@ class TagCreate(BaseModel):
 
 
 def _compute_age_from_birthday(birthday_str: str) -> str:
-    """Compute age from birthday string (YYYY-MM-DD), precise to 2 decimal places."""
+    """Compute age from birthday string, precise to 2 decimal places.
+
+    Supports formats: YYYY-MM-DD, YYYY-MM, YYYY.
+    """
     if not birthday_str:
         return ""
     try:
-        bday = datetime.strptime(birthday_str.strip(), "%Y-%m-%d").date()
+        s = birthday_str.strip()
+        # Try YYYY-MM-DD
+        if re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', s):
+            bday = datetime.strptime(s, "%Y-%m-%d").date()
+        # Try YYYY-MM
+        elif re.match(r'^\d{4}-\d{1,2}$', s):
+            bday = datetime.strptime(s, "%Y-%m").date()  # defaults to 1st
+        # Try YYYY only
+        elif re.match(r'^\d{4}$', s):
+            bday = date(int(s), 1, 1)
+        else:
+            return ""
         today = date.today()
         delta_days = (today - bday).days
         age = delta_days / 365.25
