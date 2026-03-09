@@ -183,16 +183,36 @@
       @select="onSelectFunction"
     />
 
-    <!-- Time Picker Popup -->
-    <van-popup v-model:show="showTimePicker" position="bottom" round>
-      <van-time-picker
-        v-model="timePickerValue"
-        title="选择推送时间"
-        :columns-type="['hour', 'minute']"
-        @confirm="onTimeConfirm"
-        @cancel="showTimePicker = false"
-      />
-    </van-popup>
+    <!-- Time Picker Dialog -->
+    <van-dialog
+      v-model:show="showTimePicker"
+      title="选择推送时间"
+      show-cancel-button
+      @confirm="onTimeDialogConfirm"
+    >
+      <div class="flex items-center justify-center gap-2 py-6">
+        <input
+          ref="hourInput"
+          type="number"
+          :value="timePickerHour"
+          min="0"
+          max="23"
+          class="w-16 h-12 text-center text-2xl font-mono border border-gray-300 rounded-lg focus:outline-none focus:border-blue-400"
+          @input="timePickerHour = clampInt($event.target.value, 0, 23)"
+          @wheel.prevent="timePickerHour = clampInt(timePickerHour + ($event.deltaY < 0 ? 1 : -1), 0, 23)"
+        />
+        <span class="text-2xl font-bold text-gray-500">:</span>
+        <input
+          type="number"
+          :value="timePickerMinute"
+          min="0"
+          max="59"
+          class="w-16 h-12 text-center text-2xl font-mono border border-gray-300 rounded-lg focus:outline-none focus:border-blue-400"
+          @input="timePickerMinute = clampInt($event.target.value, 0, 59)"
+          @wheel.prevent="timePickerMinute = clampInt(timePickerMinute + ($event.deltaY < 0 ? 1 : -1), 0, 59)"
+        />
+      </div>
+    </van-dialog>
   </div>
 </template>
 
@@ -231,8 +251,16 @@ const currentBotForFunction = ref(null)
 
 // Time picker
 const showTimePicker = ref(false)
-const timePickerValue = ref(['08', '00'])
+const timePickerHour = ref(8)
+const timePickerMinute = ref(0)
 const timePickerContext = ref(null) // { bot, trigger, isNew }
+const hourInput = ref(null)
+
+function clampInt(val, min, max) {
+  const n = parseInt(val, 10)
+  if (isNaN(n)) return min
+  return Math.min(max, Math.max(min, n))
+}
 
 // Computed: group bots by channel
 const botsByChannel = computed(() => {
@@ -383,7 +411,8 @@ function onSelectFunction(action) {
   showFunctionSheet.value = false
   const trigger = action.value
   // Show time picker for the new function
-  timePickerValue.value = ['08', '00']
+  timePickerHour.value = 8
+  timePickerMinute.value = 0
   timePickerContext.value = {
     bot: currentBotForFunction.value,
     trigger,
@@ -393,20 +422,18 @@ function onSelectFunction(action) {
 }
 
 function startEditTime(bot, func) {
-  timePickerValue.value = [
-    String(func.cron_hour).padStart(2, '0'),
-    String(func.cron_minute).padStart(2, '0'),
-  ]
+  timePickerHour.value = func.cron_hour
+  timePickerMinute.value = func.cron_minute
   timePickerContext.value = { bot, trigger: func.trigger, isNew: false }
   showTimePicker.value = true
 }
 
-async function onTimeConfirm({ selectedValues }) {
-  showTimePicker.value = false
+async function onTimeDialogConfirm() {
   const ctx = timePickerContext.value
   if (!ctx) return
 
-  const [hour, minute] = selectedValues.map(Number)
+  const hour = timePickerHour.value
+  const minute = timePickerMinute.value
 
   if (ctx.isNew) {
     // Add new function
