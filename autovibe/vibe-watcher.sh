@@ -320,11 +320,9 @@ handle_commit() {
     # Check if there are changes to commit
     if git diff --quiet HEAD 2>/dev/null && [ -z "$(git status --porcelain)" ]; then
         log_warn "No changes to commit, marking as committed"
-        local commit_hash
-        commit_hash=$(git rev-parse HEAD)
         api_call -X PUT "$API/$task_id/vibe-status" \
             -H "Content-Type: application/json" \
-            -d "{\"status\": \"committed\", \"commit_id\": \"$commit_hash\"}" > /dev/null
+            -d '{"status": "committed"}' > /dev/null
         api_call -X POST "$API/$task_id/complete" > /dev/null
         end_session "$task_id"
         return 0

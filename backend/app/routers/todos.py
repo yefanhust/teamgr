@@ -436,10 +436,6 @@ def update_vibe_status(todo_id: int, body: VibeStatusUpdate, db: Session = Depen
     if new_status == "committed" and not item.vibe_commit_id:
         if body.commit_id:
             item.vibe_commit_id = body.commit_id
-        else:
-            commit_hash, _ = _check_git_commit()
-            if commit_hash:
-                item.vibe_commit_id = commit_hash
     # Clear commit_id when reverting from committed
     if new_status != "committed":
         item.vibe_commit_id = None
@@ -470,13 +466,6 @@ def check_commit(todo_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Todo not found")
     if item.vibe_status != "committed":
         raise HTTPException(status_code=400, detail="Task is not in committed status")
-    if item.vibe_commit_id:
-        return _serialize(item)
-    commit_hash, _ = _check_git_commit()
-    if commit_hash:
-        item.vibe_commit_id = commit_hash
-        db.commit()
-        db.refresh(item)
     return _serialize(item)
 
 
