@@ -1998,6 +1998,43 @@ async function triggerDurationStats() {
   }
 }
 
+// Plugin: draw std-dev whisker lines at the end of each bar
+const errorBarPlugin = {
+  id: 'errorBar',
+  afterDatasetsDraw(chart) {
+    const meta = chart.getDatasetMeta(0)
+    if (!meta || !meta.data) return
+    const ctx = chart.ctx
+    const stdData = chart.data.datasets[0]._stdHours
+    if (!stdData) return
+    const xScale = chart.scales.x
+    ctx.save()
+    ctx.strokeStyle = '#374151'
+    ctx.lineWidth = 1.5
+    meta.data.forEach((bar, i) => {
+      const std = stdData[i]
+      if (!std) return
+      const avg = chart.data.datasets[0].data[i]
+      const xEnd = xScale.getPixelForValue(avg + std)
+      const xStart = xScale.getPixelForValue(avg)
+      // horizontal bar: bar.y is center, bar.height is bar thickness
+      const yCenter = bar.y
+      const capH = Math.min(bar.height * 0.4, 8)
+      // line from bar end to avg+std
+      ctx.beginPath()
+      ctx.moveTo(xStart, yCenter)
+      ctx.lineTo(xEnd, yCenter)
+      ctx.stroke()
+      // cap at the end
+      ctx.beginPath()
+      ctx.moveTo(xEnd, yCenter - capH)
+      ctx.lineTo(xEnd, yCenter + capH)
+      ctx.stroke()
+    })
+    ctx.restore()
+  },
+}
+
 function renderDurationChart() {
   if (!durationChartCanvas.value || durationStats.value.length === 0) return
 
@@ -2013,39 +2050,32 @@ function renderDurationChart() {
   const avgHours = stats.map(s => +(s.avg_duration_minutes / 60).toFixed(1))
   const stdHours = stats.map(s => +(s.std_dev_minutes / 60).toFixed(1))
 
+  const dataset = {
+    label: '平均耗时 (小时)',
+    data: avgHours,
+    backgroundColor: 'rgba(139, 92, 246, 0.6)',
+    borderColor: 'rgba(139, 92, 246, 1)',
+    borderWidth: 1,
+    _stdHours: stdHours,
+  }
+
   durationChartInstance = new Chart(durationChartCanvas.value, {
     type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          label: '平均耗时 (小时)',
-          data: avgHours,
-          backgroundColor: 'rgba(139, 92, 246, 0.6)',
-          borderColor: 'rgba(139, 92, 246, 1)',
-          borderWidth: 1,
-        },
-        {
-          label: '标准差 (小时)',
-          data: stdHours,
-          backgroundColor: 'rgba(59, 130, 246, 0.4)',
-          borderColor: 'rgba(59, 130, 246, 1)',
-          borderWidth: 1,
-        },
-      ],
-    },
+    data: { labels, datasets: [dataset] },
+    plugins: [errorBarPlugin],
     options: {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { font: { size: 11 } } },
+        legend: { display: false },
         tooltip: {
           callbacks: {
             label(ctx) {
-              const v = ctx.raw
-              if (v < 1) return `${ctx.dataset.label}: ${Math.round(v * 60)}分钟`
-              return `${ctx.dataset.label}: ${v}小时`
+              const avg = ctx.raw
+              const std = stdHours[ctx.dataIndex]
+              const fmtVal = v => v < 1 ? `${Math.round(v * 60)}分钟` : `${v}小时`
+              return `平均: ${fmtVal(avg)}` + (std ? ` ± ${fmtVal(std)}` : '')
             },
           },
         },
