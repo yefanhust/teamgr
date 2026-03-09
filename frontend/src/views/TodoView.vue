@@ -422,8 +422,8 @@
         </div>
       </van-tab>
 
-      <!-- ==================== Tab 4: 研发进度 ==================== -->
-      <van-tab title="研发进度">
+      <!-- ==================== Tab 4: 研发 ==================== -->
+      <van-tab title="研发">
         <div class="max-w-3xl mx-auto px-4 py-4">
           <van-tabs v-model:active="vibeTab" type="card" class="vibe-tabs">
             <!-- Sub-tab: 需求 -->
