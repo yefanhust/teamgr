@@ -159,7 +159,11 @@ def generate_deadline_content() -> tuple[str, str] | None:
 
 
 def generate_daily_list_content() -> tuple[str, str] | None:
-    """Generate daily task list content. Returns (title, content) or None."""
+    """Generate daily task list content. Returns (title, content) or None.
+    Only includes regular TODO items, excludes vibe (研发) tasks.
+    """
+    from sqlalchemy import or_
+
     from app.database import SessionLocal
     from app.models.todo import TodoItem
 
@@ -168,7 +172,10 @@ def generate_daily_list_content() -> tuple[str, str] | None:
         today = date.today()
         items = (
             db.query(TodoItem)
-            .filter(TodoItem.completed == False)
+            .filter(
+                TodoItem.completed == False,
+                or_(TodoItem.vibe_status.is_(None), TodoItem.vibe_status == ""),
+            )
             .order_by(TodoItem.high_priority.desc(), TodoItem.deadline.asc().nullslast(), TodoItem.created_at.desc())
             .all()
         )

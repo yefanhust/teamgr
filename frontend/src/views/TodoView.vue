@@ -6,7 +6,7 @@
     <!-- Main Tabs -->
     <van-tabs v-model:active="activeTab" sticky offset-top="52" class="todo-tabs">
       <!-- ==================== Tab 1: TODO ==================== -->
-      <van-tab title="TODO">
+      <van-tab title="TODO" :badge="todoPendingCount || ''">
         <div class="max-w-3xl mx-auto px-4 py-4 space-y-4">
           <!-- Tag Filter -->
           <div v-if="allTags.length > 0" class="pb-1">
@@ -1386,6 +1386,9 @@ function reqToggleTag(tagId) {
   reqSelectedTagIds.value = s
 }
 
+const todoPendingCount = computed(() =>
+  store.pending.filter(t => !t.vibe_status).length
+)
 const filteredPending = computed(() => filterByTags(
   store.pending.filter(t => !t.vibe_status)
 ))
