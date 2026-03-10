@@ -247,6 +247,58 @@ def _get_config_file_path() -> str | None:
     return None
 
 
+# ========== Instructions (prompts) — stored in instructions.yaml ==========
+
+_instructions = None
+
+
+def _get_instructions_path() -> str:
+    """Return instructions.yaml path, next to config.yaml."""
+    cfg_path = _get_config_file_path()
+    if cfg_path:
+        return os.path.join(os.path.dirname(cfg_path), "instructions.yaml")
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "config", "instructions.yaml"
+    )
+
+
+def load_instructions() -> dict:
+    global _instructions
+    path = _get_instructions_path()
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            _instructions = yaml.safe_load(f) or {}
+    else:
+        _instructions = {}
+    return _instructions
+
+
+def get_instructions() -> dict:
+    if _instructions is None:
+        return load_instructions()
+    return _instructions
+
+
+def get_instruction(key: str, default: str = "") -> str:
+    return get_instructions().get(key, "") or default
+
+
+def save_instruction(key: str, value: str):
+    instructions = get_instructions()
+    instructions[key] = value
+    path = _get_instructions_path()
+
+    class _BlockDumper(yaml.Dumper):
+        pass
+
+    _BlockDumper.add_representer(str, lambda d, s: d.represent_scalar(
+        'tag:yaml.org,2002:str', s, style='|' if '\n' in s else None
+    ))
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(instructions, f, Dumper=_BlockDumper, allow_unicode=True, default_flow_style=False)
+
+
 def save_notification_bots(bots: list):
     """Save notification bots to config (in memory + persist to file)."""
     cfg = get_config()

@@ -243,23 +243,27 @@
     />
 
     <!-- Organize Prompt Editor -->
-    <van-dialog
+    <van-popup
       v-model:show="showPromptEditor"
-      title="编辑整理规则"
-      show-cancel-button
-      :before-close="handlePromptEditorClose"
+      position="bottom"
+      round
+      :style="{ height: '80vh' }"
     >
-      <div class="px-4 py-2">
+      <div class="flex flex-col h-full">
+        <div class="flex items-center justify-between px-4 py-3 border-b">
+          <van-button size="small" @click="showPromptEditor = false">取消</van-button>
+          <span class="font-medium text-gray-700">编辑整理规则</span>
+          <van-button size="small" type="primary" @click="saveOrganizePrompt">保存</van-button>
+        </div>
         <textarea
           v-model="organizePromptText"
-          class="w-full border rounded-lg p-3 text-sm text-gray-700 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-300"
-          rows="12"
+          class="flex-1 w-full p-4 text-sm text-gray-700 leading-relaxed focus:outline-none resize-none"
         />
-        <div class="flex justify-end mt-1">
+        <div class="flex justify-end px-4 py-2 border-t">
           <span class="text-xs text-gray-400 cursor-pointer hover:text-blue-500" @click="resetOrganizePrompt">恢复默认</span>
         </div>
       </div>
-    </van-dialog>
+    </van-popup>
   </div>
 </template>
 
@@ -483,6 +487,12 @@ function handleSSELine(line) {
       organizeStatusText.value = `思考完成 (${data.elapsed}s)，正在生成分类结果...`
     } else if (data.type === 'chunk') {
       organizeStream.value += data.content
+    } else if (data.type === 'delete') {
+      const count = data.deleted.length
+      organizeStream.value += `\n--- 删除了 ${count} 个标签 ---\n` + data.deleted.map(d => `  ${d}`).join('\n') + '\n'
+    } else if (data.type === 'rename') {
+      const count = data.renames.length
+      organizeStream.value += `\n--- 重命名了 ${count} 个标签 ---\n` + data.renames.map(r => `  ${r}`).join('\n') + '\n'
     } else if (data.type === 'merge') {
       const count = data.merges.length
       organizeStream.value += `\n--- 合并了 ${count} 组相似标签 ---\n` + data.merges.map(m => `  ${m}`).join('\n') + '\n'
@@ -519,22 +529,19 @@ async function openOrganizePromptEditor() {
   }
 }
 
-async function handlePromptEditorClose(action) {
-  if (action === 'confirm') {
-    try {
-      const token = localStorage.getItem('teamgr_token')
-      await fetch('/api/talents/tags/organize-prompt', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ instructions: organizePromptText.value }),
-      })
-      showToast('已保存')
-    } catch (e) {
-      showToast('保存失败')
-      return false
-    }
+async function saveOrganizePrompt() {
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    await fetch('/api/talents/tags/organize-prompt', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ instructions: organizePromptText.value }),
+    })
+    showToast('已保存')
+    showPromptEditor.value = false
+  } catch (e) {
+    showToast('保存失败')
   }
-  return true
 }
 
 function resetOrganizePrompt() {

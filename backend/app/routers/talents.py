@@ -400,6 +400,21 @@ async def create_tag(
     return {"id": tag.id, "name": tag.name, "color": tag.color}
 
 
+@router.get("/tags/organize-prompt")
+async def get_organize_prompt(_=Depends(require_auth)):
+    """Get the current organize prompt instructions."""
+    return {"instructions": _get_organize_instructions(), "default": DEFAULT_ORGANIZE_INSTRUCTIONS}
+
+
+@router.put("/tags/organize-prompt")
+async def save_organize_prompt_endpoint(body: dict, _=Depends(require_auth)):
+    """Save custom organize prompt instructions."""
+    from app.config import save_instruction
+    instructions = body.get("instructions", "").strip()
+    save_instruction("talent_organize_tags", instructions)
+    return {"ok": True}
+
+
 @router.put("/tags/{tag_id}")
 async def update_tag(
     tag_id: int,
@@ -456,8 +471,8 @@ DEFAULT_ORGANIZE_INSTRUCTIONS = """你是一个标签分类专家。请完成以
 
 
 def _get_organize_instructions() -> str:
-    from app.config import get_config
-    return get_config().get("prompts", {}).get("talent_organize_tags", "") or DEFAULT_ORGANIZE_INSTRUCTIONS
+    from app.config import get_instruction
+    return get_instruction("talent_organize_tags", DEFAULT_ORGANIZE_INSTRUCTIONS)
 
 
 def _build_organize_prompt(tag_names: list[str]) -> str:
@@ -469,6 +484,10 @@ def _build_organize_prompt(tag_names: list[str]) -> str:
 
 请严格按以下JSON格式返回，不要包含其他内容：
 {{
+  "deletes": ["需要删除的标签1", "需要删除的标签2"],
+  "renames": [
+    {{"from": "原标签名", "to": "新标签名"}}
+  ],
   "merges": [
     {{"keep": "保留的标签名", "remove": ["待合并标签1", "待合并标签2"]}}
   ],
@@ -481,7 +500,45 @@ def _build_organize_prompt(tag_names: list[str]) -> str:
   ]
 }}
 
+如果没有需要删除的标签，deletes 返回空数组 []。
+如果没有需要重命名的标签，renames 返回空数组 []。
 如果没有需要合并的标签，merges 返回空数组 []。"""
+
+
+def _rename_tags(db: Session, renames: list[dict]) -> list[str]:
+    """Rename tags. Returns list of human-readable descriptions."""
+    descriptions = []
+    for r in renames:
+        old_name = r.get("from", "")
+        new_name = r.get("to", "")
+        if not old_name or not new_name or old_name == new_name:
+            continue
+        tag = db.query(Tag).filter(Tag.name == old_name).first()
+        if not tag:
+            continue
+        existing = db.query(Tag).filter(Tag.name == new_name).first()
+        if existing:
+            continue  # skip if target name already exists
+        tag.name = new_name
+        descriptions.append(f"{old_name} → {new_name}")
+    if descriptions:
+        db.flush()
+    return descriptions
+
+
+def _delete_tags(db: Session, delete_names: list[str]) -> list[str]:
+    """Delete specified tags and their associations. Returns list of deleted tag names."""
+    deleted = []
+    for name in delete_names:
+        tag = db.query(Tag).filter(Tag.name == name).first()
+        if not tag:
+            continue
+        db.query(TalentTag).filter(TalentTag.tag_id == tag.id).delete()
+        db.delete(tag)
+        deleted.append(name)
+    if deleted:
+        db.flush()
+    return deleted
 
 
 def _merge_similar_tags(db: Session, merges: list[dict]) -> list[str]:
@@ -528,6 +585,7 @@ def _merge_similar_tags(db: Session, merges: list[dict]) -> list[str]:
 
 def _apply_tag_hierarchy(db: Session, categories: list[dict]):
     """Apply LLM-generated hierarchy to database tags."""
+    db.expire_all()  # ensure fresh data after deletes/renames/merges
     tags = db.query(Tag).all()
     tag_map = {t.name: t for t in tags}
 
@@ -557,8 +615,25 @@ def _apply_tag_hierarchy(db: Session, categories: list[dict]):
             if child_tag and child_tag.id != parent_tag.id:
                 child_tag.parent_id = parent_tag.id
                 child_tag.color = "#3B82F6"
+            elif not child_tag:
+                logger.warning(f"Tag organize: '{child_name}' in category '{parent_name}' not found in DB, skipping")
 
     db.flush()
+
+    # Fallback: assign uncategorized tags (with talent links) to "未分类"
+    all_tags = db.query(Tag).all()
+    parent_ids = {t.parent_id for t in all_tags if t.parent_id}
+    orphans = [t for t in all_tags if t.parent_id is None and t.id not in parent_ids and len(t.talents) > 0]
+    if orphans:
+        logger.warning(f"Tag organize: {len(orphans)} tags uncategorized, assigning to '未分类': {[t.name for t in orphans]}")
+        fallback = db.query(Tag).filter(Tag.name == "未分类").first()
+        if not fallback:
+            fallback = Tag(name="未分类", color="#9CA3AF", parent_id=None)
+            db.add(fallback)
+            db.flush()
+        for t in orphans:
+            t.parent_id = fallback.id
+        db.flush()
 
     # Clean up orphan tags: no parent, no children, no talent links
     all_tags = db.query(Tag).all()
@@ -569,32 +644,6 @@ def _apply_tag_hierarchy(db: Session, categories: list[dict]):
 
     db.commit()
 
-
-@router.get("/tags/organize-prompt")
-async def get_organize_prompt(_=Depends(require_auth)):
-    """Get the current organize prompt instructions."""
-    return {"instructions": _get_organize_instructions(), "default": DEFAULT_ORGANIZE_INSTRUCTIONS}
-
-
-@router.put("/tags/organize-prompt")
-async def save_organize_prompt(body: dict, _=Depends(require_auth)):
-    """Save custom organize prompt instructions."""
-    import yaml
-    from app.config import get_config, _get_config_file_path
-
-    instructions = body.get("instructions", "").strip()
-    cfg = get_config()
-    cfg.setdefault("prompts", {})["talent_organize_tags"] = instructions
-
-    actual_path = _get_config_file_path()
-    if actual_path:
-        with open(actual_path, "r", encoding="utf-8") as f:
-            file_cfg = yaml.safe_load(f) or {}
-        file_cfg.setdefault("prompts", {})["talent_organize_tags"] = instructions
-        with open(actual_path, "w", encoding="utf-8") as f:
-            yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
-
-    return {"ok": True}
 
 
 @router.post("/tags/organize")
@@ -715,14 +764,28 @@ async def organize_tags(
                 text = re.sub(r'\n?```$', '', text)
             result = json.loads(text)
 
-            # Step 1: Merge similar tags
+            # Step 1: Delete tags
+            deletes = result.get("deletes", [])
+            if deletes:
+                deleted = _delete_tags(db, deletes)
+                if deleted:
+                    yield f"data: {json.dumps({'type': 'delete', 'deleted': deleted}, ensure_ascii=False)}\n\n"
+
+            # Step 2: Rename tags
+            renames = result.get("renames", [])
+            if renames:
+                rename_descs = _rename_tags(db, renames)
+                if rename_descs:
+                    yield f"data: {json.dumps({'type': 'rename', 'renames': rename_descs}, ensure_ascii=False)}\n\n"
+
+            # Step 3: Merge similar tags
             merges = result.get("merges", [])
             if merges:
                 merge_descs = _merge_similar_tags(db, merges)
                 if merge_descs:
                     yield f"data: {json.dumps({'type': 'merge', 'merges': merge_descs}, ensure_ascii=False)}\n\n"
 
-            # Step 2: Apply hierarchy
+            # Step 4: Apply hierarchy
             categories = result.get("categories", [])
             if not categories:
                 yield f"data: {json.dumps({'type': 'error', 'content': '未返回分类结果'}, ensure_ascii=False)}\n\n"
