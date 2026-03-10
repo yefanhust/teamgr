@@ -20,16 +20,60 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     return truncated + "\n..."
 
 
-async def send_wecom_webhook(webhook_url: str, title: str, content: str):
-    md_body = f"## {title}\n{content}" if title else content
-    md_body = _truncate_utf8(md_body, _WECOM_MAX_BYTES)
+def _split_markdown_chunks(text: str, max_bytes: int) -> list[str]:
+    """Split text into chunks that each fit within max_bytes (UTF-8).
+
+    Tries to split at blank lines (paragraph boundaries) first,
+    then falls back to single line boundaries.
+    """
+    if len(text.encode("utf-8")) <= max_bytes:
+        return [text]
+
+    chunks = []
+    current_lines: list[str] = []
+    current_size = 0
+
+    for line in text.split("\n"):
+        line_bytes = len((line + "\n").encode("utf-8"))
+        if current_size + line_bytes > max_bytes and current_lines:
+            chunks.append("\n".join(current_lines))
+            current_lines = []
+            current_size = 0
+        current_lines.append(line)
+        current_size += line_bytes
+
+    if current_lines:
+        chunks.append("\n".join(current_lines))
+
+    return chunks
+
+
+async def _send_wecom_single(client: httpx.AsyncClient, webhook_url: str, md_body: str):
     payload = {"msgtype": "markdown", "markdown": {"content": md_body}}
+    resp = await client.post(webhook_url, json=payload)
+    resp.raise_for_status()
+    data = resp.json()
+    if data.get("errcode") != 0:
+        logger.warning(f"WeCom webhook error: {data}")
+
+
+async def send_wecom_webhook(webhook_url: str, title: str, content: str):
+    # Reserve bytes for title in first chunk and continuation marker
+    header = f"## {title}\n" if title else ""
+    header_bytes = len(header.encode("utf-8"))
+
+    chunks = _split_markdown_chunks(content, _WECOM_MAX_BYTES - header_bytes)
+
     async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.post(webhook_url, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("errcode") != 0:
-            logger.warning(f"WeCom webhook error: {data}")
+        for i, chunk in enumerate(chunks):
+            if i == 0 and title:
+                md_body = f"## {title}\n{chunk}"
+            elif len(chunks) > 1:
+                md_body = f"## {title}（续{i}）\n{chunk}" if title else chunk
+            else:
+                md_body = chunk
+            md_body = _truncate_utf8(md_body, _WECOM_MAX_BYTES)
+            await _send_wecom_single(client, webhook_url, md_body)
 
 
 async def send_to_bot(bot: dict, title: str, content: str):
@@ -291,7 +335,6 @@ def _fetch_latest_todo_analysis() -> tuple[str, str] | None:
         )
         if not analysis:
             return None
-        summary = analysis.content[:500] if len(analysis.content) > 500 else analysis.content
-        return "任务效率分析", summary
+        return "任务效率分析", analysis.content
     finally:
         db.close()

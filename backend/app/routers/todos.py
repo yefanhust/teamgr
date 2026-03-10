@@ -1004,9 +1004,7 @@ async def run_daily_todo_analysis():
         # Send notification
         from app.services.notification_service import is_trigger_enabled, send_notification
         if is_trigger_enabled("todo_analysis"):
-            # Truncate for notification
-            summary = result[:500] if len(result) > 500 else result
-            await send_notification("任务效率分析", summary)
+            await send_notification("任务效率分析", result)
     except Exception as e:
         logger.error(f"Todo analysis failed: {e}")
     finally:
@@ -1147,7 +1145,11 @@ def _build_analysis_prompt(db):
     week_ago = datetime.utcnow() - timedelta(days=7)
     completed_items = (
         db.query(TodoItem)
-        .filter(TodoItem.completed == True, TodoItem.completed_at >= week_ago)
+        .filter(
+            TodoItem.completed == True,
+            TodoItem.completed_at >= week_ago,
+            (TodoItem.vibe_status == None) | (TodoItem.vibe_status == ""),  # 排除研发任务
+        )
         .order_by(TodoItem.completed_at.desc())
         .all()
     )

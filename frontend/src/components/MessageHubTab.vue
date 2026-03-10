@@ -80,12 +80,15 @@
                   :key="func.trigger"
                   class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2"
                 >
-                  <div class="flex items-center gap-2 flex-1 min-w-0">
-                    <span class="text-sm text-gray-700">{{ triggerTypes[func.trigger] || func.trigger }}</span>
-                    <span
-                      class="text-xs text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-1.5 py-0.5 rounded"
-                      @click="startEditTime(bot, func)"
-                    >{{ formatTime(func.cron_hour, func.cron_minute) }}</span>
+                  <div class="flex flex-col flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm text-gray-700">{{ triggerTypes[func.trigger] || func.trigger }}</span>
+                      <span
+                        class="text-xs text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-1.5 py-0.5 rounded"
+                        @click="startEditTime(bot, func)"
+                      >{{ formatTime(func.cron_hour, func.cron_minute) }}</span>
+                    </div>
+                    <span v-if="triggerDescriptions[func.trigger]" class="text-xs text-gray-400 mt-0.5">{{ triggerDescriptions[func.trigger] }}</span>
                   </div>
                   <div class="flex items-center gap-1.5 flex-shrink-0">
                     <van-button
@@ -203,6 +206,9 @@ import { showToast, showConfirmDialog } from 'vant'
 import DrumTimePicker from './DrumTimePicker.vue'
 
 const channelLabels = { wecom: '企微' }
+const triggerDescriptions = {
+  todo_deadline: '提醒已逾期和当天截止的未完成任务',
+}
 
 const loading = ref(true)
 const bots = ref([])
