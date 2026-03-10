@@ -1437,6 +1437,13 @@ onMounted(async () => {
   }
 })
 
+// Auto-refresh duration stats when switching to 效率分析 tab (index 2)
+watch(activeTab, (tab) => {
+  if (tab === 2) {
+    loadDurationStats()
+  }
+})
+
 // Poll for status changes when there are implementing tasks
 let vibePollingTimer = null
 

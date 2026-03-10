@@ -44,6 +44,12 @@
         >
           一键整理
         </van-button>
+        <van-icon
+          name="edit"
+          size="16"
+          class="text-gray-400 cursor-pointer hover:text-blue-500 ml-1"
+          @click="openOrganizePromptEditor"
+        />
       </div>
       <!-- Organize progress -->
       <div v-if="organizing || organizeStatus" class="mb-3 bg-gray-50 rounded-lg p-3 text-sm">
@@ -235,6 +241,25 @@
       show-cancel-button
       @confirm="handleDeleteTag"
     />
+
+    <!-- Organize Prompt Editor -->
+    <van-dialog
+      v-model:show="showPromptEditor"
+      title="编辑整理规则"
+      show-cancel-button
+      :before-close="handlePromptEditorClose"
+    >
+      <div class="px-4 py-2">
+        <textarea
+          v-model="organizePromptText"
+          class="w-full border rounded-lg p-3 text-sm text-gray-700 leading-relaxed focus:outline-none focus:ring-2 focus:ring-blue-300"
+          rows="12"
+        />
+        <div class="flex justify-end mt-1">
+          <span class="text-xs text-gray-400 cursor-pointer hover:text-blue-500" @click="resetOrganizePrompt">恢复默认</span>
+        </div>
+      </div>
+    </van-dialog>
   </div>
 </template>
 
@@ -263,6 +288,9 @@ const showDeleteTagConfirm = ref(false)
 const deletingTag = ref(null)
 const scheduledResults = ref([])
 const organizing = ref(false)
+const showPromptEditor = ref(false)
+const organizePromptText = ref('')
+const organizePromptDefault = ref('')
 const organizeStream = ref('')
 const thinkingStream = ref('')
 const thinkingPre = ref(null)
@@ -474,6 +502,43 @@ function handleSSELine(line) {
   } catch (e) {
     console.error('SSE parse error:', e, 'line:', line)
   }
+}
+
+async function openOrganizePromptEditor() {
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    const res = await fetch('/api/talents/tags/organize-prompt', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    const data = await res.json()
+    organizePromptText.value = data.instructions
+    organizePromptDefault.value = data.default
+    showPromptEditor.value = true
+  } catch (e) {
+    showToast('加载失败')
+  }
+}
+
+async function handlePromptEditorClose(action) {
+  if (action === 'confirm') {
+    try {
+      const token = localStorage.getItem('teamgr_token')
+      await fetch('/api/talents/tags/organize-prompt', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ instructions: organizePromptText.value }),
+      })
+      showToast('已保存')
+    } catch (e) {
+      showToast('保存失败')
+      return false
+    }
+  }
+  return true
+}
+
+function resetOrganizePrompt() {
+  organizePromptText.value = organizePromptDefault.value
 }
 
 async function organizeTags() {

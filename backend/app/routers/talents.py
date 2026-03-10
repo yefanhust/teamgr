@@ -439,8 +439,7 @@ async def delete_tag(
     return {"message": "已删除"}
 
 
-def _build_organize_prompt(tag_names: list[str]) -> str:
-    return f"""你是一个标签分类专家。请完成以下两个任务：
+DEFAULT_ORGANIZE_INSTRUCTIONS = """你是一个标签分类专家。请完成以下两个任务：
 
 ## 任务1：合并同义标签
 找出语义相同或高度相似的标签组，选择最简洁准确的一个作为保留名，其余作为待合并项。
@@ -453,7 +452,17 @@ def _build_organize_prompt(tag_names: list[str]) -> str:
 1. 一级标签是新创建的大分类名称（如"技术方向"、"学历背景"、"个人特质"等），数量控制在3-8个
 2. 每个保留的标签都必须归入某个一级标签下作为二级标签
 3. 一级标签名称要简洁、有概括性
-4. 所有保留的标签都必须被分配，不能遗漏
+4. 所有保留的标签都必须被分配，不能遗漏""".strip()
+
+
+def _get_organize_instructions() -> str:
+    from app.config import get_config
+    return get_config().get("prompts", {}).get("talent_organize_tags", "") or DEFAULT_ORGANIZE_INSTRUCTIONS
+
+
+def _build_organize_prompt(tag_names: list[str]) -> str:
+    instructions = _get_organize_instructions()
+    return f"""{instructions}
 
 现有标签列表：
 {json.dumps(tag_names, ensure_ascii=False)}
@@ -559,6 +568,33 @@ def _apply_tag_hierarchy(db: Session, categories: list[dict]):
             db.delete(t)
 
     db.commit()
+
+
+@router.get("/tags/organize-prompt")
+async def get_organize_prompt(_=Depends(require_auth)):
+    """Get the current organize prompt instructions."""
+    return {"instructions": _get_organize_instructions(), "default": DEFAULT_ORGANIZE_INSTRUCTIONS}
+
+
+@router.put("/tags/organize-prompt")
+async def save_organize_prompt(body: dict, _=Depends(require_auth)):
+    """Save custom organize prompt instructions."""
+    import yaml
+    from app.config import get_config, _get_config_file_path
+
+    instructions = body.get("instructions", "").strip()
+    cfg = get_config()
+    cfg.setdefault("prompts", {})["talent_organize_tags"] = instructions
+
+    actual_path = _get_config_file_path()
+    if actual_path:
+        with open(actual_path, "r", encoding="utf-8") as f:
+            file_cfg = yaml.safe_load(f) or {}
+        file_cfg.setdefault("prompts", {})["talent_organize_tags"] = instructions
+        with open(actual_path, "w", encoding="utf-8") as f:
+            yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
+
+    return {"ok": True}
 
 
 @router.post("/tags/organize")
