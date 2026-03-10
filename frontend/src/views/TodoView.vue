@@ -866,6 +866,15 @@
                         >
                           改进
                         </van-button>
+                        <van-button
+                          size="small"
+                          type="danger"
+                          plain
+                          icon="delete-o"
+                          @click.stop="deleteVibeTask(item)"
+                        >
+                          删除
+                        </van-button>
                       </div>
                     </div>
                   </div>
@@ -940,7 +949,10 @@
 
       <!-- ==================== Tab 5: 龙图阁 ==================== -->
       <van-tab title="龙图阁">
-        <MessageHubTab />
+        <div class="text-center py-12 text-gray-400">
+          <div class="text-4xl mb-3">📜</div>
+          <p class="text-sm">敬请期待</p>
+        </div>
       </van-tab>
     </van-tabs>
 
@@ -1212,7 +1224,6 @@ import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 Chart.register(BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 import TopNavBar from '../components/TopNavBar.vue'
-import MessageHubTab from '../components/MessageHubTab.vue'
 
 const store = useTodosStore()
 

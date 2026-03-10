@@ -1,5 +1,5 @@
 <template>
-  <div class="max-w-3xl mx-auto px-4 py-4">
+  <div>
     <!-- Loading -->
     <div v-if="loading" class="flex justify-center py-12">
       <van-loading size="36px">加载中...</van-loading>

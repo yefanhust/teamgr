@@ -63,6 +63,16 @@
           </div>
         </div>
 
+        <!-- 企微推送设置 -->
+        <div class="mb-6">
+          <h2 class="text-sm font-bold text-gray-600 mb-1 flex items-center gap-1.5">
+            <span class="inline-block w-1 h-4 rounded-full bg-amber-500"></span>
+            企微推送
+          </h2>
+          <p class="text-xs text-gray-400 mb-3">管理推送机器人及订阅功能</p>
+          <MessageHubTab />
+        </div>
+
         <!-- Model Defaults -->
         <div class="mb-4">
           <h2 class="text-sm font-bold text-gray-600 mb-1 flex items-center gap-1.5">
@@ -128,6 +138,7 @@ import { ref, computed, onMounted } from 'vue'
 import api from '../api'
 import { showToast } from 'vant'
 import DrumTimePicker from '../components/DrumTimePicker.vue'
+import MessageHubTab from '../components/MessageHubTab.vue'
 
 // Group call types by first-level page
 const PAGE_GROUPS = [
