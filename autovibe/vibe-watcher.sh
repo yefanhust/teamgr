@@ -165,6 +165,27 @@ rebuild_service() {
     fi
 }
 
+# ========== Fallback: ensure Claude updated task status ==========
+# If Claude finishes but forgets to call the API, we update the status ourselves.
+ensure_status_left() {
+    local task_id="$1"
+    local expected_status="$2"  # the status task should NOT still be in
+    local fallback_status="$3"  # the status to set if still stuck
+    local fallback_json="$4"    # extra JSON fields (e.g. summary)
+
+    local current
+    current=$(api_call -s "$API/$task_id" | jq -r '.vibe_status // empty')
+
+    if [ "$current" = "$expected_status" ]; then
+        log_warn "Task #$task_id still in '$expected_status' after Claude finished — applying fallback → '$fallback_status'"
+        api_call -X PUT "$API/$task_id/vibe-status" \
+            -H "Content-Type: application/json" \
+            -d "$fallback_json" > /dev/null
+        return 0
+    fi
+    return 1
+}
+
 # ========== Handle claim signal (new task, new session) ==========
 handle_claim() {
     local file="$1"
@@ -224,6 +245,12 @@ $([ -n "$description" ] && echo "描述: $description")
     -H 'Authorization: Bearer $TOKEN' \\
     -d '{\"status\": \"verifying\", \"summary\": \"你的变更总结 (Markdown)\"}'"
     fi
+
+    # Fallback: if Claude forgot to update status, do it ourselves
+    local result_text=""
+    [ -s "$CLAUDE_OUTPUT_FILE" ] && result_text=$(cat "$CLAUDE_OUTPUT_FILE")
+    ensure_status_left "$task_id" "implementing" "verifying" \
+        "{\"status\": \"verifying\", \"summary\": \"$(echo "$result_text" | head -c 500 | sed 's/"/\\"/g' || echo '(auto-fallback: Claude 未更新状态)')\"}"
 
     if has_code_changes; then
         rebuild_service
@@ -298,6 +325,12 @@ $feedback
      -H 'Content-Type: application/json' \\
      -H 'Authorization: Bearer $TOKEN' \\
      -d '{\"status\": \"verifying\", \"summary\": \"更新后的变更总结 (Markdown)\"}'"
+
+    # Fallback: if Claude forgot to update status, do it ourselves
+    local result_text=""
+    [ -s "$CLAUDE_OUTPUT_FILE" ] && result_text=$(cat "$CLAUDE_OUTPUT_FILE")
+    ensure_status_left "$task_id" "implementing" "verifying" \
+        "{\"status\": \"verifying\", \"summary\": \"$(echo "$result_text" | head -c 500 | sed 's/"/\\"/g' || echo '(auto-fallback: Claude 未更新状态)')\"}"
 
     if has_code_changes; then
         rebuild_service
