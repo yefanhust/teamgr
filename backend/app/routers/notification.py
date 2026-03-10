@@ -197,10 +197,12 @@ async def test_trigger(bot_id: str, trigger: str):
         raise HTTPException(status_code=400, detail=f"Unknown trigger: {trigger}")
     bots = get_notification_bots()
     bot = _find_bot(bots, bot_id)
-    result = generate_trigger_content(trigger, test_mode=True)
+    result = generate_trigger_content(trigger)
     if result is None:
-        raise HTTPException(status_code=404, detail="No content available for this trigger")
-    title, content = result
+        # No real content available; send a placeholder so users can verify the channel works
+        title, content = _test_fallback_content(trigger)
+    else:
+        title, content = result
     try:
         await send_to_bot(bot, title, content)
         return {"ok": True, "title": title}
@@ -209,6 +211,12 @@ async def test_trigger(bot_id: str, trigger: str):
 
 
 # ---- Helpers ----
+
+def _test_fallback_content(trigger: str) -> tuple[str, str]:
+    """Return a placeholder message when no real content is available for testing."""
+    label = TRIGGER_TYPES.get(trigger, trigger)
+    return label, f"[测试消息] 当前没有可推送的{label}内容，此消息仅用于验证推送通道是否正常。"
+
 
 def _find_bot(bots: list, bot_id: str) -> dict:
     for b in bots:
