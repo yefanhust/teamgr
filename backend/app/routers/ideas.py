@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -560,7 +560,8 @@ async def run_daily_idea_aggregation():
         liked_contents = [i.content for i in liked]
 
         # Remove un-liked insights from previous days (keep today's and liked ones)
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        _CN_TZ = timezone(timedelta(hours=8))
+        today = datetime.now(_CN_TZ).strftime("%Y-%m-%d")
         stale = (
             db.query(IdeaInsight)
             .filter(IdeaInsight.liked == False, IdeaInsight.generated_date != today)

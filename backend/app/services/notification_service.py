@@ -249,11 +249,12 @@ def _fetch_latest_scheduled_query() -> tuple[str, str] | None:
 def _fetch_latest_idea_insight() -> tuple[str, str] | None:
     from app.database import SessionLocal
     from app.models.talent import IdeaInsight
-    from datetime import datetime
+    from datetime import datetime, timedelta, timezone
 
     db = SessionLocal()
     try:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        _CN_TZ = timezone(timedelta(hours=8))
+        today = datetime.now(_CN_TZ).strftime("%Y-%m-%d")
         insights = (
             db.query(IdeaInsight)
             .filter(IdeaInsight.generated_date == today)
