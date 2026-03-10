@@ -110,13 +110,13 @@
       </template>
     </div>
 
-    <!-- Time Picker Popup -->
+    <!-- Time Picker Popup (bottom for mobile thumb reach) -->
     <van-popup v-model:show="showTimePicker" position="bottom" round>
-      <van-time-picker
-        v-model="timePickerValue"
+      <DrumTimePicker
+        v-model:model-hour="timePickerHour"
+        v-model:model-minute="timePickerMinute"
         title="选择执行时间"
-        :columns-type="['hour', 'minute']"
-        @confirm="onTimeConfirm"
+        @confirm="onTimeConfirm(); showTimePicker = false"
         @cancel="showTimePicker = false"
       />
     </van-popup>
@@ -127,6 +127,7 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '../api'
 import { showToast } from 'vant'
+import DrumTimePicker from '../components/DrumTimePicker.vue'
 
 // Group call types by first-level page
 const PAGE_GROUPS = [
@@ -159,7 +160,8 @@ const schedulerTypes = ref({})
 const schedulers = ref({})
 const savingSchedulers = ref(false)
 const showTimePicker = ref(false)
-const timePickerValue = ref(['08', '00'])
+const timePickerHour = ref(8)
+const timePickerMinute = ref(0)
 const timePickerKey = ref(null)
 
 const networkModels = computed(() => availableModels.value.filter(m => m.location === 'network'))
@@ -191,21 +193,17 @@ function formatTime(h, m) {
 
 function openSchedulerTimePicker(key) {
   const cfg = schedulers.value[key] || {}
-  timePickerValue.value = [
-    String(cfg.cron_hour ?? 0).padStart(2, '0'),
-    String(cfg.cron_minute ?? 0).padStart(2, '0'),
-  ]
+  timePickerHour.value = cfg.cron_hour ?? 0
+  timePickerMinute.value = cfg.cron_minute ?? 0
   timePickerKey.value = key
   showTimePicker.value = true
 }
 
-function onTimeConfirm({ selectedValues }) {
-  showTimePicker.value = false
+function onTimeConfirm() {
   const key = timePickerKey.value
   if (!key || !schedulers.value[key]) return
-  const [hour, minute] = selectedValues.map(Number)
-  schedulers.value[key].cron_hour = hour
-  schedulers.value[key].cron_minute = minute
+  schedulers.value[key].cron_hour = timePickerHour.value
+  schedulers.value[key].cron_minute = timePickerMinute.value
 }
 
 onMounted(async () => {
