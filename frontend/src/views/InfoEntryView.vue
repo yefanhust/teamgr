@@ -273,9 +273,13 @@ const modelActions = computed(() => {
 
 async function fetchModelSettings() {
   try {
-    const res = await api.get('/api/settings/model')
-    currentModel.value = res.data.current_model
-    availableModels.value = res.data.available_models
+    const [modelRes, defaultsRes] = await Promise.all([
+      api.get('/api/settings/model'),
+      api.get('/api/settings/model-defaults'),
+    ])
+    const textEntryModel = defaultsRes.data.defaults?.['text-entry']
+    currentModel.value = textEntryModel || modelRes.data.current_model
+    availableModels.value = modelRes.data.available_models
   } catch (e) {
     // ignore
   }
@@ -285,7 +289,10 @@ async function onModelSelect(action) {
   const model = action.name
   if (model === currentModel.value) return
   try {
-    await api.put('/api/settings/model', { model })
+    const defaultsRes = await api.get('/api/settings/model-defaults')
+    const defaults = defaultsRes.data.defaults || {}
+    defaults['text-entry'] = model
+    await api.put('/api/settings/model-defaults', { defaults })
     currentModel.value = model
     showToast(`已切换到 ${model}`)
   } catch (e) {

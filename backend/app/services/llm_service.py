@@ -336,7 +336,15 @@ async def parse_pdf_content(
 
     Returns: dict with extracted_info, card_data, summary, suggested_tags, new_dimensions
     """
-    model = _get_model()
+    # Resolve model: per-type default > global default
+    from app.config import get_model_defaults
+    per_type = get_model_defaults().get("pdf-parse")
+    if per_type and not _get_local_model_config(per_type):
+        model = _get_model_for_override(per_type)
+        eff_name = per_type
+    else:
+        model = _get_model()
+        eff_name = _current_model_name or "unknown"
     if not model:
         return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
                 "extracted_info": {}}
@@ -398,7 +406,7 @@ async def parse_pdf_content(
         usage = getattr(response, 'usage_metadata', None)
         isl = getattr(usage, 'prompt_token_count', 0) or 0
         osl = getattr(usage, 'candidates_token_count', 0) or 0
-        _record_llm_usage(_current_model_name or "unknown", "pdf-parse", duration_ms, isl, osl)
+        _record_llm_usage(eff_name, "pdf-parse", duration_ms, isl, osl)
 
         text = response.text.strip()
         result = _extract_json(text)
@@ -427,7 +435,15 @@ async def parse_image_content(
 
     Returns: dict with extracted_info, card_data, summary, suggested_tags, new_dimensions
     """
-    model = _get_model()
+    # Resolve model: per-type default > global default
+    from app.config import get_model_defaults
+    per_type = get_model_defaults().get("image-parse")
+    if per_type and not _get_local_model_config(per_type):
+        model = _get_model_for_override(per_type)
+        eff_name = per_type
+    else:
+        model = _get_model()
+        eff_name = _current_model_name or "unknown"
     if not model:
         return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
                 "extracted_info": {}}
@@ -485,7 +501,7 @@ async def parse_image_content(
         usage = getattr(response, 'usage_metadata', None)
         isl = getattr(usage, 'prompt_token_count', 0) or 0
         osl = getattr(usage, 'candidates_token_count', 0) or 0
-        _record_llm_usage(_current_model_name or "unknown", "image-parse", duration_ms, isl, osl)
+        _record_llm_usage(eff_name, "image-parse", duration_ms, isl, osl)
 
         text = response.text.strip()
         result = _extract_json(text)
