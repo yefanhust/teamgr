@@ -1188,7 +1188,10 @@
       @confirm="submitImprove"
     >
       <div class="px-4 py-3">
-        <p class="text-sm text-gray-500 mb-2">请输入改进意见，Claude 将根据反馈修改代码：</p>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-sm text-gray-500">请输入改进意见，Claude 将根据反馈修改代码：</p>
+          <VoiceInputButton v-model="improveFeedback" :size="16" />
+        </div>
         <textarea
           v-model="improveFeedback"
           class="w-full border border-gray-300 rounded-lg p-2 text-sm resize-y min-h-[80px] outline-none focus:border-indigo-400"

@@ -31,7 +31,7 @@
             >
               <div class="flex-1 min-w-0">
                 <div class="text-sm font-medium text-gray-800">{{ label }}</div>
-                <div class="text-xs text-gray-400">{{ key }}</div>
+                <div class="text-xs text-gray-400">{{ schedulerDescriptions[key] || key }}</div>
               </div>
               <!-- Interval type -->
               <template v-if="schedulers[key]?.interval_hours !== undefined">
@@ -157,6 +157,7 @@ const availableModels = ref([])
 
 // Scheduler config
 const schedulerTypes = ref({})
+const schedulerDescriptions = ref({})
 const schedulers = ref({})
 const savingSchedulers = ref(false)
 const showTimePicker = ref(false)
@@ -217,6 +218,7 @@ onMounted(async () => {
     globalModel.value = modelRes.data.global_model
     availableModels.value = modelRes.data.available_models
     schedulerTypes.value = schedulerRes.data.scheduler_types || {}
+    schedulerDescriptions.value = schedulerRes.data.scheduler_descriptions || {}
     schedulers.value = JSON.parse(JSON.stringify(schedulerRes.data.schedulers || {}))
   } catch (e) {
     showToast('Failed to load settings')

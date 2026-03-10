@@ -206,7 +206,7 @@ def generate_daily_list_content() -> tuple[str, str] | None:
         db.close()
 
 
-def generate_trigger_content(trigger_name: str) -> tuple[str, str] | None:
+def generate_trigger_content(trigger_name: str, *, test_mode: bool = False) -> tuple[str, str] | None:
     """Generate content for a given trigger. Returns (title, content) or None."""
     if trigger_name == "todo_deadline":
         return generate_deadline_content()
@@ -215,7 +215,7 @@ def generate_trigger_content(trigger_name: str) -> tuple[str, str] | None:
     elif trigger_name == "scheduled_query":
         return _fetch_latest_scheduled_query()
     elif trigger_name == "idea_insight":
-        return _fetch_latest_idea_insight()
+        return _fetch_latest_idea_insight(today_only=not test_mode)
     elif trigger_name == "todo_analysis":
         return _fetch_latest_todo_analysis()
     return None
@@ -246,14 +246,19 @@ def _fetch_latest_scheduled_query() -> tuple[str, str] | None:
         db.close()
 
 
-def _fetch_latest_idea_insight() -> tuple[str, str] | None:
+def _fetch_latest_idea_insight(today_only: bool = True) -> tuple[str, str] | None:
     from app.database import SessionLocal
     from app.models.talent import IdeaInsight
+    from datetime import datetime
 
     db = SessionLocal()
     try:
+        query = db.query(IdeaInsight)
+        if today_only:
+            today = datetime.utcnow().strftime("%Y-%m-%d")
+            query = query.filter(IdeaInsight.generated_date == today)
         insights = (
-            db.query(IdeaInsight)
+            query
             .order_by(IdeaInsight.created_at.desc())
             .limit(5)
             .all()

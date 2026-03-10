@@ -300,9 +300,10 @@ async def update_model_defaults_api(body: dict):
 
 @app.get("/api/settings/schedulers")
 async def get_scheduler_settings():
-    from app.config import SCHEDULER_TYPES, get_scheduler_config
+    from app.config import SCHEDULER_TYPES, SCHEDULER_DESCRIPTIONS, get_scheduler_config
     return {
         "scheduler_types": SCHEDULER_TYPES,
+        "scheduler_descriptions": SCHEDULER_DESCRIPTIONS,
         "schedulers": get_scheduler_config(),
     }
 

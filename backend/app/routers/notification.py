@@ -197,7 +197,7 @@ async def test_trigger(bot_id: str, trigger: str):
         raise HTTPException(status_code=400, detail=f"Unknown trigger: {trigger}")
     bots = get_notification_bots()
     bot = _find_bot(bots, bot_id)
-    result = generate_trigger_content(trigger)
+    result = generate_trigger_content(trigger, test_mode=True)
     if result is None:
         raise HTTPException(status_code=404, detail="No content available for this trigger")
     title, content = result

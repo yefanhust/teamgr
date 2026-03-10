@@ -87,7 +87,7 @@ schedulers:
   daily_duration_stats:        # 任务耗时统计
     cron_hour: 3
     cron_minute: 35
-  repeat_todo_check:           # 重复任务检查
+  repeat_todo_check:           # 周期任务自动创建（检查重复规则的已完成任务，自动创建下一周期待办）
     interval_hours: 1
 
 # 备份调度

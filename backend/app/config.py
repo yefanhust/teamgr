@@ -99,8 +99,17 @@ SCHEDULER_TYPES = {
     "daily_idea_aggregation": "灵感洞见聚合",
     "daily_todo_analysis": "任务效率分析",
     "daily_duration_stats": "任务耗时统计",
-    "repeat_todo_check": "重复任务检查",
+    "repeat_todo_check": "周期任务自动创建",
     "daily_backup": "数据库备份",
+}
+
+SCHEDULER_DESCRIPTIONS = {
+    "daily_scheduled_queries": "执行预设的人才查询问题，生成查询结果供推送使用",
+    "daily_idea_aggregation": "对近期灵感进行 AI 聚合分析，生成洞见摘要",
+    "daily_todo_analysis": "分析任务完成效率，生成统计报告",
+    "daily_duration_stats": "统计已完成任务的实际耗时数据",
+    "repeat_todo_check": "检查设置了重复规则的已完成任务，自动创建下一周期的待办（如每日/每周/每月重复）",
+    "daily_backup": "将数据库备份到腾讯云 COS",
 }
 
 _SCHEDULER_DEFAULTS = {
