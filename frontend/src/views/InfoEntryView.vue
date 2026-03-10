@@ -148,7 +148,15 @@
 
       <!-- File Upload -->
       <div class="bg-white rounded-xl shadow-sm p-4 mb-4">
-        <label class="text-sm font-medium text-gray-600 mb-2 block">上传文件</label>
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-sm font-medium text-gray-600">上传文件</label>
+          <van-icon
+            name="setting-o"
+            size="16"
+            class="text-gray-400 cursor-pointer hover:text-blue-500"
+            @click="openParsePromptEditor"
+          />
+        </div>
         <div class="flex gap-3">
           <van-uploader
             :after-read="handlePdfUpload"
@@ -220,11 +228,37 @@
         <button type="submit" style="display:none" />
       </form>
     </van-dialog>
+
+    <!-- Parse Prompt Editor -->
+    <van-popup
+      v-model:show="showPromptEditor"
+      position="bottom"
+      :style="{ height: '80vh' }"
+      round
+      closeable
+    >
+      <div class="flex flex-col h-full p-4">
+        <h3 class="text-base font-bold text-gray-700 mb-2">编辑解析提示词</h3>
+        <van-tabs v-model:active="promptTab" shrink>
+          <van-tab title="PDF简历解析" name="pdf-parse" />
+          <van-tab title="图片解析" name="image-parse" />
+        </van-tabs>
+        <textarea
+          v-model="promptEditorText"
+          class="flex-1 w-full border border-gray-300 rounded-lg p-3 mt-2 text-sm resize-none focus:outline-none focus:border-blue-400"
+          placeholder="输入提示词..."
+        />
+        <div class="flex gap-2 mt-3">
+          <van-button size="small" plain @click="resetParsePrompt">恢复默认</van-button>
+          <van-button size="small" type="primary" class="flex-1" @click="saveParsePrompt">保存</van-button>
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTalentStore } from '../stores/talent'
 import { showToast, showImagePreview } from 'vant'
@@ -256,6 +290,12 @@ let dragCounter = 0
 // Track pending entry IDs for polling
 const pendingEntries = ref(new Map()) // entryId -> msgIndex
 let pollTimer = null
+
+// Prompt editor state
+const showPromptEditor = ref(false)
+const promptTab = ref('pdf-parse')
+const promptEditorText = ref('')
+const promptCache = ref({}) // { 'pdf-parse': { instructions, default }, 'image-parse': ... }
 
 const canSubmit = computed(() => {
   return selectedTalent.value && inputText.value.trim()
@@ -692,6 +732,45 @@ async function createAndSelect() {
 
 function previewImage(src) {
   showImagePreview({ images: [src], closeable: true })
+}
+
+async function openParsePromptEditor() {
+  showPromptEditor.value = true
+  await loadPromptForTab(promptTab.value)
+}
+
+async function loadPromptForTab(type) {
+  try {
+    const res = await api.get(`/api/entry/prompts/${type}`)
+    promptCache.value[type] = res.data
+    promptEditorText.value = res.data.instructions || ''
+  } catch (e) {
+    showToast('加载失败')
+  }
+}
+
+// Watch tab switch
+watch(promptTab, (val) => {
+  if (showPromptEditor.value) loadPromptForTab(val)
+})
+
+async function saveParsePrompt() {
+  try {
+    await api.put(`/api/entry/prompts/${promptTab.value}`, {
+      instructions: promptEditorText.value,
+    })
+    showToast('已保存')
+    showPromptEditor.value = false
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+async function resetParsePrompt() {
+  const cached = promptCache.value[promptTab.value]
+  if (cached?.default) {
+    promptEditorText.value = cached.default
+  }
 }
 
 function scrollToBottom() {

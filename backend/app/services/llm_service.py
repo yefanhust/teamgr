@@ -7,9 +7,32 @@ from typing import Optional
 
 import google.generativeai as genai
 import httpx
-from app.config import get_gemini_config, get_local_models_config
+from app.config import get_gemini_config, get_local_models_config, get_instruction
 
 logger = logging.getLogger(__name__)
+
+# ---------- Editable prompt defaults ----------
+
+DEFAULT_PDF_PARSE_INSTRUCTIONS = """\
+你是一个简历解析助手。请仔细查看以下简历图片，提取结构化信息，填入人才卡片。
+
+## 要求:
+1. 仔细阅读简历图片中的所有内容（包括侧边栏、表格、图标旁文字等）
+2. 从简历中提取信息，填入对应的维度
+3. 如果能识别出姓名、邮箱、电话，请在返回的 extracted_info 中提供
+4. 如果简历中有信息无法归入现有维度，建议新维度
+5. 标签必须原子化，每个标签只表达一个独立概念，不要组合。例如"中科院硕士"应拆为"中科院"和"硕士"两个标签"""
+
+DEFAULT_IMAGE_PARSE_INSTRUCTIONS = """\
+你是一个人才信息提取助手。请仔细查看以下图片，提取与人才相关的结构化信息，填入人才卡片。
+图片可能是名片、截图、证件照、简历照片等任何与人才相关的图片。
+
+## 要求:
+1. 仔细查看所有图片中的内容（包括文字、Logo、头像旁的信息等）
+2. 从图片中提取信息，填入对应的维度
+3. 如果能识别出姓名、邮箱、电话，请在返回的 extracted_info 中提供
+4. 如果图片中有信息无法归入现有维度，建议新维度
+5. 标签必须原子化，每个标签只表达一个独立概念，不要组合"""
 
 
 def _record_llm_usage(model_name: str, call_type: str, duration_ms: int, input_tokens: int, output_tokens: int):
@@ -351,19 +374,14 @@ async def parse_pdf_content(
 
     dimensions_desc = "\n".join(f"- {d['key']} ({d['label']}): 结构为 {d['schema']}" for d in dimensions)
 
-    prompt = f"""你是一个简历解析助手。请仔细查看以下简历图片，提取结构化信息，填入人才卡片。
+    instructions = get_instruction("pdf_parse", DEFAULT_PDF_PARSE_INSTRUCTIONS)
+
+    prompt = f"""{instructions}
 
 ## 人才姓名: {talent_name or '从简历中识别'}
 
 ## 人才卡维度定义:
 {dimensions_desc}
-
-## 要求:
-1. 仔细阅读简历图片中的所有内容（包括侧边栏、表格、图标旁文字等）
-2. 从简历中提取信息，填入对应的维度
-3. 如果能识别出姓名、邮箱、电话，请在返回的 extracted_info 中提供
-4. 如果简历中有信息无法归入现有维度，建议新维度
-5. 标签必须原子化，每个标签只表达一个独立概念，不要组合。例如"中科院硕士"应拆为"中科院"和"硕士"两个标签
 
 请严格返回以下JSON格式（不要包含markdown代码块标记）:
 {{
@@ -450,20 +468,14 @@ async def parse_image_content(
 
     dimensions_desc = "\n".join(f"- {d['key']} ({d['label']}): 结构为 {d['schema']}" for d in dimensions)
 
-    prompt = f"""你是一个人才信息提取助手。请仔细查看以下图片，提取与人才相关的结构化信息，填入人才卡片。
-图片可能是名片、截图、证件照、简历照片等任何与人才相关的图片。
+    instructions = get_instruction("image_parse", DEFAULT_IMAGE_PARSE_INSTRUCTIONS)
+
+    prompt = f"""{instructions}
 
 ## 人才姓名: {talent_name or '从图片中识别'}
 
 ## 人才卡维度定义:
 {dimensions_desc}
-
-## 要求:
-1. 仔细查看所有图片中的内容（包括文字、Logo、头像旁的信息等）
-2. 从图片中提取信息，填入对应的维度
-3. 如果能识别出姓名、邮箱、电话，请在返回的 extracted_info 中提供
-4. 如果图片中有信息无法归入现有维度，建议新维度
-5. 标签必须原子化，每个标签只表达一个独立概念，不要组合
 
 请严格返回以下JSON格式（不要包含markdown代码块标记）:
 {{

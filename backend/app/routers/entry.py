@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db, SessionLocal
 from app.models.talent import Talent, Tag, TalentTag, EntryLog, CardDimension
 from app.middleware.auth_middleware import require_auth
-from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content, get_current_model_name
+from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content, get_current_model_name, DEFAULT_PDF_PARSE_INSTRUCTIONS, DEFAULT_IMAGE_PARSE_INSTRUCTIONS
 from app.services.pdf_service import extract_text_from_pdf, pdf_to_images
 from app.services.pinyin_service import get_pinyin_data
 
@@ -511,6 +511,38 @@ async def upload_images(
         "talent_id": talent.id,
         "status": "processing",
     }
+
+
+@router.get("/prompts/{prompt_type}")
+async def get_entry_prompt(prompt_type: str, _=Depends(require_auth)):
+    """Get editable prompt for pdf-parse or image-parse."""
+    from app.config import get_instruction
+    if prompt_type == "pdf-parse":
+        return {
+            "instructions": get_instruction("pdf_parse", DEFAULT_PDF_PARSE_INSTRUCTIONS),
+            "default": DEFAULT_PDF_PARSE_INSTRUCTIONS,
+        }
+    elif prompt_type == "image-parse":
+        return {
+            "instructions": get_instruction("image_parse", DEFAULT_IMAGE_PARSE_INSTRUCTIONS),
+            "default": DEFAULT_IMAGE_PARSE_INSTRUCTIONS,
+        }
+    else:
+        raise HTTPException(status_code=400, detail=f"未知的 prompt 类型: {prompt_type}")
+
+
+@router.put("/prompts/{prompt_type}")
+async def save_entry_prompt(prompt_type: str, body: dict, _=Depends(require_auth)):
+    """Save custom prompt for pdf-parse or image-parse."""
+    from app.config import save_instruction
+    instructions = body.get("instructions", "").strip()
+    if prompt_type == "pdf-parse":
+        save_instruction("pdf_parse", instructions)
+    elif prompt_type == "image-parse":
+        save_instruction("image_parse", instructions)
+    else:
+        raise HTTPException(status_code=400, detail=f"未知的 prompt 类型: {prompt_type}")
+    return {"ok": True}
 
 
 @router.get("/status/{entry_id}")
