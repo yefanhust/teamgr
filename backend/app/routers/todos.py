@@ -1001,10 +1001,6 @@ async def run_daily_todo_analysis():
         db.commit()
         logger.info(f"Todo analysis generated for {today} ({count} tasks)")
 
-        # Send notification
-        from app.services.notification_service import is_trigger_enabled, send_notification
-        if is_trigger_enabled("todo_analysis"):
-            await send_notification("任务效率分析", result)
     except Exception as e:
         logger.error(f"Todo analysis failed: {e}")
     finally:

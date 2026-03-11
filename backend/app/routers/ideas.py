@@ -590,14 +590,6 @@ async def run_daily_idea_aggregation():
         db.commit()
         logger.info(f"Generated {len(insights)} new idea insights for {today}")
 
-        # Send notification
-        if insights:
-            from app.services.notification_service import is_trigger_enabled, send_notification
-            if is_trigger_enabled("idea_insight"):
-                lines = [ins.get("content", "")[:200] for ins in insights[:5]]
-                content = "\n".join(f"- {line}" for line in lines if line)
-                await send_notification("灵感洞见", content)
-
     except Exception as e:
         logger.error(f"Daily idea aggregation failed: {e}")
     finally:
