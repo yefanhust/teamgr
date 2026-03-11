@@ -339,6 +339,7 @@ LLM_CALL_TYPES = {
     "todo-auto-tag": "任务自动打标",
     "todo-organize-tags": "任务标签整理",
     "todo-analysis": "任务完成效率分析",
+    "scholar-categorize": "大学士-历史对话分类",
 }
 
 

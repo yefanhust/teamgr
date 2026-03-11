@@ -10,6 +10,7 @@
 - **Studio** - 任务管理 + 标签分类 + 重复任务 + 截止日期 + 效率分析 + Vibe Coding
 - **灵感碎片** - 随时记录想法，LLM定时聚合生成洞见
 - **Vibe Coding** - 自动化研发管理（规划→实现→验证→提交），Claude Code 驱动
+- **龙图阁大学士** - AI 问答助手，联网搜索 + PDF 分析 + 多轮对话，Claude Code 驱动
 - **消息推送** - 企业微信 Webhook 推送每日总结、灵感洞见、截止提醒
 - **安全认证** - 密码认证 + 渐进式封禁 + 自动解封 + IP限流
 - **数据备份** - 每日自动备份到腾讯云COS
@@ -203,10 +204,13 @@ teamgr/
 ├── scripts/             # 脚本
 │   ├── start_web.sh     # 启动 uvicorn（容器内）
 │   └── restart_web.sh   # 重启 uvicorn（容器内）
-├── autovibe/            # AutoVibe 自动化研发
+├── autovibe/            # AutoVibe + Scholar 自动化
 │   ├── autovibe.md      # AutoVibe 系统文档
+│   ├── scholar.md       # 龙图阁大学士系统文档
 │   ├── vibe-watcher.sh  # Vibe Watcher 守护进程（宿主机）
-│   ├── claude-pty.py    # Claude CLI PTY 包装器 + 流式解析
+│   ├── scholar-watcher.sh  # Scholar Watcher 守护进程（宿主机）
+│   ├── scholar-runner.py   # Claude CLI PTY 包装器（Scholar 专用）
+│   ├── claude-pty.py    # Claude CLI PTY 包装器（AutoVibe）
 │   └── claude-stream-parser.py  # 独立流式解析器（备用）
 ├── backend/             # Python FastAPI后端
 │   └── app/
@@ -223,7 +227,11 @@ teamgr/
 ├── data/                # 运行时数据（SQLite、队列文件、日志）
 │   ├── teamgr.db        # SQLite数据库
 │   ├── vibe-queue/      # Vibe Watcher 信号队列
-│   └── vibe-sessions/   # Claude Code 会话 ID 存储
+│   ├── vibe-sessions/   # Claude Code 会话 ID 存储
+│   ├── scholar-queue/   # Scholar 信号队列
+│   ├── scholar-stream/  # Scholar 流式输出文件
+│   ├── scholar-sessions/# Scholar Claude 会话 ID 存储
+│   └── scholar-files/   # Scholar 上传文件存储
 └── ssl/                 # 自签名证书(自动生成)
 ```
 
@@ -319,17 +327,65 @@ tmux new-session -s autovibe "bash autovibe/vibe-watcher.sh 2>&1 | tee -a data/v
 tmux attach -t autovibe
 ```
 
-## 10. 消息推送（企业微信）
+## 10. 龙图阁大学士（AI 问答助手）
+
+龙图阁大学士是一个 AI 驱动的智能问答助手，基于 Claude Code CLI（Max Plan）运行。支持联网搜索实时信息、PDF 文档上传分析、多轮对话，以及历史对话 LLM 自动分类。详见 [autovibe/scholar.md](autovibe/scholar.md)。
+
+### 10.1 前置要求
+
+- Claude Code CLI 已安装并登录（Max Plan）
+- 宿主机安装 `inotify-tools`、`jq`
+- Node.js 20+、Python 3.11+
+
+### 10.2 启动 Scholar Watcher
+
+```bash
+# 安装依赖（仅首次，如果 AutoVibe 已安装则跳过）
+sudo apt-get install -y inotify-tools jq tmux
+
+# 创建 tmux session 并启动 watcher
+tmux new-session -s scholar "bash autovibe/scholar-watcher.sh 2>&1 | tee -a data/scholar-watcher.log"
+
+# 查看实时输出
+tmux attach -t scholar
+```
+
+> Scholar Watcher 和 AutoVibe Watcher 是独立的守护进程，可以同时运行。
+
+### 10.3 使用
+
+1. 在前端进入「龙图阁」标签页，即可看到「龙图阁大学士」
+2. 输入问题后点击发送，大学士会联网搜索并给出回答
+3. 支持拖拽 PDF 文件到输入区域，上传后可对文档内容提问
+4. 点击右上角时钟图标查看历史对话（LLM 自动按主题分类）
+5. 点击 + 号新建对话
+
+### 10.4 功能特性
+
+| 功能 | 说明 |
+|------|------|
+| 联网搜索 | 自动调用 WebSearch / WebFetch 获取实时信息（股价、新闻等） |
+| PDF 文档分析 | 拖拽或点击上传 PDF，提取文本后注入上下文 |
+| 多轮对话 | 同一对话 resume 同一个 Claude session，保持上下文连贯 |
+| 历史对话分类 | LLM 自动按主题分类历史对话，带缓存，秒开 |
+| Markdown 渲染 | 支持表格、代码块、链接、列表等 Markdown 格式 |
+| 流式输出 | 实时显示思考过程、搜索动态、回答文本 |
+
+### 10.5 分类模型配置
+
+历史对话分类所使用的 LLM 可在「设置」页面的 Studio 分组下配置「大学士-历史对话分类」模型。
+
+## 11. 消息推送（企业微信）
 
 系统支持通过企业微信群机器人 Webhook 推送消息通知，无需登录网站即可接收每日总结和提醒。
 
-### 10.1 创建企业微信群机器人
+### 11.1 创建企业微信群机器人
 
 1. 在企业微信中创建一个群聊（可以只有自己）
 2. 群聊设置 → 群机器人 → 添加机器人
 3. 复制机器人的 Webhook URL
 
-### 10.2 配置
+### 11.2 配置
 
 在 `config/config.yaml` 中添加：
 
@@ -348,7 +404,7 @@ notification:
     todo_daily_list: true   # 每日任务清单
 ```
 
-### 10.3 推送内容
+### 11.3 推送内容
 
 | 推送项 | 触发时间 | 内容 |
 |--------|----------|------|
@@ -358,16 +414,16 @@ notification:
 | 截止日期提醒 | 08:00 | 当天到期 + 已逾期的任务列表 |
 | 每日任务清单 | 08:05 | 所有待办任务汇总（按优先级分组） |
 
-### 10.4 说明
+### 11.4 说明
 
 - 消息以 Markdown 格式推送，企业微信客户端原生渲染
 - 推送失败不影响主业务（静默处理错误）
 - 各推送项可通过 `triggers` 独立开关
 - 频率限制：企业微信 Webhook 支持 20 条/分钟，各定时任务自然错开，不会触发限制
 
-## 11. 备份
+## 12. 备份
 
-### 11.1 腾讯云COS备份
+### 12.1 腾讯云COS备份
 
 系统支持每日自动备份数据库到腾讯云 COS 对象存储。
 

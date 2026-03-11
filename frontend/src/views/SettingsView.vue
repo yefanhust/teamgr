@@ -145,7 +145,7 @@ const PAGE_GROUPS = [
   {
     page: 'Studio',
     color: '#8B5CF6',
-    types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis'],
+    types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis', 'scholar-categorize'],
   },
   {
     page: '灵感',

@@ -949,10 +949,7 @@
 
       <!-- ==================== Tab 5: 龙图阁 ==================== -->
       <van-tab title="龙图阁">
-        <div class="text-center py-12 text-gray-400">
-          <div class="text-4xl mb-3">📜</div>
-          <p class="text-sm">敬请期待</p>
-        </div>
+        <ScholarChat />
       </van-tab>
     </van-tabs>
 
@@ -1224,6 +1221,7 @@ import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 Chart.register(BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 import TopNavBar from '../components/TopNavBar.vue'
+import ScholarChat from '../components/ScholarChat.vue'
 
 const store = useTodosStore()
 
