@@ -111,8 +111,8 @@
                 <div v-for="(v, k) in item" :key="k">
                   <template v-if="v && v !== ''">
                     <span class="text-gray-500">{{ k }}：</span>
-                    <input v-if="isEditing(dim.key, idx, k)" v-model="editValue" class="edit-value-input" ref="editInput"
-                      @blur="finishEdit" @keypress.enter="finishEdit" @keydown.escape="cancelEdit" />
+                    <textarea v-if="isEditing(dim.key, idx, k)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
+                      @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
                     <span v-else-if="Array.isArray(v)" class="editable-value" @dblclick.stop="startEdit(dim.key, [idx, k], v, true)">{{ v.join('、') }}</span>
                     <span v-else class="editable-value" @dblclick.stop="startEdit(dim.key, [idx, k], v)">{{ v }}</span>
                   </template>
@@ -122,8 +122,8 @@
             <!-- Array of strings -->
             <ul v-else class="list-disc list-inside space-y-1">
               <li v-for="(item, idx) in getCardValue(dim.key)" :key="idx">
-                <input v-if="isEditing(dim.key, idx)" v-model="editValue" class="edit-value-input" ref="editInput"
-                  @blur="finishEdit" @keypress.enter="finishEdit" @keydown.escape="cancelEdit" />
+                <textarea v-if="isEditing(dim.key, idx)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
+                  @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
                 <span v-else class="editable-value" @dblclick.stop="startEdit(dim.key, [idx], item)">{{ item }}</span>
               </li>
             </ul>
@@ -145,24 +145,24 @@
                       <div v-for="(sv, sk) in subItem" :key="sk">
                         <template v-if="sv && sv !== ''">
                           <span class="text-gray-500">{{ sk }}：</span>
-                          <input v-if="isEditing(dim.key, key, si, sk)" v-model="editValue" class="edit-value-input" ref="editInput"
-                            @blur="finishEdit" @keypress.enter="finishEdit" @keydown.escape="cancelEdit" />
+                          <textarea v-if="isEditing(dim.key, key, si, sk)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
+                            @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
                           <span v-else class="editable-value" @dblclick.stop="startEdit(dim.key, [key, si, sk], sv, Array.isArray(sv))">{{ Array.isArray(sv) ? sv.join('、') : sv }}</span>
                         </template>
                       </div>
                     </div>
                   </template>
                   <template v-else>
-                    <input v-if="isEditing(dim.key, key)" v-model="editValue" class="edit-value-input" ref="editInput"
-                      @blur="finishEdit" @keypress.enter="finishEdit" @keydown.escape="cancelEdit" />
+                    <textarea v-if="isEditing(dim.key, key)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
+                      @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
                     <span v-else-if="Array.isArray(val)" class="editable-value" @dblclick.stop="startEdit(dim.key, [key], val, true)">{{ val.join('、') }}</span>
                     <span v-else-if="typeof val === 'object' && val !== null" class="editable-value" @dblclick.stop="startEdit(dim.key, [key], Object.entries(val).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(', '))">{{ Object.entries(val).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(', ') || '' }}</span>
                     <span v-else class="editable-value" @dblclick.stop="startEdit(dim.key, [key], val)">{{ val }}</span>
                   </template>
                 </template>
                 <template v-else>
-                  <input v-if="isEditing(dim.key, key)" v-model="editValue" class="edit-value-input" ref="editInput"
-                    @blur="finishEdit" @keypress.enter="finishEdit" @keydown.escape="cancelEdit" />
+                  <textarea v-if="isEditing(dim.key, key)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
+                    @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
                   <span v-else class="text-gray-300 editable-value" @dblclick.stop="startEdit(dim.key, [key], '')">未填写</span>
                 </template>
               </div>
@@ -171,8 +171,8 @@
 
           <!-- String type -->
           <template v-else>
-            <input v-if="isEditing(dim.key)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
-              @blur="finishEdit" @keypress.enter="finishEdit" @keydown.escape="cancelEdit" />
+            <textarea v-if="isEditing(dim.key)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
+              @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
             <p v-else-if="getCardValue(dim.key)" class="editable-value" @dblclick.stop="startEdit(dim.key, [], getCardValue(dim.key))">{{ getCardValue(dim.key) }}</p>
             <p v-else class="text-gray-400">暂无数据</p>
           </template>
@@ -440,14 +440,23 @@ function isEditing(dimKey, ...path) {
   return ep.every((p, i) => String(p) === String(path[i]))
 }
 
+function autoResize(e) {
+  const el = e.target || e
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
 function startEdit(dimKey, path, value, isArray = false) {
   editing.value = { dimKey, path, isArray }
   editValue.value = isArray && Array.isArray(value) ? value.join('、') : String(value ?? '')
   nextTick(() => {
     const el = editInput.value
     const input = Array.isArray(el) ? el[0] : el
-    input?.focus()
-    input?.select()
+    if (input) {
+      input.focus()
+      input.select()
+      autoResize(input)
+    }
   })
 }
 
@@ -588,6 +597,11 @@ onUnmounted(() => {
   outline: none;
   background: #fff;
   min-width: 80px;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.5;
+  font-family: inherit;
+  display: block;
 }
 .edit-value-input-wide {
   width: 100%;
