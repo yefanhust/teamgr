@@ -92,7 +92,7 @@
     <!-- Messages -->
     <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50 scholar-messages">
       <div class="max-w-2xl mx-auto">
-        <div v-if="messages.length === 0" class="flex flex-col items-center justify-center py-20 text-gray-300">
+        <div v-if="messages.length === 0" class="flex flex-col items-center justify-center py-8 text-gray-300">
           <div class="text-6xl mb-4">📜</div>
           <p class="text-base font-medium text-gray-400">向大学士提问</p>
           <p class="text-xs mt-2 text-gray-300">支持上传 PDF 文档 · 联网搜索实时信息</p>
@@ -251,7 +251,7 @@ const canSend = computed(() => {
 })
 
 const chatHeight = computed(() => {
-  return 'calc(100vh - 96px)'
+  return 'calc(100dvh - 96px)'
 })
 
 // ──────────────── Markdown ────────────────
@@ -697,6 +697,8 @@ onMounted(() => {
 <style scoped>
 .scholar-chat {
   position: relative;
+  max-height: calc(100vh - 96px);
+  max-height: calc(100dvh - 96px);
 }
 
 /* ── Header ── */

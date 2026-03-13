@@ -1229,6 +1229,7 @@ const store = useTodosStore()
 const activeTab = ref(0)
 const vibeTab = ref(0)
 
+
 const newTitle = ref('')
 const newHighPriority = ref(false)
 const newDeadline = ref('')

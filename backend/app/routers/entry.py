@@ -114,8 +114,11 @@ async def _process_text_entry_bg(entry_log_id: int, talent_id: int, content: str
         if not talent:
             return
 
-        # Apply new dimensions
-        _apply_new_dimensions(db, result.get("new_dimensions", []))
+        # Apply new dimensions (validate each item is a dict, same as PDF/image paths)
+        new_dims = result.get("new_dimensions", [])
+        if isinstance(new_dims, list):
+            new_dims = [d for d in new_dims if isinstance(d, dict)]
+            _apply_new_dimensions(db, new_dims)
 
         # Update talent card
         talent.card_data = result.get("card_data", talent.card_data)
