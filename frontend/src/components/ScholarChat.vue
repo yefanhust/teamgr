@@ -19,6 +19,9 @@
         </div>
       </div>
       <div class="flex items-center gap-3 flex-shrink-0">
+        <div class="header-btn" title="定时报告" @click="showScheduled = true">
+          <van-icon name="notes-o" size="18" />
+        </div>
         <div class="header-btn" title="历史对话" @click="openHistory">
           <van-icon name="clock-o" size="18" />
         </div>
@@ -87,6 +90,11 @@
           </div>
         </div>
       </div>
+    </transition>
+
+    <!-- Scheduled overlay -->
+    <transition name="slide-down">
+      <ScholarScheduled v-if="showScheduled" @close="showScheduled = false" />
     </transition>
 
     <!-- Messages -->
@@ -221,6 +229,7 @@ import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { showToast } from 'vant'
 import api from '../api'
 import VoiceInputButton from './VoiceInputButton.vue'
+import ScholarScheduled from './ScholarScheduled.vue'
 
 // ──────────────── State ────────────────
 
@@ -231,6 +240,7 @@ const streaming = ref(false)
 const uploading = ref(false)
 const isDragging = ref(false)
 const showHistory = ref(false)
+const showScheduled = ref(false)
 const historyLoading = ref(false)
 const conversations = ref([])
 const categories = ref([])

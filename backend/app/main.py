@@ -183,6 +183,11 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f"Repeat todo check job registered: every {rt.get('interval_hours', 1)} hour(s)")
 
+        # Scholar scheduled questions — one job per enabled question
+        from app.services.scholar_scheduled_service import seed_default_scheduled_questions, refresh_scholar_jobs
+        seed_default_scheduled_questions()
+        refresh_scholar_jobs(_scheduler)
+
         # Notification delivery jobs (龙图阁 — per-bot per-function scheduling)
         from app.services.notification_scheduler import refresh_notification_jobs
         refresh_notification_jobs(_scheduler)
@@ -324,6 +329,10 @@ async def update_scheduler_settings(body: dict):
             try:
                 if "interval_hours" in cfg:
                     _scheduler.reschedule_job(job_id, trigger="interval", hours=cfg["interval_hours"])
+                elif "day_of_week" in cfg:
+                    _scheduler.reschedule_job(job_id, trigger="cron", day_of_week=cfg["day_of_week"], hour=cfg["cron_hour"], minute=cfg["cron_minute"])
+                elif "day_of_month" in cfg:
+                    _scheduler.reschedule_job(job_id, trigger="cron", day=cfg["day_of_month"], hour=cfg["cron_hour"], minute=cfg["cron_minute"])
                 else:
                     _scheduler.reschedule_job(job_id, trigger="cron", hour=cfg["cron_hour"], minute=cfg["cron_minute"])
                 logger.info(f"Rescheduled job {job_id}: {cfg}")

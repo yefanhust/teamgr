@@ -269,6 +269,8 @@ def generate_trigger_content(trigger_name: str) -> tuple[str, str] | None:
         return _fetch_latest_idea_insight()
     elif trigger_name == "todo_analysis":
         return _fetch_latest_todo_analysis()
+    elif trigger_name == "scholar_scheduled":
+        return _fetch_latest_scholar_scheduled()
     return None
 
 
@@ -318,6 +320,43 @@ def _fetch_latest_idea_insight() -> tuple[str, str] | None:
         lines = [ins.content[:200] for ins in insights if ins.content]
         content = "\n".join(f"- {line}" for line in lines if line)
         return "灵感洞见", content
+    finally:
+        db.close()
+
+
+def _fetch_latest_scholar_scheduled() -> tuple[str, str] | None:
+    """Fetch latest scholar scheduled results from today."""
+    from app.database import SessionLocal
+    from app.models.scholar import ScholarScheduledResult, ScholarScheduledQuestion
+    from datetime import datetime, timedelta
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.utcnow() - timedelta(days=1)
+        results = (
+            db.query(ScholarScheduledResult)
+            .filter(
+                ScholarScheduledResult.generated_at >= cutoff,
+                ScholarScheduledResult.status == "success",
+            )
+            .order_by(ScholarScheduledResult.generated_at.desc())
+            .all()
+        )
+        if not results:
+            return None
+
+        summaries = []
+        for r in results:
+            q = db.query(ScholarScheduledQuestion).filter(
+                ScholarScheduledQuestion.id == r.question_id
+            ).first()
+            title = q.title if q else "定时问题"
+            # Truncate long answers for notification
+            answer = r.answer[:1500] if len(r.answer) > 1500 else r.answer
+            summaries.append(f"**{title}** ({r.period_label})\n{answer}")
+
+        content = "\n\n---\n\n".join(summaries)
+        return "龙图阁定时报告", content
     finally:
         db.close()
 

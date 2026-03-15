@@ -48,6 +48,7 @@ def init_db():
         IdeaFragment, IdeaInputLog, IdeaInsight,
     )
     from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis, TodoDurationStats  # noqa
+    from app.models.scholar import ScholarScheduledQuestion, ScholarScheduledResult  # noqa
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _seed_default_dimensions()

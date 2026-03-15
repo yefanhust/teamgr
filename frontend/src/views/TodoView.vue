@@ -1094,12 +1094,20 @@
             <span v-if="detailAssignedTags.length === 0 && !showDetailTagPicker" class="text-xs text-gray-400">点击 + 添加标签</span>
           </div>
           <div v-if="showDetailTagPicker" class="flex gap-1.5 flex-wrap mt-1.5 items-center" @click.stop>
-            <input
-              v-model="newTagName"
-              class="new-tag-input"
-              placeholder="新标签..."
-              @keypress.enter="createAndAddDetailTag"
-            />
+            <div class="new-tag-wrapper">
+              <input
+                v-model="newTagName"
+                class="new-tag-input"
+                placeholder="新标签..."
+                @keypress.enter="createAndAddDetailTag"
+              />
+              <van-icon
+                v-if="newTagName.trim()"
+                name="success"
+                class="new-tag-confirm"
+                @click="createAndAddDetailTag"
+              />
+            </div>
             <van-tag
               v-for="tag in detailUnassignedTags"
               :key="tag.id"
@@ -2658,18 +2666,31 @@ function formatDateTime(isoStr) {
 .repeat-interval-input:focus {
   border-color: #8b5cf6;
 }
+.new-tag-wrapper {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+}
 .new-tag-input {
   border: 1px dashed #9ca3af;
   border-radius: 4px;
   padding: 2px 8px;
+  padding-right: 24px;
   font-size: 12px;
-  width: 80px;
+  width: 100px;
   outline: none;
   background: #fff;
 }
 .new-tag-input:focus {
   border-color: #3b82f6;
   border-style: solid;
+}
+.new-tag-confirm {
+  position: absolute;
+  right: 4px;
+  color: #3b82f6;
+  font-size: 16px;
+  cursor: pointer;
 }
 .edit-tag-input {
   border: 1.5px solid #3b82f6;

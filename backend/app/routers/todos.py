@@ -1033,17 +1033,12 @@ def compute_duration_stats(db: Session):
     completed_items = (
         db.query(TodoItem)
         .filter(TodoItem.completed == True, TodoItem.completed_at >= month_ago,
-                TodoItem.created_at.isnot(None))
+                TodoItem.created_at.isnot(None),
+                (TodoItem.vibe_status == None) | (TodoItem.vibe_status == ""))  # 排除研发任务
         .all()
     )
     if not completed_items:
         return
-
-    # Only include tags that are part of the active hierarchy (child or parent),
-    # excluding orphan tags left after one-click organize/manual deletion.
-    all_tags = db.query(TodoTag).all()
-    parent_ids = {t.parent_id for t in all_tags if t.parent_id}
-    active_tag_names = {t.name for t in all_tags if t.parent_id is not None or t.id in parent_ids}
 
     # Group durations (in minutes) by tag name
     tag_durations: dict[str, list[float]] = {}
@@ -1053,7 +1048,7 @@ def compute_duration_stats(db: Session):
         dur_min = (item.completed_at - item.created_at).total_seconds() / 60.0
         if dur_min < 0:
             continue
-        tag_names = [t.name for t in item.tags if t.name in active_tag_names] if item.tags else []
+        tag_names = [t.name for t in item.tags] if item.tags else []
         if not tag_names:
             tag_names = ["无标签"]
         for tn in tag_names:
