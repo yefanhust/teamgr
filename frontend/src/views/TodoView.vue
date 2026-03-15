@@ -1211,7 +1211,8 @@
         </div>
         <textarea
           v-model="improveFeedback"
-          class="w-full border border-gray-300 rounded-lg p-2 text-sm resize-y min-h-[80px] outline-none focus:border-indigo-400"
+          class="w-full border border-gray-300 rounded-lg p-2 text-sm resize-y min-h-[160px] outline-none focus:border-indigo-400"
+          rows="6"
           placeholder="需要改进的地方..."
         ></textarea>
       </div>

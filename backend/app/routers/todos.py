@@ -1147,6 +1147,10 @@ def _build_analysis_prompt(db):
     if not completed_items:
         return None, 0
 
+    # Convert UTC times to Asia/Shanghai for display in LLM prompt
+    from zoneinfo import ZoneInfo
+    tz_shanghai = ZoneInfo("Asia/Shanghai")
+
     task_lines = []
     for item in completed_items:
         tags_str = ", ".join(t.name for t in item.tags) if item.tags else "无标签"
@@ -1160,7 +1164,8 @@ def _build_analysis_prompt(db):
         if item.deadline:
             line += f" | 截止日：{item.deadline}"
         if item.completed_at:
-            line += f" | 完成时间：{item.completed_at.strftime('%Y-%m-%d %H:%M')}"
+            completed_local = item.completed_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai)
+            line += f" | 完成时间：{completed_local.strftime('%Y-%m-%d %H:%M')}"
         task_lines.append(line)
 
     tasks_text = "\n".join(task_lines)
