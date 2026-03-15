@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from app.config import load_config, get_auth_password, get_gemini_config
 from app.database import init_db, SessionLocal
-from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification, scholar
+from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification, scholar, backup
 from app.services.backup_service import setup_backup_scheduler
 
 # ANSI color codes
@@ -227,6 +227,7 @@ app.include_router(ideas.router)
 app.include_router(todos.router)
 app.include_router(notification.router)
 app.include_router(scholar.router)
+app.include_router(backup.router)
 
 
 # Settings API for model switching

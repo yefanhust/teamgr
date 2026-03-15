@@ -13,16 +13,24 @@
           <span class="text-sm font-medium" :class="{ 'font-bold': isActive(item.route) }">{{ item.label }}</span>
         </div>
         <van-icon name="setting-o" size="20" class="text-gray-400 cursor-pointer flex-shrink-0 ml-1" @click="router.push('/settings')" />
+        <div class="relative flex-shrink-0 cursor-pointer ml-0.5" @click="router.push('/backup-logs')">
+          <van-icon name="shield-o" size="20" :class="backupHealthy ? 'text-gray-400' : 'text-red-500'" />
+          <span v-if="!backupHealthy" class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border border-white"></span>
+        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
+import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import api from '../api'
 
 const router = useRouter()
 const route = useRoute()
+
+const backupHealthy = ref(true)
 
 const navItems = [
   {
@@ -68,6 +76,19 @@ function navigateTo(target) {
     router.push(target)
   }
 }
+
+async function checkBackupStatus() {
+  try {
+    const { data } = await api.get('/api/backup/status')
+    backupHealthy.value = data.healthy
+  } catch {
+    // Silently ignore - don't block UI
+  }
+}
+
+onMounted(() => {
+  checkBackupStatus()
+})
 </script>
 
 <style scoped>

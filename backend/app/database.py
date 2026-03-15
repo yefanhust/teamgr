@@ -49,6 +49,7 @@ def init_db():
     )
     from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis, TodoDurationStats  # noqa
     from app.models.scholar import ScholarScheduledQuestion, ScholarScheduledResult  # noqa
+    from app.models.backup import BackupLog  # noqa
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _seed_default_dimensions()

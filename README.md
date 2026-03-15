@@ -423,14 +423,13 @@ notification:
 
 ## 12. 备份
 
-### 12.1 腾讯云COS备份
+系统每日自动将所有关键数据打包加密后备份到腾讯云 COS。备份内容包括：数据库、配置文件、自定义提示词、龙图阁对话历史和上传文件。
 
-系统支持每日自动备份数据库到腾讯云 COS 对象存储。
+### 12.1 配置
 
-1. 登录 [腾讯云控制台](https://console.cloud.tencent.com/cos)
-2. 创建存储桶
-3. 在 访问管理 -> API密钥管理 获取 SecretId 和 SecretKey
-4. 配置 `config/config.yaml`:
+1. 登录 [腾讯云控制台](https://console.cloud.tencent.com/cos) 创建存储桶
+2. 在 访问管理 -> API密钥管理 获取 SecretId 和 SecretKey
+3. 配置 `config/config.yaml`:
    ```yaml
    cos:
      enabled: true
@@ -440,5 +439,70 @@ notification:
      bucket: "your-bucket-1234567890"
    backup:
      enabled: true
-     cron_hour: 3   # 每天凌晨3点备份
+     cron_hour: 3
+     cron_minute: 0
+     encryption_password: "your-strong-backup-password"  # 务必牢记！
    ```
+
+### 12.2 备份内容
+
+| 数据 | 说明 |
+|------|------|
+| `data/teamgr.db` | SQLite 数据库（通过 backup API 安全导出） |
+| `config/config.yaml` | 配置文件（含 API Key、密码等） |
+| `config/instructions.yaml` | 自定义 LLM 提示词 |
+| `data/scholar-conversations.json` | 龙图阁对话历史 |
+| `data/scholar-sessions/` | 龙图阁会话 ID |
+| `data/scholar-files/` | 龙图阁上传文件 |
+| `data/vibe-sessions/` | Vibe 会话 ID |
+
+### 12.3 安全机制
+
+- **AES-256-GCM 加密**：备份包在上传前加密，COS 泄露也不会暴露数据
+- **未设置加密密码时不上传**：防止明文备份泄露，系统会记录失败日志并推送企微告警
+- **两把钥匙**：恢复需要 COS 凭证（访问备份）+ 加密密码（解密内容）
+
+### 12.4 备份日志
+
+点击页面顶部导航栏的盾牌图标可查看备份日志，包括：
+- 备份健康状态（最后成功时间、包大小、加密状态）
+- 历史备份记录（成功/失败、时间、大小、错误信息）
+- 手动触发备份按钮
+
+当备份失败或超过 36 小时未成功备份时，盾牌图标会显示红色角标。
+
+### 12.5 灾难恢复
+
+假设机器完全崩溃，需要在新机器上恢复：
+
+```bash
+# 1. 拉取代码
+git clone <repo-url> teamgr && cd teamgr
+
+# 2. 安装恢复脚本依赖
+pip install cos-python-sdk-v5 cryptography
+
+# 3. 从 COS 下载并恢复备份
+python scripts/restore_from_cos.py \
+  --secret-id YOUR_COS_SECRET_ID \
+  --secret-key YOUR_COS_SECRET_KEY \
+  --region ap-singapore \
+  --bucket taco-sg-1251783334 \
+  --password YOUR_BACKUP_PASSWORD
+
+# 4. 构建并启动容器
+docker-compose -f docker/docker-compose.yml up -d --build
+docker-compose -f docker/docker-compose.yml exec teamgr /workspace/scripts/start_web.sh
+```
+
+恢复特定时间点版本：
+```bash
+python scripts/restore_from_cos.py ... --timestamp 20260315_043000
+```
+
+恢复旧格式（未加密 .db 文件）：
+```bash
+python scripts/restore_from_cos.py ... --legacy
+```
+
+> **重要**：请在安全的地方（如密码管理器）记录以下三个信息：COS SecretId、COS SecretKey、备份加密密码。加密密码遗忘后加密备份将无法恢复。

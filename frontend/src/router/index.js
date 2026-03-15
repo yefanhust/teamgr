@@ -58,6 +58,11 @@ const routes = [
     name: 'Settings',
     component: () => import('../views/SettingsView.vue'),
   },
+  {
+    path: '/backup-logs',
+    name: 'BackupLogs',
+    component: () => import('../views/BackupLogsView.vue'),
+  },
 ]
 
 const router = createRouter({

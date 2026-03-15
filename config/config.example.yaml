@@ -72,6 +72,7 @@ notification:
         - trigger: "todo_daily_list"  # 每日任务清单
           cron_hour: 8
           cron_minute: 5
+        # 备份失败告警无需订阅，会自动推送到所有已启用的机器人
 
 # 定时任务调度配置
 schedulers:
@@ -95,3 +96,4 @@ backup:
   enabled: false
   cron_hour: 3
   cron_minute: 0
+  encryption_password: ""   # 备份加密密码（AES-256-GCM），务必牢记！未设置时备份不会上传
