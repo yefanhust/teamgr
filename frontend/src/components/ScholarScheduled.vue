@@ -342,12 +342,20 @@ function formatRelativeTime(iso) {
 }
 
 // Markdown renderer (with pipe table support)
-function colorizeCell(text) {
-  // Color percentage changes: green for up, red for down
-  // Matches: +2.3%, -1.5%, ▲2.3%, ▼1.5%, 涨2.3%, 跌1.5%
+function inlineMarkdown(text) {
+  // Process inline markdown: bold, italic, inline code
   return text
-    .replace(/([+▲涨]\s*[\d.]+%)/g, '<span style="color:#16a34a;font-weight:600">$1</span>')
-    .replace(/([-▼跌]\s*[\d.]+%)/g, '<span style="color:#dc2626;font-weight:600">$1</span>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">$1</code>')
+}
+
+function colorizeCell(text) {
+  // Replace +/- with ▲/▼ triangles and colorize percentage changes
+  // Single regex per direction to avoid double-wrapping
+  return text
+    .replace(/[+▲涨]\s*([\d.]+%)/g, '<span style="color:#16a34a;font-weight:600">▲$1</span>')
+    .replace(/[-▼跌]\s*([\d.]+%)/g, '<span style="color:#dc2626;font-weight:600">▼$1</span>')
 }
 
 function renderMarkdownTable(block) {
@@ -358,11 +366,11 @@ function renderMarkdownTable(block) {
   const header = rows[0]
   const body = rows.slice(2)
   let t = '<div class="overflow-x-auto my-2"><table class="scholar-table"><thead><tr>'
-  for (const h of header) t += `<th>${h}</th>`
+  for (const h of header) t += `<th>${inlineMarkdown(h)}</th>`
   t += '</tr></thead><tbody>'
   for (const row of body) {
     t += '<tr>'
-    for (let i = 0; i < header.length; i++) t += `<td>${colorizeCell(row[i] || '')}</td>`
+    for (let i = 0; i < header.length; i++) t += `<td>${colorizeCell(inlineMarkdown(row[i] || ''))}</td>`
     t += '</tr>'
   }
   t += '</tbody></table></div>'

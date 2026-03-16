@@ -1,6 +1,5 @@
 """Scholar (龙图阁大学士) router — AI Q&A powered by Claude Code CLI."""
 
-import hashlib
 import logging
 import os
 import re
@@ -488,33 +487,7 @@ async def get_scheduled_results(
 
 # ──────────────── TTS (Text-to-Speech via edge-tts) ────────────────
 
-_TTS_CACHE_DIR = os.path.join(
-    os.environ.get("TEAMGR_DATA_DIR", "/app/data"),
-    "scholar-tts-cache",
-)
-os.makedirs(_TTS_CACHE_DIR, exist_ok=True)
-
-
-def _strip_markdown(text: str) -> str:
-    """Remove markdown formatting for cleaner TTS output."""
-    # Strip Sources / references section at the end (not useful for audio)
-    text = re.sub(
-        r'\n(?:Sources|References|参考来源|来源|资料来源)\s*[:：]?\s*\n[\s\S]*$',
-        '', text, flags=re.I,
-    )
-    text = re.sub(r'```[\s\S]*?```', '', text)        # code blocks
-    text = re.sub(r'\|[^\n]+\|', '', text)             # table rows
-    text = re.sub(r'^[-*]{3,}$', '', text, flags=re.M) # hr
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.M) # headings (keeps "1. Title")
-    text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)       # bold
-    text = re.sub(r'\*(.*?)\*', r'\1', text)            # italic
-    text = re.sub(r'`([^`]+)`', r'\1', text)            # inline code
-    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)# links
-    text = re.sub(r'^[-*+]\s+', '', text, flags=re.M)   # unordered list markers
-    # NOTE: ordered list markers (1. 2. 3.) are intentionally kept —
-    # they provide structure for TTS and match the displayed numbered items
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
+from app.services.tts_service import strip_markdown, generate_tts_cache_async, get_tts_cache_path
 
 
 @router.get("/scheduled/results/{result_id}/tts")
@@ -545,26 +518,9 @@ async def get_result_tts(
     if not answer.strip():
         raise HTTPException(status_code=400, detail="结果内容为空")
 
-    # Cache by content hash
-    clean_text = _strip_markdown(answer)
-    text_hash = hashlib.md5(clean_text.encode()).hexdigest()
-    cache_path = os.path.join(_TTS_CACHE_DIR, f"{text_hash}.mp3")
-
-    if not os.path.exists(cache_path):
-        import edge_tts
-        import asyncio
-
-        voice = "zh-CN-YunxiNeural"
-        communicate = edge_tts.Communicate(clean_text, voice, rate="+10%")
-
-        try:
-            await communicate.save(cache_path)
-        except Exception as e:
-            logger.error(f"edge-tts generation failed: {e}")
-            # Clean up partial file
-            if os.path.exists(cache_path):
-                os.remove(cache_path)
-            raise HTTPException(status_code=500, detail=f"语音生成失败: {e}")
+    cache_path = await generate_tts_cache_async(answer)
+    if not cache_path:
+        raise HTTPException(status_code=500, detail="语音生成失败")
 
     return FileResponse(
         cache_path,

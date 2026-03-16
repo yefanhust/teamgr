@@ -383,6 +383,13 @@ def _run_single_question_cron(question_id: int):
             db.commit()
             logger.info(f"Cron result saved: '{q.title}' [{period_label}]")
 
+            # Pre-generate TTS audio so it's ready when users want to listen
+            if status == "success":
+                from app.services.tts_service import generate_tts_cache_sync
+                tts_path = generate_tts_cache_sync(answer)
+                if tts_path:
+                    logger.info(f"TTS pre-generated for '{q.title}' [{period_label}]")
+
         except Exception as e:
             logger.error(f"Cron execution failed for '{q.title}': {e}")
             db.rollback()
@@ -458,6 +465,13 @@ def run_scholar_scheduled_job(schedule_type: str):
                 db.add(result)
                 db.commit()
                 logger.info(f"Scholar scheduled result saved: '{q.title}' [{period_label}]")
+
+                # Pre-generate TTS audio so it's ready when users want to listen
+                if status == "success":
+                    from app.services.tts_service import generate_tts_cache_sync
+                    tts_path = generate_tts_cache_sync(answer)
+                    if tts_path:
+                        logger.info(f"TTS pre-generated for '{q.title}' [{period_label}]")
 
             except Exception as e:
                 logger.error(f"Scholar scheduled query failed for '{q.title}': {e}")
@@ -549,6 +563,13 @@ def run_single_question_now(question_id: int, force: bool = False) -> dict:
         db.add(result)
         db.commit()
         db.refresh(result)
+
+        # Pre-generate TTS audio so it's ready when users want to listen
+        if status == "success":
+            from app.services.tts_service import generate_tts_cache_sync
+            tts_path = generate_tts_cache_sync(answer)
+            if tts_path:
+                logger.info(f"TTS pre-generated for '{q.title}' [{period_label}]")
 
         return {
             "result_id": result.id,
