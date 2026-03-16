@@ -1202,6 +1202,8 @@
       title="改进"
       show-cancel-button
       confirm-button-text="提交"
+      width="90vw"
+      class="improve-dialog"
       @confirm="submitImprove"
     >
       <div class="px-4 py-3">
@@ -1211,7 +1213,7 @@
         </div>
         <textarea
           v-model="improveFeedback"
-          class="w-full border border-gray-300 rounded-lg p-2 text-sm resize-y min-h-[160px] outline-none focus:border-indigo-400"
+          class="w-full border border-gray-300 rounded-lg p-3 text-base resize-y min-h-[160px] outline-none focus:border-indigo-400"
           rows="6"
           placeholder="需要改进的地方..."
         ></textarea>
@@ -2748,5 +2750,12 @@ function formatDateTime(isoStr) {
 :deep(.van-tag) {
   white-space: nowrap;
   flex-shrink: 0;
+}
+</style>
+
+<style>
+/* PC端改进对话框限制最大宽度 */
+.improve-dialog {
+  max-width: 560px !important;
 }
 </style>
