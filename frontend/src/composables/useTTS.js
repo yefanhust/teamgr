@@ -15,8 +15,13 @@ export function useTTS() {
 
   let audio = null
   let progressTimer = null
+  let loadTimeout = null
 
   function _cleanup() {
+    if (loadTimeout) {
+      clearTimeout(loadTimeout)
+      loadTimeout = null
+    }
     if (progressTimer) {
       clearInterval(progressTimer)
       progressTimer = null
@@ -50,15 +55,29 @@ export function useTTS() {
     progress.value = 0
 
     audio = new Audio()
-    audio.src = `/api/scholar/scheduled/results/${resultId}/tts?token=${encodeURIComponent(token)}`
+    audio.preload = 'auto'
 
-    audio.oncanplaythrough = () => {
+    let hasStarted = false
+    function _tryPlay() {
+      if (hasStarted || !audio) return
+      hasStarted = true
+      if (loadTimeout) {
+        clearTimeout(loadTimeout)
+        loadTimeout = null
+      }
       isLoading.value = false
       isSpeaking.value = true
       audio.playbackRate = playbackRate.value
-      audio.play()
+      audio.play().catch(() => {
+        isSpeaking.value = false
+        isLoading.value = false
+      })
       _trackProgress()
     }
+
+    // Use multiple events — canplay fires earlier and more reliably than canplaythrough
+    audio.oncanplay = _tryPlay
+    audio.oncanplaythrough = _tryPlay
 
     audio.onplay = () => {
       isSpeaking.value = true
@@ -87,7 +106,14 @@ export function useTTS() {
       isPaused.value = false
     }
 
-    // Start loading
+    // Timeout: if still loading after 3 minutes, give up
+    loadTimeout = setTimeout(() => {
+      if (isLoading.value && !hasStarted) {
+        stop()
+      }
+    }, 180000)
+
+    audio.src = `/api/scholar/scheduled/results/${resultId}/tts?token=${encodeURIComponent(token)}`
     audio.load()
   }
 

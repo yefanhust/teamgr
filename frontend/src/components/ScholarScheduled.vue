@@ -96,6 +96,7 @@
                   <span v-else-if="ttsResultId === r.id && tts.isSpeaking.value && !tts.isPaused.value">暂停朗读</span>
                   <span v-else-if="ttsResultId === r.id && tts.isPaused.value">继续朗读</span>
                   <span v-else>语音朗读</span>
+                  <van-icon v-if="!(ttsResultId === r.id && (tts.isSpeaking.value || tts.isLoading.value)) && r.tts_ready" name="checked" size="12" class="text-green-400" title="语音已预生成" />
                 </div>
                 <div v-if="ttsResultId === r.id && (tts.isSpeaking.value || tts.isLoading.value)" class="flex items-center gap-2 flex-1 min-w-0">
                   <div
@@ -358,6 +359,14 @@ function colorizeCell(text) {
     .replace(/[-▼跌]\s*([\d.]+%)/g, '<span style="color:#dc2626;font-weight:600">▼$1</span>')
 }
 
+function detectRowDirection(cells) {
+  // Scan all cells in a row to detect up/down/neutral
+  const joined = cells.join(' ')
+  if (/[+▲涨]\s*[\d.]+%/.test(joined)) return 'up'
+  if (/[-▼跌]\s*[\d.]+%/.test(joined)) return 'down'
+  return 'neutral'
+}
+
 function renderMarkdownTable(block) {
   const rows = block.map(line =>
     line.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim())
@@ -365,11 +374,12 @@ function renderMarkdownTable(block) {
   if (rows.length < 2) return block.join('\n')
   const header = rows[0]
   const body = rows.slice(2)
-  let t = '<div class="overflow-x-auto my-2"><table class="scholar-table"><thead><tr>'
+  let t = '<div class="overflow-x-auto my-2"><table class="scholar-table scholar-table-styled"><thead><tr>'
   for (const h of header) t += `<th>${inlineMarkdown(h)}</th>`
   t += '</tr></thead><tbody>'
   for (const row of body) {
-    t += '<tr>'
+    const dir = detectRowDirection(row)
+    t += `<tr class="row-${dir}">`
     for (let i = 0; i < header.length; i++) t += `<td>${colorizeCell(inlineMarkdown(row[i] || ''))}</td>`
     t += '</tr>'
   }
@@ -558,8 +568,15 @@ async function runNow(q, force = false) {
       if (prog.stage) progressStage.value = prog.stage
       if (prog.events) progressEvents.value = prog.events
 
-      // Check if done
-      if (prog.done) {
+      // Check if done — either explicit done flag, or running=false (task finished and cleaned up).
+      // Skip running=false in the first 6s (3 polls) — the background thread may not have registered yet.
+      const taskFinished = prog.done || (!prog.running && elapsed > 6000)
+      if (taskFinished) {
+        // When running=false without done, the task finished but _active_queries was already cleaned up.
+        // Wait a moment for the DB write + TTS pre-generation to complete.
+        if (!prog.done) {
+          await new Promise(r => setTimeout(r, 2000))
+        }
         const { data } = await api.get(`/api/scholar/scheduled/${q.id}/results?limit=30`)
         results.value = data.results
         if (data.results.length > 0) {
@@ -693,5 +710,55 @@ defineExpose({ refresh: loadQuestions })
 }
 .scholar-md :deep(.scholar-table tr:nth-child(even)) {
   background: #f9fafb;
+}
+
+/* Styled market table: colored rows with rounded corners */
+.scholar-md :deep(.scholar-table-styled) {
+  width: auto;
+  min-width: 50%;
+  margin: 0 auto;
+  border-collapse: separate;
+  border-spacing: 0 3px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+.scholar-md :deep(.scholar-table-styled th) {
+  background: transparent;
+  border: none;
+  padding: 1px 6px 4px;
+  font-size: 0.7rem;
+  color: #9ca3af;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.scholar-md :deep(.scholar-table-styled td) {
+  border: none;
+  padding: 4px 6px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.scholar-md :deep(.scholar-table-styled tr.row-down td) {
+  background: #fef2f2;
+  color: #991b1b;
+}
+.scholar-md :deep(.scholar-table-styled tr.row-up td) {
+  background: #f0fdf4;
+  color: #166534;
+}
+.scholar-md :deep(.scholar-table-styled tr.row-neutral td) {
+  background: #f9fafb;
+  color: #374151;
+}
+/* Rounded corners: first and last cell in each row */
+.scholar-md :deep(.scholar-table-styled tbody td:first-child) {
+  border-radius: 8px 0 0 8px;
+}
+.scholar-md :deep(.scholar-table-styled tbody td:last-child) {
+  border-radius: 0 8px 8px 0;
+}
+/* Bold text in colored rows should inherit row color */
+.scholar-md :deep(.scholar-table-styled tr.row-down strong),
+.scholar-md :deep(.scholar-table-styled tr.row-up strong) {
+  color: inherit;
 }
 </style>

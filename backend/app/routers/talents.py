@@ -812,3 +812,89 @@ async def organize_tags(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+def run_daily_tag_organize():
+    """Background job: run talent tag organize (non-streaming)."""
+    import time
+    from app.database import SessionLocal
+    from app.services.llm_service import _record_llm_usage
+
+    db = SessionLocal()
+    try:
+        tags = db.query(Tag).all()
+        if not tags:
+            logger.info("Daily tag organize: no tags, skipping")
+            return
+
+        tag_names = [t.name for t in tags]
+        prompt = _build_organize_prompt(tag_names)
+
+        from google import genai
+        from google.genai import types as genai_types
+        from app.config import get_gemini_config, get_model_defaults
+        from app.services.llm_service import get_current_model_name
+
+        cfg = get_gemini_config()
+        api_key = cfg.get("api_key", "")
+        if not api_key or api_key == "your-gemini-api-key-here":
+            logger.warning("Daily tag organize: Gemini API key not configured, skipping")
+            return
+
+        organize_model = get_model_defaults().get("organize-tags") or get_current_model_name()
+        client = genai.Client(api_key=api_key)
+
+        t0 = time.monotonic()
+        response = client.models.generate_content(
+            model=organize_model,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                thinking_config=genai_types.ThinkingConfig(include_thoughts=True),
+            ),
+        )
+
+        full_text = ""
+        for part in response.candidates[0].content.parts:
+            if not getattr(part, 'thought', False):
+                full_text += getattr(part, 'text', '') or ''
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) if usage else 0
+        osl = getattr(usage, 'candidates_token_count', 0) if usage else 0
+        _record_llm_usage(organize_model, "organize-tags", duration_ms, isl, osl)
+
+        text = full_text.strip()
+        if text.startswith("```"):
+            text = re.sub(r'^```\w*\n?', '', text)
+            text = re.sub(r'\n?```$', '', text)
+        result = json.loads(text)
+
+        deletes = result.get("deletes", [])
+        if deletes:
+            deleted = _delete_tags(db, deletes)
+            logger.info(f"Daily tag organize: deleted {len(deleted)} tags")
+
+        renames = result.get("renames", [])
+        if renames:
+            rename_descs = _rename_tags(db, renames)
+            logger.info(f"Daily tag organize: renamed {len(rename_descs)} tags")
+
+        merges = result.get("merges", [])
+        if merges:
+            merge_descs = _merge_similar_tags(db, merges)
+            logger.info(f"Daily tag organize: merged {len(merge_descs)} groups")
+
+        categories = result.get("categories", [])
+        if categories:
+            _apply_tag_hierarchy(db, categories)
+            logger.info(f"Daily tag organize: applied {len(categories)} categories")
+        else:
+            logger.warning("Daily tag organize: LLM returned no categories")
+
+        logger.info("Daily tag organize completed successfully")
+
+    except Exception as e:
+        logger.error(f"Daily tag organize failed: {e}")
+    finally:
+        db.close()

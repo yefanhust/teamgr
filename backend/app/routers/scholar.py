@@ -479,6 +479,7 @@ async def get_scheduled_results(
                 "status": r.status,
                 "generated_at": _utc_iso(r.generated_at),
                 "duration_seconds": r.duration_seconds,
+                "tts_ready": r.status == "success" and bool(r.answer and r.answer.strip()) and os.path.exists(get_tts_cache_path(r.answer)),
             } for r in results],
         }
     finally:

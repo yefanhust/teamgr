@@ -183,6 +183,17 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f"Repeat todo check job registered: every {rt.get('interval_hours', 1)} hour(s)")
 
+        from app.routers.talents import run_daily_tag_organize
+        to = sc.get("daily_tag_organize", {})
+        _scheduler.add_job(
+            run_daily_tag_organize,
+            "cron",
+            hour=to.get("cron_hour", 22),
+            minute=to.get("cron_minute", 0),
+            id="daily_tag_organize",
+        )
+        logger.info(f"Tag organize job registered: daily at {to.get('cron_hour', 22):02d}:{to.get('cron_minute', 0):02d}")
+
         # Scholar scheduled questions — one job per enabled question
         from app.services.scholar_scheduled_service import seed_default_scheduled_questions, refresh_scholar_jobs
         seed_default_scheduled_questions()

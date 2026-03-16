@@ -101,9 +101,7 @@ SCHEDULER_TYPES = {
     "daily_duration_stats": "任务耗时统计",
     "repeat_todo_check": "周期任务自动创建",
     "daily_backup": "数据库备份",
-    "scholar_daily": "龙图阁每日定时问题",
-    "scholar_weekly": "龙图阁每周定时问题",
-    "scholar_monthly": "龙图阁每月定时问题",
+    "daily_tag_organize": "人才卡标签自动整理",
 }
 
 SCHEDULER_DESCRIPTIONS = {
@@ -113,9 +111,7 @@ SCHEDULER_DESCRIPTIONS = {
     "daily_duration_stats": "统计已完成任务的实际耗时数据",
     "repeat_todo_check": "检查设置了重复规则的已完成任务，自动创建下一周期的待办（如每日/每周/每月重复）",
     "daily_backup": "将数据库备份到腾讯云 COS",
-    "scholar_daily": "每日执行龙图阁定时问题（如财经新闻、科技进展），通过 Claude CLI + WebSearch 获取实时信息",
-    "scholar_weekly": "每周执行龙图阁定时问题，基于每日结果分析周趋势",
-    "scholar_monthly": "每月执行龙图阁定时问题，基于每日结果分析月趋势",
+    "daily_tag_organize": "每日自动执行人才卡标签一键整理（合并同义标签、建立层级分类）",
 }
 
 _SCHEDULER_DEFAULTS = {
@@ -125,9 +121,7 @@ _SCHEDULER_DEFAULTS = {
     "daily_duration_stats": {"cron_hour": 3, "cron_minute": 35},
     "repeat_todo_check": {"interval_hours": 1},
     "daily_backup": {"cron_hour": 3, "cron_minute": 0},
-    "scholar_daily": {"cron_hour": 6, "cron_minute": 0},
-    "scholar_weekly": {"cron_hour": 7, "cron_minute": 0, "day_of_week": "mon"},
-    "scholar_monthly": {"cron_hour": 8, "cron_minute": 0, "day_of_month": 1},
+    "daily_tag_organize": {"cron_hour": 22, "cron_minute": 0},
 }
 
 
