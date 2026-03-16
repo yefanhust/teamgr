@@ -1,10 +1,10 @@
 {
   "trusted": [
     {
-      "device_id": "039def4f-bc82-4033-a476-c04732d98f3f",
+      "device_id": "2256ee79-82a1-4e1f-9779-9a05ff29e9df",
       "device_name": "iPhone",
-      "trusted_at": "2026-03-16T05:48:06.964793+00:00",
-      "last_used_at": "2026-03-16T05:48:06.964793+00:00"
+      "trusted_at": "2026-03-16T13:04:22.626741+00:00",
+      "last_used_at": "2026-03-16T13:04:22.626741+00:00"
     }
   ],
   "blacklisted": []

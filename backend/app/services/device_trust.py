@@ -80,13 +80,28 @@ def is_device_blacklisted(device_id: str) -> bool:
 
 
 def trust_device(device_id: str, user_agent: str) -> bool:
-    """Add device to trusted list. Returns False if already trusted or blacklisted."""
+    """Add device to trusted list. Returns False only if blacklisted.
+    Idempotent: if already trusted, returns True.
+    Deduplicates by device_name: replaces existing entry with same name
+    (handles Safari clearing localStorage and generating a new device_id).
+    """
     data = _read()
     status = get_device_status(device_id)
-    if status != "unknown":
+    if status == "blacklisted":
         return False
+    if status == "trusted":
+        return True  # already trusted, idempotent
+
     now = datetime.now(timezone.utc).isoformat()
     device_name = _parse_device_name(user_agent)
+
+    # Remove any existing trusted entry with the same device_name
+    # (e.g., old iPhone entry with a stale device_id after localStorage was cleared)
+    old_count = len(data["trusted"])
+    data["trusted"] = [d for d in data["trusted"] if d.get("device_name") != device_name]
+    if len(data["trusted"]) < old_count:
+        logger.info(f"Replaced stale trust entry for {device_name}")
+
     data["trusted"].append({
         "device_id": device_id,
         "device_name": device_name,

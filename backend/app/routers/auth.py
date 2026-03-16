@@ -136,11 +136,11 @@ async def trust_device_endpoint(
     request: Request,
     _token: str = Depends(require_auth),
 ):
-    """Trust the current device. Allows multiple trusted devices."""
+    """Trust the current device. Idempotent: re-trusting returns refresh_token."""
     user_agent = request.headers.get("User-Agent", "")
     success = trust_device(body.device_id, user_agent)
     if not success:
-        raise HTTPException(status_code=409, detail="该设备已在信任或黑名单中")
+        raise HTTPException(status_code=409, detail="该设备在黑名单中，无法信任")
 
     refresh_token = create_refresh_token(body.device_id)
     return TrustDeviceResponse(message="设备已信任", refresh_token=refresh_token)

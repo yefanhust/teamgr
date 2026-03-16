@@ -118,6 +118,13 @@ export function useTTS() {
     setRate(next)
   }
 
+  function seek(percent) {
+    if (audio && audio.duration && isFinite(audio.duration)) {
+      audio.currentTime = (percent / 100) * audio.duration
+      progress.value = Math.round(percent)
+    }
+  }
+
   function stop() {
     _cleanup()
     isLoading.value = false
@@ -155,5 +162,6 @@ export function useTTS() {
     toggle,
     setRate,
     cycleRate,
+    seek,
   }
 }

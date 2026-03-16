@@ -103,8 +103,14 @@
                     @click.stop="tts.cycleRate()"
                     title="切换播放速度"
                   >{{ tts.playbackRate.value === 1.0 ? '1x' : tts.playbackRate.value + 'x' }}</div>
-                  <div class="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
-                    <div class="h-full bg-blue-400 rounded-full transition-all duration-300" :style="{ width: tts.progress.value + '%' }"></div>
+                  <div
+                    class="flex-1 h-8 flex items-center cursor-pointer group"
+                    @touchstart.stop.prevent="startSeekDrag($event)"
+                    @mousedown.stop.prevent="startSeekDrag($event)"
+                  >
+                    <div class="w-full h-1 bg-gray-200 rounded-full overflow-hidden relative group-hover:h-1.5 transition-all">
+                      <div class="h-full bg-blue-400 rounded-full" :style="{ width: tts.progress.value + '%' }"></div>
+                    </div>
                   </div>
                   <van-icon name="close" size="14" class="text-gray-400 cursor-pointer hover:text-gray-600 flex-shrink-0" @click.stop="stopTTS" />
                 </div>
@@ -576,6 +582,34 @@ function toggleTTS(r) {
 function stopTTS() {
   tts.stop()
   ttsResultId.value = null
+}
+
+function seekToPosition(el, clientX) {
+  const rect = el.getBoundingClientRect()
+  const percent = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100))
+  tts.seek(percent)
+}
+
+function startSeekDrag(e) {
+  const el = e.currentTarget
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX
+  seekToPosition(el, clientX)
+
+  const onMove = (ev) => {
+    ev.preventDefault()
+    const x = ev.touches ? ev.touches[0].clientX : ev.clientX
+    seekToPosition(el, x)
+  }
+  const onEnd = () => {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onEnd)
+    document.removeEventListener('touchmove', onMove)
+    document.removeEventListener('touchend', onEnd)
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onEnd)
+  document.addEventListener('touchmove', onMove, { passive: false })
+  document.addEventListener('touchend', onEnd)
 }
 
 function stopPolling() {

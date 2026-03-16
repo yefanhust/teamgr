@@ -497,16 +497,22 @@ os.makedirs(_TTS_CACHE_DIR, exist_ok=True)
 
 def _strip_markdown(text: str) -> str:
     """Remove markdown formatting for cleaner TTS output."""
+    # Strip Sources / references section at the end (not useful for audio)
+    text = re.sub(
+        r'\n(?:Sources|References|参考来源|来源|资料来源)\s*[:：]?\s*\n[\s\S]*$',
+        '', text, flags=re.I,
+    )
     text = re.sub(r'```[\s\S]*?```', '', text)        # code blocks
     text = re.sub(r'\|[^\n]+\|', '', text)             # table rows
     text = re.sub(r'^[-*]{3,}$', '', text, flags=re.M) # hr
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.M) # headings
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.M) # headings (keeps "1. Title")
     text = re.sub(r'\*\*(.*?)\*\*', r'\1', text)       # bold
     text = re.sub(r'\*(.*?)\*', r'\1', text)            # italic
     text = re.sub(r'`([^`]+)`', r'\1', text)            # inline code
     text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)# links
-    text = re.sub(r'^[-*+]\s+', '', text, flags=re.M)   # list markers
-    text = re.sub(r'^\d+\.\s+', '', text, flags=re.M)   # ordered list
+    text = re.sub(r'^[-*+]\s+', '', text, flags=re.M)   # unordered list markers
+    # NOTE: ordered list markers (1. 2. 3.) are intentionally kept —
+    # they provide structure for TTS and match the displayed numbered items
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
