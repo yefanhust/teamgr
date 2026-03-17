@@ -660,12 +660,33 @@ async function downloadAnswerPDF(msgIdx) {
   }
 
   const includeQ = pdfIncludeQuestion.value
-  const titleText = question ? question.substring(0, 50) : '龙图阁大学士'
+
+  // Determine title: when not including question, extract from answer content
+  let titleText = '龙图阁大学士'
+  let answerForPdf = msg.content || ''
+  if (includeQ && question) {
+    titleText = question.substring(0, 50)
+  } else {
+    // Try markdown heading (# / ## / ###), then bold line, then first non-empty line
+    const headingMatch = answerForPdf.match(/^#{1,4}\s+(.+)/m)
+    const boldMatch = answerForPdf.match(/^\*\*(.+?)\*\*/m)
+    if (headingMatch) {
+      titleText = headingMatch[1].replace(/\*\*/g, '').trim().substring(0, 50)
+      // Remove the heading line from answer to avoid title/subtitle duplication
+      answerForPdf = answerForPdf.replace(headingMatch[0], '').replace(/^\s*\n/, '')
+    } else if (boldMatch) {
+      titleText = boldMatch[1].trim().substring(0, 50)
+      answerForPdf = answerForPdf.replace(boldMatch[0], '').replace(/^\s*\n/, '')
+    } else {
+      const firstLine = answerForPdf.trim().split('\n')[0]?.trim()
+      if (firstLine) titleText = firstLine.substring(0, 50)
+    }
+  }
 
   try {
     const res = await api.post('/api/scholar/answer/pdf', {
       question: includeQ ? question : '',
-      answer: msg.content,
+      answer: answerForPdf,
       title: titleText,
     }, { responseType: 'blob' })
 
