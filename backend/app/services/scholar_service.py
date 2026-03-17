@@ -539,8 +539,8 @@ async def stream_response(query_id: str, conversation_id: str = ""):
                         accumulated_text.append(evt.get("content", ""))
                     elif evt["type"] == "done":
                         done = True
-                        # Save result text if available
-                        if evt.get("result"):
+                        # Save result text only as fallback when no text chunks were streamed
+                        if evt.get("result") and not accumulated_text:
                             accumulated_text.append(evt["result"])
         return results, done
 
