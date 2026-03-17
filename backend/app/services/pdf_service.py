@@ -642,6 +642,131 @@ def _build_markdown_elements(
     return elements
 
 
+def generate_scholar_answer_pdf(
+    question: str,
+    answer: str,
+    title: str = "龙图阁大学士",
+) -> bytes:
+    """Generate a PDF for a single Scholar answer.
+
+    Args:
+        question: The user's question
+        answer: The assistant's markdown answer
+        title: PDF title
+
+    Returns: PDF file bytes
+    """
+    font_name = _ensure_chinese_font()
+    buffer = io.BytesIO()
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
+    )
+
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "AnsTitle", parent=styles["Title"],
+        fontName=font_name, fontSize=18, leading=24,
+        spaceAfter=4 * mm,
+    )
+    question_style = ParagraphStyle(
+        "AnsQuestion", parent=styles["Normal"],
+        fontName=font_name, fontSize=11, leading=17,
+        textColor=colors.white, backColor=colors.HexColor("#3B82F6"),
+        borderPadding=(8, 10, 8, 10), spaceAfter=4 * mm,
+    )
+    h1_style = ParagraphStyle(
+        "AnsH1", parent=styles["Heading1"],
+        fontName=font_name, fontSize=16, leading=22,
+        spaceBefore=8, spaceAfter=4,
+        textColor=colors.HexColor("#1F2937"),
+    )
+    h2_style = ParagraphStyle(
+        "AnsH2", parent=styles["Heading2"],
+        fontName=font_name, fontSize=14, leading=20,
+        spaceBefore=6, spaceAfter=3,
+        textColor=colors.HexColor("#1F2937"),
+    )
+    h3_style = ParagraphStyle(
+        "AnsH3", parent=styles["Heading3"],
+        fontName=font_name, fontSize=12, leading=17,
+        spaceBefore=4, spaceAfter=2,
+        textColor=colors.HexColor("#374151"),
+    )
+    body_style = ParagraphStyle(
+        "AnsBody", parent=styles["Normal"],
+        fontName=font_name, fontSize=10, leading=16,
+        spaceAfter=3,
+    )
+    list_style = ParagraphStyle(
+        "AnsList", parent=styles["Normal"],
+        fontName=font_name, fontSize=10, leading=16,
+        leftIndent=12, spaceAfter=2,
+    )
+    code_style = ParagraphStyle(
+        "AnsCode", parent=styles["Normal"],
+        fontName=font_name, fontSize=9, leading=13,
+        leftIndent=8, rightIndent=8, spaceAfter=4,
+        backColor=colors.HexColor("#F3F4F6"),
+    )
+    table_cell_style = ParagraphStyle(
+        "AnsCell", parent=styles["Normal"],
+        fontName=font_name, fontSize=9, leading=13,
+    )
+    table_header_style = ParagraphStyle(
+        "AnsCellH", parent=styles["Normal"],
+        fontName=font_name, fontSize=9, leading=13,
+        textColor=colors.HexColor("#374151"),
+    )
+    footer_style = ParagraphStyle(
+        "AnsFooter", parent=styles["Normal"],
+        fontName=font_name, fontSize=8, leading=12,
+        textColor=colors.grey, alignment=TA_CENTER,
+    )
+
+    heading_styles = {1: h1_style, 2: h2_style, 3: h3_style, 4: h3_style}
+    page_width = A4[0] - 36 * mm
+
+    elements = []
+
+    # Title
+    elements.append(Paragraph(_xml_escape(title), title_style))
+
+    # Question
+    if question and question.strip():
+        elements.append(Paragraph(_xml_escape(question), question_style))
+
+    # Answer (markdown)
+    answer_elements = _build_markdown_elements(
+        answer, _parse_markdown_segments, page_width,
+        body_style, list_style, code_style,
+        table_cell_style, table_header_style,
+        heading_styles, font_name,
+    )
+    elements.extend(answer_elements)
+
+    # Footer
+    elements.append(Spacer(1, 8 * mm))
+    elements.append(HRFlowable(
+        width="100%", thickness=0.5,
+        color=colors.HexColor("#E5E7EB"), spaceAfter=2 * mm,
+    ))
+    gen_time = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+    elements.append(Paragraph(
+        f"导出时间: {gen_time} | 龙图阁大学士",
+        footer_style,
+    ))
+
+    doc.build(elements)
+    return buffer.getvalue()
+
+
 def generate_scholar_conversation_pdf(
     title: str,
     messages: list[dict],

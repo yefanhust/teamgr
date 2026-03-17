@@ -173,36 +173,32 @@ async def delete_conversation(
     raise HTTPException(status_code=404, detail="对话不存在")
 
 
-@router.get("/conversations/{conversation_id}/pdf")
-async def get_conversation_pdf(
-    conversation_id: str,
-    token: str = "",
+class AnswerPDFRequest(BaseModel):
+    question: str = ""
+    answer: str
+    title: str = "龙图阁大学士"
+
+
+@router.post("/answer/pdf")
+async def export_answer_pdf(
+    body: AnswerPDFRequest,
+    _token: str = Depends(require_auth),
 ):
-    """Export a conversation as PDF.
-    Auth via query param 'token' (for direct browser download).
-    """
-    from app.middleware.auth_middleware import verify_token
-    if not token or not verify_token(token):
-        raise HTTPException(status_code=401, detail="认证失败")
-    from app.services.pdf_service import generate_scholar_conversation_pdf
+    """Export a single assistant answer as PDF."""
+    from app.services.pdf_service import generate_scholar_answer_pdf
     from fastapi.responses import Response
     import urllib.parse
 
-    conv = scholar_service.get_conversation(conversation_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="对话不存在")
+    if not body.answer.strip():
+        raise HTTPException(status_code=400, detail="回答内容为空")
 
-    title = conv.get("title", "龙图阁对话")
-    messages = conv.get("messages", [])
-    if not messages:
-        raise HTTPException(status_code=400, detail="对话内容为空")
-
-    pdf_bytes = generate_scholar_conversation_pdf(
-        title=title,
-        messages=messages,
+    pdf_bytes = generate_scholar_answer_pdf(
+        question=body.question,
+        answer=body.answer,
+        title=body.title,
     )
 
-    filename = f"{title}.pdf"
+    filename = f"{body.title}.pdf"
     encoded_filename = urllib.parse.quote(filename)
 
     return Response(

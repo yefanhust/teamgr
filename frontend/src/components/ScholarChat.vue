@@ -19,9 +19,6 @@
         </div>
       </div>
       <div class="flex items-center gap-3 flex-shrink-0">
-        <div v-if="conversationId && messages.some(m => m.role === 'assistant')" class="header-btn" title="导出PDF" @click="downloadConversationPDF">
-          <van-icon name="description" size="18" />
-        </div>
         <div class="header-btn" title="定时报告" @click="showScheduled = true">
           <van-icon name="notes-o" size="18" />
         </div>
@@ -101,7 +98,7 @@
     </transition>
 
     <!-- Messages -->
-    <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50 scholar-messages">
+    <div ref="messagesEl" class="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-gray-50 scholar-messages" @click="pdfMenuIdx = null">
       <div class="max-w-2xl mx-auto">
         <div v-if="messages.length === 0" class="flex flex-col items-center justify-center py-8 text-gray-300">
           <div class="text-6xl mb-4">📜</div>
@@ -146,8 +143,24 @@
 
           <!-- Assistant text -->
           <div v-else-if="msg.role === 'assistant'" class="mb-3">
-            <div class="bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-              <div class="text-base text-gray-700 leading-relaxed scholar-md" v-html="renderMarkdown(msg.content)"></div>
+            <div class="relative bg-white border border-gray-100 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+              <div v-if="!msg.streaming" class="absolute top-2.5 right-2.5 z-10">
+                <div
+                  class="cursor-pointer text-gray-300 active:text-blue-600 transition-colors p-1"
+                  title="导出PDF"
+                  @click.stop="pdfMenuIdx = pdfMenuIdx === idx ? null : idx"
+                >
+                  <van-icon name="description" size="16" />
+                </div>
+                <div v-if="pdfMenuIdx === idx" class="absolute right-0 top-8 bg-white border border-gray-200 rounded-xl shadow-lg p-3 w-48" @click.stop>
+                  <label class="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none mb-3">
+                    <input type="checkbox" v-model="pdfIncludeQuestion" class="rounded" />
+                    <span>包含提问内容</span>
+                  </label>
+                  <van-button size="small" type="primary" block @click="downloadAnswerPDF(idx); pdfMenuIdx = null">导出 PDF</van-button>
+                </div>
+              </div>
+              <div class="text-base text-gray-700 leading-relaxed scholar-md" :class="{ 'pr-7': !msg.streaming }" v-html="renderMarkdown(msg.content)"></div>
               <van-loading v-if="msg.streaming" size="16" class="mt-2" />
             </div>
           </div>
@@ -252,6 +265,8 @@ const categoryColors = ['#3B82F6', '#F59E0B', '#10B981', '#8B5CF6', '#EF4444', '
 const conversationId = ref('')
 const messagesEl = ref(null)
 const inputEl = ref(null)
+const pdfMenuIdx = ref(null)
+const pdfIncludeQuestion = ref(false)
 
 const inputRows = computed(() => {
   const lines = (inputText.value.match(/\n/g) || []).length + 1
@@ -631,14 +646,38 @@ function newConversation() {
   showHistory.value = false
 }
 
-function downloadConversationPDF() {
-  if (!conversationId.value) return
-  const token = localStorage.getItem('teamgr_token')
-  if (!token) {
-    showToast('请先登录')
-    return
+async function downloadAnswerPDF(msgIdx) {
+  // Find the corresponding question (previous user message)
+  const msg = messages.value[msgIdx]
+  if (!msg || msg.role !== 'assistant') return
+
+  let question = ''
+  for (let i = msgIdx - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      question = messages.value[i].content
+      break
+    }
   }
-  window.open(`/api/scholar/conversations/${conversationId.value}/pdf?token=${encodeURIComponent(token)}`, '_blank')
+
+  const includeQ = pdfIncludeQuestion.value
+  const titleText = question ? question.substring(0, 50) : '龙图阁大学士'
+
+  try {
+    const res = await api.post('/api/scholar/answer/pdf', {
+      question: includeQ ? question : '',
+      answer: msg.content,
+      title: titleText,
+    }, { responseType: 'blob' })
+
+    const url = URL.createObjectURL(res.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = titleText.substring(0, 30) + '.pdf'
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    showToast('导出失败')
+  }
 }
 
 async function fetchConversations() {
