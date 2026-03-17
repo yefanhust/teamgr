@@ -898,3 +898,57 @@ def run_daily_tag_organize():
         logger.error(f"Daily tag organize failed: {e}")
     finally:
         db.close()
+
+
+def check_missed_tag_organize(scheduler):
+    """On startup, check if yesterday's tag organize was missed and schedule recovery."""
+    from datetime import datetime, timedelta
+    from app.database import SessionLocal
+    from app.models.talent import LLMUsageLog
+    from app.config import get_scheduler_config
+
+    if scheduler is None:
+        return
+
+    sc = get_scheduler_config().get("daily_tag_organize", {})
+    cron_hour = sc.get("cron_hour", 22)
+    cron_minute = sc.get("cron_minute", 0)
+
+    now = datetime.now()
+    yesterday = now - timedelta(days=1)
+
+    # Check if organize-tags ran yesterday (after the scheduled time)
+    scheduled_yesterday = yesterday.replace(hour=cron_hour, minute=cron_minute, second=0, microsecond=0)
+
+    db = SessionLocal()
+    try:
+        last_run = (
+            db.query(LLMUsageLog)
+            .filter(
+                LLMUsageLog.call_type == "organize-tags",
+                LLMUsageLog.timestamp >= scheduled_yesterday,
+            )
+            .first()
+        )
+        if last_run:
+            return  # Already ran
+
+        # Also skip if today's scheduled time hasn't passed yet AND we're before that time
+        scheduled_today = now.replace(hour=cron_hour, minute=cron_minute, second=0, microsecond=0)
+        if now < scheduled_today and (now - yesterday.replace(hour=0, minute=0)).days < 1:
+            # Only recover if yesterday's scheduled time has truly passed
+            pass  # fall through to schedule recovery
+
+        delay_seconds = 90
+        run_at = datetime.now() + timedelta(seconds=delay_seconds)
+        scheduler.add_job(
+            run_daily_tag_organize,
+            "date",
+            run_date=run_at,
+            id="tag_organize_recovery",
+        )
+        logger.info(f"Tag organize: missed execution detected, recovery scheduled in {delay_seconds}s")
+    except Exception as e:
+        logger.warning(f"Tag organize missed execution check failed: {e}")
+    finally:
+        db.close()
