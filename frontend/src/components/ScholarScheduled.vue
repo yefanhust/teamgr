@@ -719,14 +719,14 @@ defineExpose({ refresh: loadQuestions })
   margin: 0 auto;
   border-collapse: separate;
   border-spacing: 0 3px;
-  font-size: 0.8rem;
-  line-height: 1.4;
+  font-size: 0.95rem;
+  line-height: 1.5;
 }
 .scholar-md :deep(.scholar-table-styled th) {
   background: transparent;
   border: none;
-  padding: 1px 6px 4px;
-  font-size: 0.7rem;
+  padding: 2px 6px 5px;
+  font-size: 0.8rem;
   color: #9ca3af;
   font-weight: 500;
   white-space: nowrap;

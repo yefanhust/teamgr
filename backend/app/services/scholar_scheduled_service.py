@@ -276,6 +276,7 @@ def _build_context_from_dependency(depends_on_id: int, context_days: int) -> str
 
 
 _SCHOLAR_JOB_PREFIX = "scholar_q_"
+_SCHOLAR_RECOVERY_PREFIX = "scholar_recovery_"
 
 
 def refresh_scholar_jobs(scheduler):
@@ -327,6 +328,113 @@ def refresh_scholar_jobs(scheduler):
         logger.info(f"Scholar scheduler refreshed: {len(questions)} job(s)")
     finally:
         db.close()
+
+
+def check_missed_executions(scheduler):
+    """On startup, detect scheduled questions that missed their execution window
+    (e.g. due to server restart) and schedule immediate recovery runs.
+
+    Checks both today's and yesterday's period for daily questions, since a server
+    restart after the scheduled time would leave the previous day's result missing.
+    """
+    from app.database import SessionLocal
+    from app.models.scholar import ScholarScheduledQuestion, ScholarScheduledResult
+
+    if scheduler is None:
+        return
+
+    now = datetime.now(_CN_TZ)
+    db = SessionLocal()
+    try:
+        questions = db.query(ScholarScheduledQuestion).filter(
+            ScholarScheduledQuestion.enabled == True,
+        ).all()
+
+        recovery_count = 0
+        for q in questions:
+            # Only recover daily questions (weekly/monthly are less time-sensitive)
+            if q.schedule_type != "daily":
+                continue
+
+            # Check both today and yesterday for missing results
+            periods_to_check = []
+            today_label = now.strftime("%Y-%m-%d")
+            yesterday_label = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+            # Yesterday should always have a result (its scheduled time has long passed)
+            periods_to_check.append(yesterday_label)
+
+            # Today only if scheduled time has already passed
+            scheduled_time = now.replace(
+                hour=q.cron_hour, minute=q.cron_minute, second=0, microsecond=0
+            )
+            if now >= scheduled_time:
+                periods_to_check.append(today_label)
+
+            for period_label in periods_to_check:
+                existing = (
+                    db.query(ScholarScheduledResult)
+                    .filter(
+                        ScholarScheduledResult.question_id == q.id,
+                        ScholarScheduledResult.period_label == period_label,
+                        ScholarScheduledResult.status == "success",
+                    )
+                    .first()
+                )
+                if existing:
+                    continue  # Already has result
+
+                # Schedule recovery run with staggered delays to avoid overload
+                delay_seconds = 60 + recovery_count * 300  # 1min, 6min, 11min, ...
+                run_at = datetime.now() + timedelta(seconds=delay_seconds)
+
+                def make_recovery(qid):
+                    return lambda: _run_single_question_cron(qid)
+
+                job_id = f"{_SCHOLAR_RECOVERY_PREFIX}{q.id}_{period_label}"
+                scheduler.add_job(
+                    make_recovery(q.id),
+                    "date",
+                    run_date=run_at,
+                    id=job_id,
+                    replace_existing=True,
+                )
+                recovery_count += 1
+                logger.info(
+                    f"Missed execution detected for '{q.title}' [{period_label}], "
+                    f"recovery scheduled in {delay_seconds}s [job={job_id}]"
+                )
+
+        if recovery_count:
+            logger.info(f"Scholar startup recovery: {recovery_count} missed execution(s) scheduled")
+        else:
+            logger.info("Scholar startup recovery: no missed executions detected")
+
+        # Clean up orphaned stream files (older than 24h)
+        _cleanup_orphaned_stream_files()
+
+    except Exception as e:
+        logger.error(f"Failed to check missed executions: {e}")
+    finally:
+        db.close()
+
+
+def _cleanup_orphaned_stream_files():
+    """Remove old sched_*.done and sched_*.jsonl files left by interrupted runs."""
+    cutoff = time.time() - 86400  # 24 hours
+    try:
+        for fname in os.listdir(_STREAM_DIR):
+            if not fname.startswith("sched_"):
+                continue
+            fpath = os.path.join(_STREAM_DIR, fname)
+            try:
+                if os.path.getmtime(fpath) < cutoff:
+                    os.remove(fpath)
+                    logger.info(f"Cleaned up orphaned stream file: {fname}")
+            except OSError:
+                pass
+    except OSError:
+        pass
 
 
 def _run_single_question_cron(question_id: int):

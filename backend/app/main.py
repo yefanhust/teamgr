@@ -195,9 +195,10 @@ async def lifespan(app: FastAPI):
         logger.info(f"Tag organize job registered: daily at {to.get('cron_hour', 22):02d}:{to.get('cron_minute', 0):02d}")
 
         # Scholar scheduled questions — one job per enabled question
-        from app.services.scholar_scheduled_service import seed_default_scheduled_questions, refresh_scholar_jobs
+        from app.services.scholar_scheduled_service import seed_default_scheduled_questions, refresh_scholar_jobs, check_missed_executions
         seed_default_scheduled_questions()
         refresh_scholar_jobs(_scheduler)
+        check_missed_executions(_scheduler)
 
         # Notification delivery jobs (龙图阁 — per-bot per-function scheduling)
         from app.services.notification_scheduler import refresh_notification_jobs
