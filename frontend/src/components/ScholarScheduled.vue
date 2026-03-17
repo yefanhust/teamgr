@@ -82,7 +82,7 @@
               </div>
             </div>
             <div v-if="expandedResult === r.id" class="border-t border-gray-50 bg-gray-50/50">
-              <!-- TTS control bar -->
+              <!-- TTS + PDF control bar -->
               <div v-if="r.status === 'success'" class="px-3 py-2 flex items-center gap-2 border-b border-gray-100 bg-white/60">
                 <div
                   class="flex items-center gap-1.5 cursor-pointer select-none rounded-full px-2.5 py-1 text-xs transition-colors"
@@ -97,6 +97,13 @@
                   <span v-else-if="ttsResultId === r.id && tts.isPaused.value">继续朗读</span>
                   <span v-else>语音朗读</span>
                   <van-icon v-if="!(ttsResultId === r.id && (tts.isSpeaking.value || tts.isLoading.value)) && r.tts_ready" name="checked" size="12" class="text-green-400" title="语音已预生成" />
+                </div>
+                <div
+                  class="flex items-center gap-1.5 cursor-pointer select-none rounded-full px-2.5 py-1 text-xs bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors"
+                  @click.stop="downloadPDF(r)"
+                >
+                  <van-icon name="description" size="14" />
+                  <span>导出PDF</span>
                 </div>
                 <div v-if="ttsResultId === r.id && (tts.isSpeaking.value || tts.isLoading.value)" class="flex items-center gap-2 flex-1 min-w-0">
                   <div
@@ -607,6 +614,15 @@ function toggleTTS(r) {
 function stopTTS() {
   tts.stop()
   ttsResultId.value = null
+}
+
+function downloadPDF(r) {
+  const token = localStorage.getItem('teamgr_token')
+  if (!token) {
+    showToast('请先登录')
+    return
+  }
+  window.open(`/api/scholar/scheduled/results/${r.id}/pdf?token=${encodeURIComponent(token)}`, '_blank')
 }
 
 function seekToPosition(el, clientX) {

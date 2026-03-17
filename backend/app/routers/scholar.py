@@ -173,6 +173,48 @@ async def delete_conversation(
     raise HTTPException(status_code=404, detail="对话不存在")
 
 
+@router.get("/conversations/{conversation_id}/pdf")
+async def get_conversation_pdf(
+    conversation_id: str,
+    token: str = "",
+):
+    """Export a conversation as PDF.
+    Auth via query param 'token' (for direct browser download).
+    """
+    from app.middleware.auth_middleware import verify_token
+    if not token or not verify_token(token):
+        raise HTTPException(status_code=401, detail="认证失败")
+    from app.services.pdf_service import generate_scholar_conversation_pdf
+    from fastapi.responses import Response
+    import urllib.parse
+
+    conv = scholar_service.get_conversation(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+
+    title = conv.get("title", "龙图阁对话")
+    messages = conv.get("messages", [])
+    if not messages:
+        raise HTTPException(status_code=400, detail="对话内容为空")
+
+    pdf_bytes = generate_scholar_conversation_pdf(
+        title=title,
+        messages=messages,
+    )
+
+    filename = f"{title}.pdf"
+    encoded_filename = urllib.parse.quote(filename)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
 # ──────────────── Scheduled Questions ────────────────
 
 
@@ -527,4 +569,67 @@ async def get_result_tts(
         cache_path,
         media_type="audio/mpeg",
         headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
+# ──────────────── PDF Export ────────────────
+
+
+@router.get("/scheduled/results/{result_id}/pdf")
+async def get_result_pdf(
+    result_id: int,
+    token: str = "",
+):
+    """Generate PDF for a scheduled result.
+    Auth via query param 'token' (for direct browser download).
+    """
+    from app.middleware.auth_middleware import verify_token
+    if not token or not verify_token(token):
+        raise HTTPException(status_code=401, detail="认证失败")
+    from app.database import SessionLocal
+    from app.models.scholar import ScholarScheduledResult, ScholarScheduledQuestion
+    from app.services.pdf_service import generate_scholar_result_pdf
+    from fastapi.responses import Response
+    import urllib.parse
+
+    db = SessionLocal()
+    try:
+        r = db.query(ScholarScheduledResult).filter(
+            ScholarScheduledResult.id == result_id,
+        ).first()
+        if not r:
+            raise HTTPException(status_code=404, detail="结果不存在")
+
+        answer = r.answer or ""
+        period_label = r.period_label or ""
+        generated_at = _utc_iso(r.generated_at) or ""
+
+        # Get question title
+        q = db.query(ScholarScheduledQuestion).filter(
+            ScholarScheduledQuestion.id == r.question_id,
+        ).first()
+        title = q.title if q else "龙图阁报告"
+    finally:
+        db.close()
+
+    if not answer.strip():
+        raise HTTPException(status_code=400, detail="结果内容为空")
+
+    pdf_bytes = generate_scholar_result_pdf(
+        title=title,
+        answer=answer,
+        period_label=period_label,
+        generated_at=generated_at,
+    )
+
+    filename = f"{title}_{period_label}.pdf"
+    encoded_filename = urllib.parse.quote(filename)
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+            "Cache-Control": "no-cache",
+        },
     )

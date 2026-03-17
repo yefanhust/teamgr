@@ -19,6 +19,9 @@
         </div>
       </div>
       <div class="flex items-center gap-3 flex-shrink-0">
+        <div v-if="conversationId && messages.some(m => m.role === 'assistant')" class="header-btn" title="导出PDF" @click="downloadConversationPDF">
+          <van-icon name="description" size="18" />
+        </div>
         <div class="header-btn" title="定时报告" @click="showScheduled = true">
           <van-icon name="notes-o" size="18" />
         </div>
@@ -266,6 +269,13 @@ const chatHeight = computed(() => {
 
 // ──────────────── Markdown ────────────────
 
+function inlineMarkdown(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`([^`]+)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono">$1</code>')
+}
+
 function renderMarkdownTable(block) {
   // Parse a pipe-table block (lines array) into HTML <table>
   const rows = block.map(line =>
@@ -276,11 +286,11 @@ function renderMarkdownTable(block) {
   const header = rows[0]
   const body = rows.slice(2)
   let t = '<div class="overflow-x-auto my-2"><table class="scholar-table"><thead><tr>'
-  for (const h of header) t += `<th>${h}</th>`
+  for (const h of header) t += `<th>${inlineMarkdown(h)}</th>`
   t += '</tr></thead><tbody>'
   for (const row of body) {
     t += '<tr>'
-    for (let i = 0; i < header.length; i++) t += `<td>${row[i] || ''}</td>`
+    for (let i = 0; i < header.length; i++) t += `<td>${inlineMarkdown(row[i] || '')}</td>`
     t += '</tr>'
   }
   t += '</tbody></table></div>'
@@ -619,6 +629,16 @@ function newConversation() {
   messages.value = []
   attachedFiles.value = []
   showHistory.value = false
+}
+
+function downloadConversationPDF() {
+  if (!conversationId.value) return
+  const token = localStorage.getItem('teamgr_token')
+  if (!token) {
+    showToast('请先登录')
+    return
+  }
+  window.open(`/api/scholar/conversations/${conversationId.value}/pdf?token=${encodeURIComponent(token)}`, '_blank')
 }
 
 async function fetchConversations() {
