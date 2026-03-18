@@ -131,6 +131,28 @@ def blacklist_device(device_id: str, user_agent: str) -> bool:
     return True
 
 
+def auto_adopt_device(new_device_id: str, user_agent: str) -> bool:
+    """If a trusted entry with the same device_name exists, update its device_id.
+    Handles the case where the same physical device gets a new device_id
+    (e.g., accessing via a different IP/origin causes a new localStorage).
+    Returns True if adopted, False otherwise.
+    """
+    data = _read()
+    device_name = _parse_device_name(user_agent)
+    for d in data.get("trusted", []):
+        if d.get("device_name") == device_name:
+            old_id = d["device_id"]
+            d["device_id"] = new_device_id
+            d["last_used_at"] = datetime.now(timezone.utc).isoformat()
+            _write(data)
+            logger.info(
+                f"Auto-adopted {device_name}: "
+                f"{old_id[:8]}... → {new_device_id[:8]}..."
+            )
+            return True
+    return False
+
+
 def update_last_used(device_id: str):
     data = _read()
     for d in data.get("trusted", []):

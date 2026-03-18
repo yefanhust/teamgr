@@ -22,6 +22,13 @@ export const useAuthStore = defineStore('auth', () => {
       const res = await api.get('/api/auth/status')
       passwordConfigured.value = res.data.password_configured
       authenticated.value = res.data.authenticated
+
+      // Access token expired but have refresh token? Try auto-refresh.
+      // This is the key path for trusted devices returning after token expiry.
+      if (!res.data.authenticated && localStorage.getItem('teamgr_refresh_token')) {
+        await refreshToken()
+      }
+
       statusChecked.value = true
     } catch (e) {
       statusChecked.value = true

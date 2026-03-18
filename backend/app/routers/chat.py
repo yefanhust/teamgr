@@ -171,6 +171,11 @@ async def update_preset(preset_id: int, body: PresetQuestionUpdate, db: Session 
         preset.question = body.question
     if body.is_scheduled is not None:
         preset.is_scheduled = body.is_scheduled
+        # 取消定时查询时，清除旧的查询结果
+        if not body.is_scheduled:
+            db.query(ScheduledQueryResult).filter(
+                ScheduledQueryResult.preset_question_id == preset_id
+            ).delete()
     db.commit()
     db.refresh(preset)
     return _preset_to_dict(preset)
@@ -195,6 +200,8 @@ async def list_scheduled_results(
 ):
     results = (
         db.query(ScheduledQueryResult)
+        .join(PresetQuestion, ScheduledQueryResult.preset_question_id == PresetQuestion.id)
+        .filter(PresetQuestion.is_scheduled == True)
         .order_by(ScheduledQueryResult.generated_at.desc())
         .limit(limit)
         .all()

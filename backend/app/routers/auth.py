@@ -12,7 +12,7 @@ from app.middleware.rate_limiter import (
 )
 from app.services.device_trust import (
     is_device_trusted, is_device_blacklisted, get_device_status,
-    trust_device, blacklist_device, update_last_used,
+    trust_device, blacklist_device, update_last_used, auto_adopt_device,
 )
 
 logger = logging.getLogger(__name__)
@@ -126,7 +126,19 @@ async def login(
                 device_blacklisted=True,
             )
 
-    # Unknown device or no device_id — frontend decides what to show
+        # Unknown device_id — but maybe the same physical device
+        # accessed via a different origin (IP change → new localStorage → new UUID).
+        # If a trusted entry with the same device_name exists, auto-adopt.
+        user_agent = request.headers.get("User-Agent", "")
+        if auto_adopt_device(body.device_id, user_agent):
+            update_last_used(body.device_id)
+            refresh_token = create_refresh_token(body.device_id)
+            return LoginResponse(
+                token=token, message="登录成功",
+                refresh_token=refresh_token, device_trusted=True,
+            )
+
+    # Truly unknown device or no device_id — frontend decides what to show
     return LoginResponse(token=token, message="登录成功")
 
 
