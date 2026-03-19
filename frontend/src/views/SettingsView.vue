@@ -145,7 +145,7 @@ const PAGE_GROUPS = [
   {
     page: 'Studio',
     color: '#8B5CF6',
-    types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis', 'scholar-categorize'],
+    types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis'],
   },
   {
     page: '灵感',
@@ -156,6 +156,16 @@ const PAGE_GROUPS = [
     page: '人才卡',
     color: '#3B82F6',
     types: ['text-entry', 'pdf-parse', 'image-parse', 'semantic-search', 'chat-analyze', 'chat-answer', 'organize-tags'],
+  },
+  {
+    page: '项目管理',
+    color: '#10B981',
+    types: ['project-summary', 'project-update-parse'],
+  },
+  {
+    page: '龙图阁',
+    color: '#8B5CF6',
+    types: ['scholar-categorize'],
   },
 ]
 

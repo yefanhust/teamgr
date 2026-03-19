@@ -28,6 +28,7 @@ class ProjectUpdateSchema(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    parent_id: Optional[int] = -1  # -1 means not provided; None means clear parent
 
 
 class UpdateCreate(BaseModel):
@@ -278,6 +279,13 @@ async def update_project(
         project.description = body.description
     if body.status is not None and body.status in ("active", "completed", "archived"):
         project.status = body.status
+    if body.parent_id != -1:  # -1 means field not provided
+        if body.parent_id is not None and body.parent_id != project.id:
+            parent = db.query(Project).filter(Project.id == body.parent_id).first()
+            if parent:
+                project.parent_id = body.parent_id
+        elif body.parent_id is None:
+            project.parent_id = None
 
     db.commit()
     db.refresh(project)
@@ -306,6 +314,8 @@ async def submit_update(
     db: Session = Depends(get_db),
     _=Depends(require_auth),
 ):
+    import asyncio
+
     project = db.query(Project).filter(Project.id == body.project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -314,14 +324,12 @@ async def submit_update(
     if not talent:
         raise HTTPException(status_code=404, detail="人才不存在")
 
-    # Parse with LLM
-    parsed_data = await _parse_update_with_llm(body.content, talent.name, project.name, model_override=body.model)
-
+    # Save update immediately with raw content, LLM parsing happens in background
     update = ProjectUpdate(
         project_id=body.project_id,
         talent_id=body.talent_id,
         raw_input=body.content,
-        parsed_data=parsed_data,
+        parsed_data={},
     )
     db.add(update)
 
@@ -341,14 +349,19 @@ async def submit_update(
         member = ProjectMember(
             project_id=body.project_id,
             talent_id=body.talent_id,
-            role=parsed_data.get("role_hint", ""),
         )
         db.add(member)
-    elif parsed_data.get("role_hint") and not existing_member.role:
-        existing_member.role = parsed_data["role_hint"]
 
     db.commit()
     db.refresh(update)
+
+    # Launch LLM parsing in background
+    update_id = update.id
+    talent_name = talent.name
+    project_name = project.name
+    model = body.model
+    asyncio.create_task(_parse_update_bg(update_id, body.content, talent_name, project_name, model))
+
     return _update_to_dict(update)
 
 
@@ -404,8 +417,12 @@ async def get_project_info(
     return {
         "id": project.id,
         "name": project.name,
+        "description": project.description or "",
         "status": project.status,
+        "parent_id": project.parent_id,
+        "parent_name": project.parent.name if project.parent else None,
         "started_at": project.started_at.isoformat() if project.started_at else None,
+        "created_at": project.created_at.isoformat() if project.created_at else None,
         "days_active": days_active,
         "member_count": len(project.members),
         "update_count": len(project.updates),
@@ -434,6 +451,35 @@ async def refresh_project_info(
     db.commit()
 
     return {"llm_summary": summary}
+
+
+# ---- Background LLM processing ----
+
+async def _parse_update_bg(update_id: int, content: str, talent_name: str, project_name: str, model: str = None):
+    """Background task: parse update content with LLM and save results."""
+    from app.database import SessionLocal
+    try:
+        parsed_data = await _parse_update_with_llm(content, talent_name, project_name, model_override=model)
+        db = SessionLocal()
+        try:
+            upd = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+            if upd:
+                upd.parsed_data = parsed_data
+                # Update member role if detected
+                if parsed_data.get("role_hint"):
+                    member = (
+                        db.query(ProjectMember)
+                        .filter(ProjectMember.project_id == upd.project_id, ProjectMember.talent_id == upd.talent_id)
+                        .first()
+                    )
+                    if member and not member.role:
+                        member.role = parsed_data["role_hint"]
+                db.commit()
+                logger.info(f"Background LLM parse done for update {update_id}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Background LLM parse failed for update {update_id}: {e}")
 
 
 # ---- LLM helpers ----

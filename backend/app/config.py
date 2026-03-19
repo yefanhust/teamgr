@@ -345,6 +345,8 @@ LLM_CALL_TYPES = {
     "todo-organize-tags": "任务标签整理",
     "todo-analysis": "任务完成效率分析",
     "scholar-categorize": "大学士-历史对话分类",
+    "project-summary": "项目概览生成",
+    "project-update-parse": "项目进展解析",
 }
 
 

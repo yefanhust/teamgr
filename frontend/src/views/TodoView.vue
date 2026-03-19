@@ -1386,10 +1386,12 @@
             </div>
             <div
               v-if="pmParentProjectSearch.trim() && !pmParentProjectResults.some(p => p.name === pmParentProjectSearch.trim())"
-              class="px-3 py-2 text-sm cursor-pointer hover:bg-green-50 text-green-600 border-t border-gray-100"
-              @click="createPmParentProjectInline"
+              class="border-t border-gray-100 p-2"
             >
-              + 创建父项目「{{ pmParentProjectSearch.trim() }}」
+              <input v-model="pmInlineDesc" class="w-full text-xs border border-gray-200 rounded px-2 py-1 mb-1 outline-none focus:border-blue-300" placeholder="项目描述（可选）" />
+              <div class="text-sm cursor-pointer hover:bg-green-50 text-green-600 px-1 py-1 rounded" @click="createPmParentProjectInline">
+                + 创建父项目「{{ pmParentProjectSearch.trim() }}」
+              </div>
             </div>
           </div>
         </div>
@@ -1418,10 +1420,12 @@
             <!-- Create new project/sub-project -->
             <div
               v-if="pmProjectSearch.trim() && !pmFilteredProjectResults.some(p => p.name === pmProjectSearch.trim())"
-              class="px-3 py-2 text-sm cursor-pointer hover:bg-green-50 text-green-600 border-t border-gray-100"
-              @click="createPmProjectInline(pmSelectedParentForCreate)"
+              class="border-t border-gray-100 p-2"
             >
-              + 创建{{ pmSelectedParentForCreate ? '子项目' : '项目' }}「{{ pmProjectSearch.trim() }}」{{ pmSelectedParentForCreate ? '（属于 ' + pmSelectedParentForCreate.name + '）' : '' }}
+              <input v-model="pmInlineDesc" class="w-full text-xs border border-gray-200 rounded px-2 py-1 mb-1 outline-none focus:border-blue-300" placeholder="项目描述（可选）" />
+              <div class="text-sm cursor-pointer hover:bg-green-50 text-green-600 px-1 py-1 rounded" @click="createPmProjectInline(pmSelectedParentForCreate)">
+                + 创建{{ pmSelectedParentForCreate ? '子项目' : '项目' }}「{{ pmProjectSearch.trim() }}」{{ pmSelectedParentForCreate ? '（属于 ' + pmSelectedParentForCreate.name + '）' : '' }}
+              </div>
             </div>
           </div>
           <!-- Selected display -->
@@ -1465,15 +1469,8 @@
           提交
         </van-button>
 
-        <!-- Show parsed result -->
-        <div v-if="pmLastResult" class="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
-          <p class="font-medium text-green-600 mb-2">提交成功，LLM 解析结果：</p>
-          <p v-if="pmLastResult.parsed_data?.progress"><strong>进展：</strong>{{ pmLastResult.parsed_data.progress }}</p>
-          <p v-if="pmLastResult.parsed_data?.blockers"><strong>阻碍：</strong>{{ pmLastResult.parsed_data.blockers }}</p>
-          <p v-if="pmLastResult.parsed_data?.next_steps"><strong>下一步：</strong>{{ pmLastResult.parsed_data.next_steps }}</p>
-          <p v-if="pmLastResult.parsed_data?.completion_pct != null"><strong>完成度：</strong>{{ pmLastResult.parsed_data.completion_pct }}%</p>
-          <p v-if="pmLastResult.parsed_data?.role_hint"><strong>角色：</strong>{{ pmLastResult.parsed_data.role_hint }}</p>
-        </div>
+        <!-- Hint -->
+        <p class="text-xs text-gray-400 text-center">提交后 LLM 将在后台自动解析进展内容</p>
       </div>
     </van-popup>
 
@@ -1542,6 +1539,66 @@
             <van-tag :type="pmInfoData.status === 'active' ? 'success' : 'primary'" size="medium">{{ pmInfoData.status === 'active' ? '进行中' : pmInfoData.status === 'completed' ? '已完成' : '已归档' }}</van-tag>
             <van-button size="mini" plain type="primary" icon="replay" :loading="pmInfoRefreshing" @click="refreshPmInfo">刷新</van-button>
           </div>
+        </div>
+
+        <!-- Description (double-click to edit) -->
+        <div class="mb-4">
+          <textarea
+            v-if="pmEditingDesc"
+            v-model="pmEditDescText"
+            class="w-full text-sm border border-blue-300 rounded-lg p-2 outline-none resize-y min-h-[60px]"
+            @blur="savePmDesc"
+            @keydown.escape="pmEditingDesc = false"
+            ref="pmDescTextarea"
+          ></textarea>
+          <p
+            v-else
+            class="text-sm text-gray-500 cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+            @dblclick="startEditPmDesc"
+          >
+            {{ pmInfoData.description || '暂无描述（双击编辑）' }}
+          </p>
+        </div>
+
+        <!-- Parent project (configurable for top-level projects) -->
+        <div class="mb-3">
+          <div v-if="pmInfoData.parent_name" class="text-xs text-gray-400">
+            父项目：<van-tag type="primary" size="small" plain closeable @close="clearPmInfoParent">{{ pmInfoData.parent_name }}</van-tag>
+          </div>
+          <div v-else>
+            <div v-if="!pmInfoSettingParent" class="text-xs text-gray-400 cursor-pointer hover:text-blue-500" @click="pmInfoSettingParent = true">
+              + 设置父项目
+            </div>
+            <div v-else class="flex items-center gap-2">
+              <van-field
+                v-model="pmInfoParentSearch"
+                placeholder="搜索父项目..."
+                size="small"
+                class="flex-1"
+                style="padding: 0"
+                clearable
+                @focus="searchPmInfoParent"
+                @update:model-value="searchPmInfoParent"
+              />
+              <van-icon name="cross" size="14" class="cursor-pointer text-gray-400" @click="pmInfoSettingParent = false; pmInfoParentSearch = ''; pmInfoParentResults = []" />
+            </div>
+            <div v-if="pmInfoSettingParent && pmInfoParentResults.length > 0" class="border border-gray-200 rounded-lg mt-1 max-h-32 overflow-y-auto bg-white shadow">
+              <div
+                v-for="p in pmInfoParentResults"
+                :key="p.id"
+                class="px-3 py-1.5 text-sm cursor-pointer hover:bg-blue-50 text-gray-700"
+                @click="setPmInfoParent(p)"
+              >
+                {{ p.name }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Created at + started at -->
+        <div class="flex items-center gap-4 text-xs text-gray-400 mb-4">
+          <span v-if="pmInfoData.created_at">创建于 {{ formatDateTime(pmInfoData.created_at) }}</span>
+          <span v-if="pmInfoData.started_at">开始于 {{ formatDateTime(pmInfoData.started_at) }}</span>
         </div>
 
         <!-- Stats cards -->
@@ -1681,6 +1738,12 @@ const pmCreating = ref(false)
 const pmInfoData = ref(null)
 const pmInfoLoading = ref(false)
 const pmInfoRefreshing = ref(false)
+const pmEditingDesc = ref(false)
+const pmEditDescText = ref('')
+const pmDescTextarea = ref(null)
+const pmInfoSettingParent = ref(false)
+const pmInfoParentSearch = ref('')
+const pmInfoParentResults = ref([])
 
 // Boards
 const pmTimeRange = ref('month')
@@ -1692,6 +1755,7 @@ const pmProjects = computed(() => pmStore.projects)
 const pmTopProjects = computed(() => pmProjects.value.filter(p => !p.parent_id))
 const pmSelectedParentForCreate = ref(null)
 const pmParentProjectSearch = ref('')
+const pmInlineDesc = ref('')
 const pmShowParentProjectList = ref(false)
 const pmParentProjectResults = ref([])
 
@@ -3074,9 +3138,10 @@ async function createPmParentProjectInline() {
   const name = pmParentProjectSearch.value.trim()
   if (!name) return
   try {
-    const proj = await pmStore.createProject(name)
+    const proj = await pmStore.createProject(name, pmInlineDesc.value.trim())
     pmSelectedParentForCreate.value = proj
     pmParentProjectSearch.value = ''
+    pmInlineDesc.value = ''
     pmShowParentProjectList.value = false
     onParentSelected(proj)
     showToast('父项目已创建')
@@ -3130,7 +3195,7 @@ async function createPmProjectInline(parentProj = null) {
   const name = pmProjectSearch.value.trim()
   if (!name) return
   try {
-    const proj = await pmStore.createProject(name, '', parentProj?.id || null)
+    const proj = await pmStore.createProject(name, pmInlineDesc.value.trim(), parentProj?.id || null)
     // Attach parent info for display
     if (parentProj) {
       pmSelectedProject.value = { ...proj, parent_name: parentProj.name, parent_id: parentProj.id }
@@ -3138,6 +3203,7 @@ async function createPmProjectInline(parentProj = null) {
       pmSelectedProject.value = proj
     }
     pmProjectSearch.value = ''
+    pmInlineDesc.value = ''
     pmShowProjectList.value = false
     showToast(parentProj ? `已创建为「${parentProj.name}」的子项目` : '项目已创建')
   } catch (e) {
@@ -3166,17 +3232,20 @@ async function createPmProject() {
 async function submitPmUpdate() {
   if (!pmSelectedTalent.value || !pmSelectedProject.value || !pmUpdateContent.value.trim()) return
   pmSubmitting.value = true
-  pmLastResult.value = null
   try {
-    const result = await pmStore.submitUpdate(
+    await pmStore.submitUpdate(
       pmSelectedProject.value.id,
       pmSelectedTalent.value.id,
       pmUpdateContent.value.trim(),
       pmCurrentModel.value || null
     )
-    pmLastResult.value = result
+    // Clear talent and content, keep project selection for next entry
+    pmSelectedTalent.value = null
+    pmTalentSearch.value = ''
+    pmShowTalentList.value = false
+    pmTalentResults.value = []
     pmUpdateContent.value = ''
-    showToast('提交成功')
+    showToast('已提交，LLM 正在后台处理')
   } catch (e) {
     showToast('提交失败')
   } finally {
@@ -3188,6 +3257,10 @@ async function openProjectInfo(id) {
   showPmInfoPopup.value = true
   pmInfoLoading.value = true
   pmInfoData.value = null
+  pmInfoSettingParent.value = false
+  pmInfoParentSearch.value = ''
+  pmInfoParentResults.value = []
+  pmEditingDesc.value = false
   try {
     pmInfoData.value = await pmStore.getProjectInfo(id)
   } catch (e) {
@@ -3209,6 +3282,58 @@ async function refreshPmInfo() {
   } finally {
     pmInfoRefreshing.value = false
   }
+}
+
+function startEditPmDesc() {
+  pmEditDescText.value = pmInfoData.value?.description || ''
+  pmEditingDesc.value = true
+  nextTick(() => { pmDescTextarea.value?.focus() })
+}
+
+async function savePmDesc() {
+  pmEditingDesc.value = false
+  if (!pmInfoData.value) return
+  const newDesc = pmEditDescText.value.trim()
+  if (newDesc === (pmInfoData.value.description || '')) return
+  try {
+    await pmStore.updateProject(pmInfoData.value.id, { description: newDesc })
+    pmInfoData.value.description = newDesc
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+async function searchPmInfoParent() {
+  try {
+    const res = await pmStore.searchProjects(pmInfoParentSearch.value)
+    // Only top-level projects, exclude current project
+    pmInfoParentResults.value = res.filter(p => !p.parent_id && p.id !== pmInfoData.value?.id)
+  } catch (e) { pmInfoParentResults.value = [] }
+}
+
+async function setPmInfoParent(parent) {
+  if (!pmInfoData.value) return
+  try {
+    await pmStore.updateProject(pmInfoData.value.id, { parent_id: parent.id })
+    pmInfoData.value.parent_id = parent.id
+    pmInfoData.value.parent_name = parent.name
+    pmInfoSettingParent.value = false
+    pmInfoParentSearch.value = ''
+    pmInfoParentResults.value = []
+    loadPmProjects()
+    showToast('已设置父项目')
+  } catch (e) { showToast('设置失败') }
+}
+
+async function clearPmInfoParent() {
+  if (!pmInfoData.value) return
+  try {
+    await pmStore.updateProject(pmInfoData.value.id, { parent_id: null })
+    pmInfoData.value.parent_id = null
+    pmInfoData.value.parent_name = null
+    loadPmProjects()
+    showToast('已移除父项目')
+  } catch (e) { showToast('操作失败') }
 }
 
 async function changePmStatus(id, status) {
