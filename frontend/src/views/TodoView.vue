@@ -1359,43 +1359,6 @@
           </div>
         </div>
 
-        <!-- Parent project selector (optional) -->
-        <div>
-          <label class="text-sm text-gray-500 mb-1 block">父项目<span class="text-gray-300 ml-1">（可选，不选则记录到顶层项目）</span></label>
-          <div v-if="pmSelectedParentForCreate" class="flex items-center gap-1 mb-1">
-            <van-tag type="primary" size="medium" closeable @close="pmSelectedParentForCreate = null">{{ pmSelectedParentForCreate.name }}</van-tag>
-          </div>
-          <van-field
-            v-if="!pmSelectedParentForCreate"
-            v-model="pmParentProjectSearch"
-            placeholder="搜索父项目..."
-            clearable
-            @focus="searchPmParentProjects"
-            @update:model-value="searchPmParentProjects"
-          />
-          <div v-if="pmShowParentProjectList && (pmParentProjectResults.length > 0 || pmParentProjectSearch.trim())" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
-            <div
-              v-for="p in pmParentProjectResults"
-              :key="p.id"
-              class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
-              :class="pmSelectedParentForCreate?.id === p.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
-              @click="pmSelectedParentForCreate = p; pmParentProjectSearch = ''; pmShowParentProjectList = false; onParentSelected(p)"
-            >
-              <span class="font-medium">{{ p.name }}</span>
-              <span v-if="p.children?.length" class="text-xs text-gray-400 ml-2">{{ p.children.length }} 子项目</span>
-            </div>
-            <div
-              v-if="pmParentProjectSearch.trim() && !pmParentProjectResults.some(p => p.name === pmParentProjectSearch.trim())"
-              class="border-t border-gray-100 p-2"
-            >
-              <input v-model="pmInlineDesc" class="w-full text-xs border border-gray-200 rounded px-2 py-1 mb-1 outline-none focus:border-blue-300" placeholder="项目描述（可选）" />
-              <div class="text-sm cursor-pointer hover:bg-green-50 text-green-600 px-1 py-1 rounded" @click="createPmParentProjectInline">
-                + 创建父项目「{{ pmParentProjectSearch.trim() }}」
-              </div>
-            </div>
-          </div>
-        </div>
-
         <!-- Project / sub-project selector -->
         <div>
           <label class="text-sm text-gray-500 mb-1 block">{{ pmSelectedParentForCreate ? '子项目' : '项目' }}</label>
@@ -1433,6 +1396,43 @@
             <van-tag v-if="pmSelectedProject.parent_name" type="primary" size="small" plain>{{ pmSelectedProject.parent_name }}</van-tag>
             <span v-if="pmSelectedProject.parent_name" class="text-gray-400 text-xs">›</span>
             <van-tag type="success" size="medium" closeable @close="clearPmProjectSelection">{{ pmSelectedProject.name }}</van-tag>
+          </div>
+        </div>
+
+        <!-- Parent project selector (optional) -->
+        <div>
+          <label class="text-sm text-gray-500 mb-1 block">父项目<span class="text-gray-300 ml-1">（可选，不选则记录到顶层项目）</span></label>
+          <div v-if="pmSelectedParentForCreate" class="flex items-center gap-1 mb-1">
+            <van-tag type="primary" size="medium" closeable @close="pmSelectedParentForCreate = null">{{ pmSelectedParentForCreate.name }}</van-tag>
+          </div>
+          <van-field
+            v-if="!pmSelectedParentForCreate"
+            v-model="pmParentProjectSearch"
+            placeholder="搜索父项目..."
+            clearable
+            @focus="searchPmParentProjects"
+            @update:model-value="searchPmParentProjects"
+          />
+          <div v-if="pmShowParentProjectList && (pmParentProjectResults.length > 0 || pmParentProjectSearch.trim())" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
+            <div
+              v-for="p in pmParentProjectResults"
+              :key="p.id"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
+              :class="pmSelectedParentForCreate?.id === p.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
+              @click="pmSelectedParentForCreate = p; pmParentProjectSearch = ''; pmShowParentProjectList = false; onParentSelected(p)"
+            >
+              <span class="font-medium">{{ p.name }}</span>
+              <span v-if="p.children?.length" class="text-xs text-gray-400 ml-2">{{ p.children.length }} 子项目</span>
+            </div>
+            <div
+              v-if="pmParentProjectSearch.trim() && !pmParentProjectResults.some(p => p.name === pmParentProjectSearch.trim())"
+              class="border-t border-gray-100 p-2"
+            >
+              <input v-model="pmInlineDesc" class="w-full text-xs border border-gray-200 rounded px-2 py-1 mb-1 outline-none focus:border-blue-300" placeholder="项目描述（可选）" />
+              <div class="text-sm cursor-pointer hover:bg-green-50 text-green-600 px-1 py-1 rounded" @click="createPmParentProjectInline">
+                + 创建父项目「{{ pmParentProjectSearch.trim() }}」
+              </div>
+            </div>
           </div>
         </div>
 
