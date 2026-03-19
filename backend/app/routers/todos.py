@@ -256,6 +256,14 @@ async def create_todo(body: TodoCreate, db: Session = Depends(get_db)):
     return _serialize(item)
 
 
+@router.get("/{todo_id}")
+def get_todo(todo_id: int, db: Session = Depends(get_db)):
+    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    return _serialize(item)
+
+
 @router.put("/{todo_id}")
 def update_todo(todo_id: int, body: TodoUpdate, db: Session = Depends(get_db)):
     item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()

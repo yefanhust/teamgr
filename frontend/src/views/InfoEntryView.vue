@@ -128,15 +128,16 @@
         </div>
 
         <div class="flex gap-2 items-end">
-          <van-field
-            v-model="inputText"
-            type="textarea"
-            :autosize="{ minHeight: 100 }"
-            placeholder="输入候选人的信息（支持粘贴/拖拽图片）..."
-            class="flex-1 entry-input"
-            @keydown.enter="handleEnterKey"
-            @paste="handlePaste"
-          />
+          <div class="flex-1" @keydown.enter="handleEnterKey">
+            <van-field
+              v-model="inputText"
+              type="textarea"
+              :autosize="{ minHeight: 100 }"
+              placeholder="输入候选人的信息（支持粘贴/拖拽图片）..."
+              class="entry-input"
+              @paste="handlePaste"
+            />
+          </div>
           <div class="flex flex-col gap-1 items-center">
             <VoiceInputButton v-model="inputText" />
             <van-button
@@ -476,21 +477,13 @@ function clearSelection() {
 }
 
 function handleEnterKey(event) {
-  if (event.ctrlKey || event.metaKey) {
-    // Ctrl+Enter or Cmd+Enter: insert newline
-    event.preventDefault()
-    const textarea = event.target
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    inputText.value = inputText.value.substring(0, start) + '\n' + inputText.value.substring(end)
-    nextTick(() => {
-      textarea.selectionStart = textarea.selectionEnd = start + 1
-    })
-  } else if (!event.shiftKey && !event.altKey) {
-    // Plain Enter: submit
-    event.preventDefault()
-    submitEntry()
+  // Modifier + Enter (Cmd/Ctrl/Shift/Alt): do nothing, let browser insert newline naturally
+  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+    return
   }
+  // Plain Enter without any modifier: submit
+  event.preventDefault()
+  submitEntry()
 }
 
 async function submitEntry() {
