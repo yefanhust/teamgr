@@ -134,7 +134,7 @@
             :autosize="{ minHeight: 100 }"
             placeholder="输入候选人的信息（支持粘贴/拖拽图片）..."
             class="flex-1 entry-input"
-            @keypress.enter.exact.prevent="submitEntry"
+            @keydown.enter="handleEnterKey"
             @paste="handlePaste"
           />
           <div class="flex flex-col gap-1 items-center">
@@ -166,7 +166,7 @@
         <div class="flex gap-3">
           <van-uploader
             :after-read="handlePdfUpload"
-            accept="application/pdf"
+            accept="application/pdf,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             :max-count="1"
             :disabled="!selectedTalent || uploading"
           >
@@ -178,7 +178,7 @@
               :loading="uploading"
               :disabled="!selectedTalent"
             >
-              简历PDF
+              简历（PDF/Word）
             </van-button>
           </van-uploader>
           <van-uploader
@@ -201,6 +201,7 @@
           </van-uploader>
         </div>
         <p v-if="!selectedTalent" class="text-xs text-gray-400 mt-1">请先选择候选人</p>
+        <p v-else class="text-xs text-gray-400 mt-1">支持 PDF、Word(.docx) 格式简历和图片</p>
       </div>
     </div>
 
@@ -474,6 +475,24 @@ function clearSelection() {
   stopPolling()
 }
 
+function handleEnterKey(event) {
+  if (event.ctrlKey || event.metaKey) {
+    // Ctrl+Enter or Cmd+Enter: insert newline
+    event.preventDefault()
+    const textarea = event.target
+    const start = textarea.selectionStart
+    const end = textarea.selectionEnd
+    inputText.value = inputText.value.substring(0, start) + '\n' + inputText.value.substring(end)
+    nextTick(() => {
+      textarea.selectionStart = textarea.selectionEnd = start + 1
+    })
+  } else if (!event.shiftKey && !event.altKey) {
+    // Plain Enter: submit
+    event.preventDefault()
+    submitEntry()
+  }
+}
+
 async function submitEntry() {
   if (!canSubmit.value) return
 
@@ -530,7 +549,7 @@ async function handlePdfUpload(file) {
     messages.value[processingIdx] = {
       role: 'assistant',
       status: 'uploaded',
-      content: '✓ 简历已上传成功，正在排队等待后台解析（可安全关闭页面）',
+      content: '✓ 文档已上传成功，正在排队等待后台解析（可安全关闭页面）',
     }
     pendingEntries.value.set(result.entry_id, processingIdx)
     startPolling()
@@ -538,7 +557,7 @@ async function handlePdfUpload(file) {
     messages.value[processingIdx] = {
       role: 'assistant',
       status: 'failed',
-      content: 'PDF上传失败: ' + (e.response?.data?.detail || '未知错误'),
+      content: '文档上传失败: ' + (e.response?.data?.detail || '未知错误'),
     }
   } finally {
     uploading.value = false

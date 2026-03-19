@@ -203,13 +203,13 @@
           <div v-for="log in entryLogs" :key="log.id" class="border-l-2 border-gray-200 pl-3 py-1">
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
-                <van-tag size="small" :type="log.source === 'pdf' ? 'warning' : log.source === 'image' ? 'success' : 'primary'">
-                  {{ log.source === 'pdf' ? 'PDF' : log.source === 'image' ? '图片' : '手动' }}
+                <van-tag size="small" :type="log.source === 'pdf' || log.source === 'docx' ? 'warning' : log.source === 'image' ? 'success' : 'primary'">
+                  {{ log.source === 'pdf' ? 'PDF' : log.source === 'docx' ? 'Word' : log.source === 'image' ? '图片' : '手动' }}
                 </van-tag>
                 <van-tag v-if="log.status === 'uploaded'" size="small" type="success" plain>已上传</van-tag>
                 <van-tag v-if="log.status === 'processing'" size="small" type="warning" plain>解析中</van-tag>
                 <van-tag v-if="log.status === 'failed'" size="small" type="danger" plain>失败</van-tag>
-                <van-tag v-if="log.model_name && (log.source === 'pdf' || log.source === 'image')" size="small" plain class="model-tag">{{ log.model_name }}</van-tag>
+                <van-tag v-if="log.model_name && (log.source === 'pdf' || log.source === 'docx' || log.source === 'image')" size="small" plain class="model-tag">{{ log.model_name }}</van-tag>
                 {{ formatDate(log.created_at) }}
               </div>
               <van-icon
@@ -225,8 +225,8 @@
               class="text-blue-500 cursor-pointer ml-1"
               @click="toggleLogExpand(log.id)"
             >{{ expandedLogs.has(log.id) ? '收起' : '...展开' }}</span></p>
-            <!-- Parsed content summary for PDF/image entries -->
-            <template v-if="log.llm_response && log.status === 'done' && (log.source === 'pdf' || log.source === 'image')">
+            <!-- Parsed content summary for PDF/Word/image entries -->
+            <template v-if="log.llm_response && log.status === 'done' && (log.source === 'pdf' || log.source === 'docx' || log.source === 'image')">
               <div class="mt-2">
                 <span
                   class="text-xs text-blue-600 cursor-pointer hover:underline"

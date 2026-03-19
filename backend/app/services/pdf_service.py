@@ -103,6 +103,84 @@ def extract_markdown_from_pdf(pdf_bytes: bytes) -> str:
     return result
 
 
+def extract_markdown_from_docx(docx_bytes: bytes) -> str:
+    """Extract structured markdown from a .docx file using python-docx.
+
+    Preserves headings, paragraphs, lists, and tables as markdown.
+    """
+    from docx import Document
+
+    doc = Document(io.BytesIO(docx_bytes))
+    parts = []
+
+    for element in doc.element.body:
+        tag = element.tag.split('}')[-1]  # strip namespace
+
+        if tag == 'p':
+            # It's a paragraph
+            from docx.text.paragraph import Paragraph
+            para = Paragraph(element, doc)
+            text = para.text.strip()
+            if not text:
+                continue
+
+            style_name = (para.style.name or "").lower()
+
+            # Detect heading levels
+            if style_name.startswith("heading"):
+                try:
+                    level = int(style_name.replace("heading", "").strip())
+                except ValueError:
+                    level = 2
+                level = min(level, 4)
+                parts.append(f"{'#' * level} {text}")
+            elif style_name.startswith("list") or text.startswith(("•", "-", "·", "●")):
+                # List item
+                clean = text.lstrip("•-·● \t")
+                parts.append(f"- {clean}")
+            else:
+                parts.append(text)
+
+        elif tag == 'tbl':
+            # It's a table
+            from docx.table import Table as DocxTable
+            table = DocxTable(element, doc)
+            rows = table.rows
+            if not rows:
+                continue
+
+            # Build markdown table
+            header_cells = [cell.text.strip().replace("\n", " ") for cell in rows[0].cells]
+            parts.append("| " + " | ".join(header_cells) + " |")
+            parts.append("| " + " | ".join(["---"] * len(header_cells)) + " |")
+            for row in rows[1:]:
+                cells = [cell.text.strip().replace("\n", " ") for cell in row.cells]
+                # Pad if fewer cells than header
+                while len(cells) < len(header_cells):
+                    cells.append("")
+                parts.append("| " + " | ".join(cells[:len(header_cells)]) + " |")
+
+    result = "\n\n".join(parts)
+    logger.info(f"docx markdown extraction: {len(result)} chars")
+    return result
+
+
+def extract_text_from_docx(docx_bytes: bytes) -> str:
+    """Extract plain text from a .docx file using python-docx."""
+    from docx import Document
+
+    doc = Document(io.BytesIO(docx_bytes))
+    text_parts = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            text_parts.append(text)
+
+    result = "\n\n".join(text_parts)
+    logger.info(f"docx plain text extraction: {len(result)} chars")
+    return result
+
+
 def pdf_to_images(pdf_bytes: bytes, dpi: int = 200) -> list[bytes]:
     """Convert each PDF page to a PNG image using PyMuPDF.
 

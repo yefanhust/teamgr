@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 
 from app.config import load_config, get_auth_password, get_gemini_config
 from app.database import init_db, SessionLocal
-from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification, scholar, backup
+from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification, scholar, backup, projects
 from app.services.backup_service import setup_backup_scheduler
 
 # ANSI color codes
@@ -63,28 +63,34 @@ async def lifespan(app: FastAPI):
     from app.models.talent import EntryLog, Talent
     _db = SessionLocal()
     try:
-        # Mark stuck "processing" entries as failed
-        stuck = _db.query(EntryLog).filter(EntryLog.status == "processing").all()
-        for entry in stuck:
-            entry.status = "failed"
-            logger.warning(f"Marked stuck entry {entry.id} as failed (from previous run)")
-        if stuck:
-            _db.commit()
-
-        # Resume "uploaded" PDF entries that weren't processed yet
-        from app.routers.entry import _process_pdf_from_file_bg, PDF_UPLOAD_DIR
-        uploaded = _db.query(EntryLog).filter(EntryLog.status == "uploaded").all()
-        for entry in uploaded:
-            pdf_path = os.path.join(PDF_UPLOAD_DIR, f"{entry.id}.pdf")
-            if os.path.exists(pdf_path):
+        # Resume stuck "processing" or "uploaded" entries that have files on disk
+        from app.routers.entry import _process_pdf_from_file_bg, _process_docx_from_file_bg, DOC_UPLOAD_DIR
+        resumable = _db.query(EntryLog).filter(
+            EntryLog.status.in_(["uploaded", "processing"])
+        ).all()
+        resumed_count = 0
+        for entry in resumable:
+            # Check for docx file first, then pdf
+            docx_path = os.path.join(DOC_UPLOAD_DIR, f"{entry.id}.docx")
+            pdf_path = os.path.join(DOC_UPLOAD_DIR, f"{entry.id}.pdf")
+            if os.path.exists(docx_path):
+                entry.status = "uploaded"  # reset to uploaded so bg task transitions properly
+                asyncio.create_task(_process_docx_from_file_bg(entry.id))
+                logger.info(f"Resumed DOCX entry {entry.id} for background processing")
+                resumed_count += 1
+            elif os.path.exists(pdf_path):
+                entry.status = "uploaded"
                 asyncio.create_task(_process_pdf_from_file_bg(entry.id))
-                logger.info(f"Resumed uploaded PDF entry {entry.id} for background processing")
+                logger.info(f"Resumed PDF entry {entry.id} for background processing")
+                resumed_count += 1
             else:
                 entry.status = "failed"
-                entry.llm_response = '{"error": "PDF file lost during server restart"}'
-                logger.warning(f"Uploaded entry {entry.id} has no PDF file, marked as failed")
-        if uploaded:
+                entry.llm_response = '{"error": "文件在服务重启时丢失"}'
+                logger.warning(f"Entry {entry.id} has no file on disk, marked as failed")
+        if resumable:
             _db.commit()
+        if resumed_count:
+            logger.info(f"Startup recovery: resumed {resumed_count} pending upload(s)")
 
         # Clean up card_data: remove schema definitions stored as values
         all_talents = _db.query(Talent).all()
@@ -258,6 +264,7 @@ app.include_router(todos.router)
 app.include_router(notification.router)
 app.include_router(scholar.router)
 app.include_router(backup.router)
+app.include_router(projects.router)
 
 
 # Settings API for model switching

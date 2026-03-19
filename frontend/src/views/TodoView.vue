@@ -254,215 +254,138 @@
         </div>
       </van-tab>
 
-      <!-- ==================== Tab 2: 已完成 ==================== -->
-      <van-tab title="已完成">
+      <!-- ==================== Tab 2: 项目管理 ==================== -->
+      <van-tab title="项目管理">
         <div class="max-w-3xl mx-auto px-4 py-4 space-y-4">
-          <!-- Tag Filter (same tags, shared selection) -->
-          <div v-if="allTags.length > 0" class="pb-1">
-            <div class="flex items-center gap-2 mb-2">
-              <van-checkbox
-                :model-value="allSelected"
-                shape="square"
-                icon-size="16px"
-                class="flex-shrink-0 select-all-checkbox"
-                @update:model-value="selectAll"
-              >
-                全选
-              </van-checkbox>
-            </div>
-            <template v-if="tagTree.length > 0">
-              <div v-for="group in tagTree" :key="group.id" class="mb-2">
-                <div class="flex gap-2 flex-wrap items-center">
-                  <span class="text-xs text-gray-500 font-medium flex-shrink-0" :style="{ color: group.color }">{{ group.name }}</span>
-                  <template v-for="tag in group.children" :key="tag.id">
-                    <input
-                      v-if="editingTagId === tag.id"
-                      v-model="editingTagName"
-                      class="edit-tag-input"
-                      @blur="finishEditTag(tag)"
-                      @keypress.enter="finishEditTag(tag)"
-                      @keydown.escape="cancelEditTag"
-                      ref="tagEditInput"
-                    />
-                    <van-tag
-                      v-else
-                      :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
-                      :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
-                      size="medium"
-                      class="cursor-pointer tag-closeable"
-                      closeable
-                      @click="toggleTag(tag.id)"
-                      @dblclick.stop="startEditTag(tag)"
-                      @close.stop="confirmDeleteTag(tag)"
-                    >
-                      {{ tag.name }}
-                    </van-tag>
-                  </template>
-                </div>
-              </div>
-            </template>
-            <div v-if="orphanTags.length > 0" class="flex gap-2 flex-wrap items-center">
-              <template v-for="tag in orphanTags" :key="tag.id">
-                <input
-                  v-if="editingTagId === tag.id"
-                  v-model="editingTagName"
-                  class="edit-tag-input"
-                  @blur="finishEditTag(tag)"
-                  @keypress.enter="finishEditTag(tag)"
-                  @keydown.escape="cancelEditTag"
-                  ref="tagEditInput"
-                />
-                <van-tag
-                  v-else
-                  :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
-                  :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
-                  size="medium"
-                  class="cursor-pointer tag-closeable"
-                  closeable
-                  @click="toggleTag(tag.id)"
-                  @dblclick.stop="startEditTag(tag)"
-                  @close.stop="confirmDeleteTag(tag)"
-                >
-                  {{ tag.name }}
-                </van-tag>
-              </template>
-            </div>
+          <!-- Header: Update button + Create button -->
+          <div class="flex items-center justify-between">
+            <van-button type="primary" icon="edit" size="small" @click="showPmUpdatePopup = true">Update</van-button>
+            <van-button plain type="primary" icon="plus" size="small" @click="showPmCreatePopup = true">新建项目</van-button>
           </div>
 
-          <div v-if="loading" class="flex justify-center py-8">
-            <van-loading size="28px">加载中...</van-loading>
-          </div>
-          <div v-else-if="filteredCompleted.length === 0" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400">
-            <p class="text-sm">暂无已完成的任务</p>
-          </div>
-          <div v-else class="space-y-2">
-            <van-swipe-cell v-for="item in filteredCompleted" :key="item.id">
-              <div class="bg-white rounded-xl shadow-sm p-3 flex items-center gap-3 opacity-60">
-                <van-checkbox
-                  :model-value="true"
-                  shape="round"
-                  icon-size="20px"
-                  @update:model-value="handleRestart(item.id)"
-                />
-                <div class="flex-1 min-w-0" @click="openDetail(item)">
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm text-gray-500 line-through truncate min-w-0">{{ item.title }}</span>
-                    <van-tag v-if="item.high_priority" type="danger" size="small" plain class="flex-shrink-0">高优</van-tag>
+          <!-- Sub tabs: 项目列表 / 时间看板 / 人员看板 -->
+          <van-tabs v-model:active="pmSubTab" type="card" class="vibe-tabs">
+            <!-- Sub-tab: 项目列表 -->
+            <van-tab title="项目列表">
+              <div class="space-y-3 mt-3">
+                <div v-if="pmProjects.length === 0" class="bg-white rounded-xl shadow-sm p-8 text-center">
+                  <p class="text-gray-400 text-sm mb-3">暂无项目</p>
+                  <van-button size="small" plain type="primary" icon="plus" @click="showPmCreatePopup = true">创建第一个项目</van-button>
+                </div>
+                <template v-for="proj in pmTopProjects" :key="proj.id">
+                  <van-swipe-cell>
+                    <div class="bg-white rounded-xl shadow-sm overflow-hidden" @click="openProjectInfo(proj.id)">
+                      <div class="p-4">
+                        <div class="flex items-center justify-between mb-2">
+                          <div class="flex items-center gap-2">
+                            <span class="w-2 h-2 rounded-full" :class="proj.status === 'active' ? 'bg-green-500' : proj.status === 'completed' ? 'bg-blue-400' : 'bg-gray-300'"></span>
+                            <span class="font-medium text-gray-800">{{ proj.name }}</span>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <van-tag v-if="proj.status === 'active'" type="success" size="small" plain>进行中</van-tag>
+                            <van-tag v-else-if="proj.status === 'completed'" type="primary" size="small" plain>已完成</van-tag>
+                            <van-tag v-else type="default" size="small" plain>已归档</van-tag>
+                            <van-icon name="delete-o" size="16" color="#EF4444" class="pm-delete-btn cursor-pointer" @click.stop="deletePmProject(proj.id)" />
+                            <van-icon name="arrow" size="14" color="#999" />
+                          </div>
+                        </div>
+                        <p v-if="proj.description" class="text-xs text-gray-400 mb-2 line-clamp-1">{{ proj.description }}</p>
+                        <div class="flex items-center gap-4 text-xs text-gray-400">
+                          <span><van-icon name="friends-o" size="12" /> {{ proj.member_count }} 人</span>
+                          <span><van-icon name="notes-o" size="12" /> {{ proj.update_count }} 条更新</span>
+                          <span v-if="proj.last_update_at">最近: {{ formatShortDate(proj.last_update_at) }}</span>
+                        </div>
+                        <!-- Sub-projects -->
+                        <div v-if="proj.children && proj.children.length > 0" class="mt-3 pl-3 border-l-2 border-gray-100 space-y-2">
+                          <div v-for="child in proj.children" :key="child.id"
+                            class="flex items-center justify-between p-2 bg-gray-50 rounded-lg cursor-pointer"
+                            @click.stop="openProjectInfo(child.id)"
+                          >
+                            <div class="flex items-center gap-2">
+                              <span class="w-1.5 h-1.5 rounded-full" :class="child.status === 'active' ? 'bg-green-400' : 'bg-gray-300'"></span>
+                              <span class="text-sm text-gray-700">{{ child.name }}</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                              <span class="text-xs text-gray-400">{{ child.member_count }}人 / {{ child.update_count }}更新</span>
+                              <van-icon name="delete-o" size="14" color="#EF4444" class="pm-delete-btn cursor-pointer" @click.stop="deletePmProject(child.id)" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <template #right>
+                      <van-button square type="danger" text="删除" class="h-full" @click="deletePmProject(proj.id)" />
+                    </template>
+                  </van-swipe-cell>
+                </template>
+              </div>
+            </van-tab>
+
+            <!-- Sub-tab: 时间看板 -->
+            <van-tab title="时间看板">
+              <div class="mt-3 space-y-3">
+                <div class="flex items-center gap-2 mb-2">
+                  <van-tag :type="pmTimeRange === 'week' ? 'primary' : 'default'" size="medium" class="cursor-pointer" @click="pmTimeRange = 'week'; loadPmTimeline()">本周</van-tag>
+                  <van-tag :type="pmTimeRange === 'month' ? 'primary' : 'default'" size="medium" class="cursor-pointer" @click="pmTimeRange = 'month'; loadPmTimeline()">本月</van-tag>
+                  <van-tag :type="pmTimeRange === 'all' ? 'primary' : 'default'" size="medium" class="cursor-pointer" @click="pmTimeRange = 'all'; loadPmTimeline()">全部</van-tag>
+                </div>
+                <div v-if="Object.keys(pmTimeline.groups || {}).length === 0" class="bg-white rounded-xl shadow-sm p-8 text-center">
+                  <p class="text-gray-400 text-sm">该时间段暂无更新记录</p>
+                </div>
+                <div v-for="(updates, dateKey) in (pmTimeline.groups || {})" :key="dateKey" class="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div class="px-4 py-2 bg-gray-50 border-b border-gray-100">
+                    <span class="text-sm font-medium text-gray-600">{{ dateKey }}</span>
+                    <span class="text-xs text-gray-400 ml-2">{{ updates.length }} 条更新</span>
                   </div>
-                  <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-2">{{ item.description }}</p>
-                  <div class="flex items-center gap-1 mt-1 flex-wrap">
-                    <van-tag
-                      v-for="tag in (item.tags || [])"
-                      :key="tag.id"
-                      :color="tag.color"
-                      size="small"
-                      plain
-                    >
-                      {{ tag.name }}
-                    </van-tag>
-                    <span class="text-xs text-gray-400">
-                      完成于 {{ formatDateTime(item.completed_at) }}
-                    </span>
-                    <span v-if="item.created_at && item.completed_at" class="text-xs text-gray-400">
-                      耗时 {{ formatDuration(item.created_at, item.completed_at) }}
-                    </span>
-                    <span v-if="item.deadline" class="text-xs text-gray-400">
-                      截止 {{ item.deadline }}{{ item.deadline_time ? ' ' + item.deadline_time : '' }}
-                    </span>
-                    <span v-if="item.repeat_rule" class="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-400">
-                      {{ repeatLabel(item) }}
-                    </span>
+                  <div class="divide-y divide-gray-50">
+                    <div v-for="upd in updates" :key="upd.id" class="px-4 py-3">
+                      <div class="flex items-center gap-2 mb-1">
+                        <van-tag type="primary" size="small" plain>{{ upd.project_name }}</van-tag>
+                        <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
+                      </div>
+                      <p class="text-sm text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+                      <div v-if="upd.parsed_data?.blockers" class="text-xs text-red-400 mt-1">阻碍: {{ upd.parsed_data.blockers }}</div>
+                      <div v-if="upd.parsed_data?.next_steps" class="text-xs text-blue-400 mt-1">下一步: {{ upd.parsed_data.next_steps }}</div>
+                    </div>
                   </div>
                 </div>
-                <van-icon
-                  name="replay"
-                  size="16"
-                  color="#3B82F6"
-                  class="cursor-pointer"
-                  @click="handleRestart(item.id)"
-                />
-                <van-icon
-                  name="delete-o"
-                  size="16"
-                  color="#9CA3AF"
-                  class="cursor-pointer"
-                  @click="handleDelete(item.id)"
-                />
               </div>
-            </van-swipe-cell>
-          </div>
+            </van-tab>
+
+            <!-- Sub-tab: 人员看板 -->
+            <van-tab title="人员看板">
+              <div class="mt-3 space-y-3">
+                <div v-if="pmMembers.length === 0" class="bg-white rounded-xl shadow-sm p-8 text-center">
+                  <p class="text-gray-400 text-sm">暂无人员参与数据</p>
+                </div>
+                <div v-for="member in pmMembers" :key="member.talent_id" class="bg-white rounded-xl shadow-sm overflow-hidden">
+                  <div class="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                    <span class="font-medium text-gray-800"><van-icon name="user-o" size="14" class="mr-1" />{{ member.talent_name }}</span>
+                    <span class="text-xs text-gray-400">参与 {{ member.projects.length }} 个项目</span>
+                  </div>
+                  <div class="divide-y divide-gray-50">
+                    <div v-for="mp in member.projects" :key="mp.project_id" class="px-4 py-3">
+                      <div class="flex items-center justify-between mb-1">
+                        <div class="flex items-center gap-2">
+                          <span class="text-sm font-medium text-gray-700">{{ mp.project_name }}</span>
+                          <van-tag v-if="mp.role" size="small" plain type="primary">{{ mp.role }}</van-tag>
+                        </div>
+                        <van-tag :type="mp.project_status === 'active' ? 'success' : 'default'" size="small" plain>{{ mp.project_status === 'active' ? '进行中' : mp.project_status === 'completed' ? '已完成' : '归档' }}</van-tag>
+                      </div>
+                      <p v-if="mp.latest_update" class="text-xs text-gray-500">最新: {{ mp.latest_update.parsed_data?.progress || mp.latest_update.raw_input }}</p>
+                      <p v-if="mp.latest_update?.parsed_data?.completion_pct != null" class="mt-1">
+                        <van-progress :percentage="mp.latest_update.parsed_data.completion_pct" stroke-width="6" />
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </van-tab>
+          </van-tabs>
         </div>
       </van-tab>
 
-      <!-- ==================== Tab 3: 效率分析 ==================== -->
-      <van-tab title="效率分析">
-        <div class="max-w-3xl mx-auto px-4 py-4 space-y-3">
-          <!-- Duration Stats Chart -->
-          <div v-if="durationStats.length > 0" class="bg-white rounded-xl shadow-sm p-4">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-sm font-medium text-gray-700">各类任务平均耗时</span>
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-gray-400">{{ durationStats[0]?.generated_date }}</span>
-                <van-button size="mini" plain type="primary" :loading="generatingStats" @click="triggerDurationStats">刷新</van-button>
-              </div>
-            </div>
-            <div class="duration-chart-container" :style="{ height: Math.max(180, durationStats.length * 40 + 60) + 'px' }">
-              <canvas ref="durationChartCanvas"></canvas>
-            </div>
-          </div>
-          <div v-else-if="!analysisStatus" class="bg-white rounded-xl shadow-sm p-4 text-center">
-            <p class="text-gray-400 text-sm mb-3">暂无耗时统计数据</p>
-            <van-button size="small" plain type="primary" icon="chart-trending-o" :loading="generatingStats" @click="triggerDurationStats">生成耗时图表</van-button>
-          </div>
-
-          <!-- Streaming / status -->
-          <div v-if="analysisStatus" class="bg-gray-50 rounded-lg p-3 text-sm">
-            <div class="flex items-center gap-2 mb-1">
-              <van-loading v-if="analysisStatus === 'running'" size="14" />
-              <van-icon v-else-if="analysisStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
-              <span class="text-gray-600">{{ analysisStatusText }}</span>
-            </div>
-            <pre v-if="analysisThinking" ref="analysisThinkingPre" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed mb-2">{{ analysisThinking }}</pre>
-            <div v-if="analysisStream" ref="analysisStreamEl" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(analysisStream)"></div>
-          </div>
-
-          <!-- Latest analysis (only show 1) -->
-          <div v-if="analyses.length > 0" class="bg-white rounded-xl shadow-sm p-4">
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs text-purple-500 font-medium">{{ formatDateTime(analyses[0].created_at) }}</span>
-                <van-tag v-if="analyses[0].model_name" color="#8B5CF6" size="small" plain>{{ analyses[0].model_name }}</van-tag>
-              </div>
-              <van-button
-                v-if="!triggeringAnalysis"
-                size="mini"
-                plain
-                type="primary"
-                @click="triggerAnalysis"
-              >
-                重新生成
-              </van-button>
-            </div>
-            <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(analyses[0].content)"></div>
-          </div>
-
-          <!-- No analyses yet -->
-          <div v-if="analyses.length === 0 && !analysisStatus" class="bg-white rounded-xl shadow-sm p-8 text-center">
-            <p class="text-gray-400 text-sm mb-4">暂无效率分析报告</p>
-            <van-button
-              size="small"
-              plain
-              type="primary"
-              icon="chart-trending-o"
-              @click="triggerAnalysis"
-            >
-              生成效率分析
-            </van-button>
-          </div>
-        </div>
-      </van-tab>
-
-      <!-- ==================== Tab 4: 研发 ==================== -->
+      <!-- ==================== Tab 3: 研发 ==================== -->
       <van-tab title="研发">
         <div class="max-w-3xl mx-auto px-4 py-4">
           <van-tabs v-model:active="vibeTab" type="card" class="vibe-tabs">
@@ -947,6 +870,214 @@
         </div>
       </van-tab>
 
+      <!-- ==================== Tab 4: 已完成 ==================== -->
+      <van-tab title="已完成">
+        <div class="max-w-3xl mx-auto px-4 py-4 space-y-4">
+          <!-- Tag Filter (same tags, shared selection) -->
+          <div v-if="allTags.length > 0" class="pb-1">
+            <div class="flex items-center gap-2 mb-2">
+              <van-checkbox
+                :model-value="allSelected"
+                shape="square"
+                icon-size="16px"
+                class="flex-shrink-0 select-all-checkbox"
+                @update:model-value="selectAll"
+              >
+                全选
+              </van-checkbox>
+            </div>
+            <template v-if="tagTree.length > 0">
+              <div v-for="group in tagTree" :key="group.id" class="mb-2">
+                <div class="flex gap-2 flex-wrap items-center">
+                  <span class="text-xs text-gray-500 font-medium flex-shrink-0" :style="{ color: group.color }">{{ group.name }}</span>
+                  <template v-for="tag in group.children" :key="tag.id">
+                    <input
+                      v-if="editingTagId === tag.id"
+                      v-model="editingTagName"
+                      class="edit-tag-input"
+                      @blur="finishEditTag(tag)"
+                      @keypress.enter="finishEditTag(tag)"
+                      @keydown.escape="cancelEditTag"
+                      ref="tagEditInput"
+                    />
+                    <van-tag
+                      v-else
+                      :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
+                      :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
+                      size="medium"
+                      class="cursor-pointer tag-closeable"
+                      closeable
+                      @click="toggleTag(tag.id)"
+                      @dblclick.stop="startEditTag(tag)"
+                      @close.stop="confirmDeleteTag(tag)"
+                    >
+                      {{ tag.name }}
+                    </van-tag>
+                  </template>
+                </div>
+              </div>
+            </template>
+            <div v-if="orphanTags.length > 0" class="flex gap-2 flex-wrap items-center">
+              <template v-for="tag in orphanTags" :key="tag.id">
+                <input
+                  v-if="editingTagId === tag.id"
+                  v-model="editingTagName"
+                  class="edit-tag-input"
+                  @blur="finishEditTag(tag)"
+                  @keypress.enter="finishEditTag(tag)"
+                  @keydown.escape="cancelEditTag"
+                  ref="tagEditInput"
+                />
+                <van-tag
+                  v-else
+                  :type="selectedTagIds.has(tag.id) ? 'primary' : 'default'"
+                  :color="selectedTagIds.has(tag.id) ? tag.color : undefined"
+                  size="medium"
+                  class="cursor-pointer tag-closeable"
+                  closeable
+                  @click="toggleTag(tag.id)"
+                  @dblclick.stop="startEditTag(tag)"
+                  @close.stop="confirmDeleteTag(tag)"
+                >
+                  {{ tag.name }}
+                </van-tag>
+              </template>
+            </div>
+          </div>
+
+          <div v-if="loading" class="flex justify-center py-8">
+            <van-loading size="28px">加载中...</van-loading>
+          </div>
+          <div v-else-if="filteredCompleted.length === 0" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400">
+            <p class="text-sm">暂无已完成的任务</p>
+          </div>
+          <div v-else class="space-y-2">
+            <van-swipe-cell v-for="item in filteredCompleted" :key="item.id">
+              <div class="bg-white rounded-xl shadow-sm p-3 flex items-center gap-3 opacity-60">
+                <van-checkbox
+                  :model-value="true"
+                  shape="round"
+                  icon-size="20px"
+                  @update:model-value="handleRestart(item.id)"
+                />
+                <div class="flex-1 min-w-0" @click="openDetail(item)">
+                  <div class="flex items-center gap-2">
+                    <span class="text-sm text-gray-500 line-through truncate min-w-0">{{ item.title }}</span>
+                    <van-tag v-if="item.high_priority" type="danger" size="small" plain class="flex-shrink-0">高优</van-tag>
+                  </div>
+                  <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-2">{{ item.description }}</p>
+                  <div class="flex items-center gap-1 mt-1 flex-wrap">
+                    <van-tag
+                      v-for="tag in (item.tags || [])"
+                      :key="tag.id"
+                      :color="tag.color"
+                      size="small"
+                      plain
+                    >
+                      {{ tag.name }}
+                    </van-tag>
+                    <span class="text-xs text-gray-400">
+                      完成于 {{ formatDateTime(item.completed_at) }}
+                    </span>
+                    <span v-if="item.created_at && item.completed_at" class="text-xs text-gray-400">
+                      耗时 {{ formatDuration(item.created_at, item.completed_at) }}
+                    </span>
+                    <span v-if="item.deadline" class="text-xs text-gray-400">
+                      截止 {{ item.deadline }}{{ item.deadline_time ? ' ' + item.deadline_time : '' }}
+                    </span>
+                    <span v-if="item.repeat_rule" class="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-400">
+                      {{ repeatLabel(item) }}
+                    </span>
+                  </div>
+                </div>
+                <van-icon
+                  name="replay"
+                  size="16"
+                  color="#3B82F6"
+                  class="cursor-pointer"
+                  @click="handleRestart(item.id)"
+                />
+                <van-icon
+                  name="delete-o"
+                  size="16"
+                  color="#9CA3AF"
+                  class="cursor-pointer"
+                  @click="handleDelete(item.id)"
+                />
+              </div>
+            </van-swipe-cell>
+          </div>
+        </div>
+      </van-tab>
+
+      <!-- ==================== Tab 5: 效率分析 ==================== -->
+      <van-tab title="效率分析">
+        <div class="max-w-3xl mx-auto px-4 py-4 space-y-3">
+          <!-- Duration Stats Chart -->
+          <div v-if="durationStats.length > 0" class="bg-white rounded-xl shadow-sm p-4">
+            <div class="flex items-center justify-between mb-3">
+              <span class="text-sm font-medium text-gray-700">各类任务平均耗时</span>
+              <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-400">{{ durationStats[0]?.generated_date }}</span>
+                <van-button size="mini" plain type="primary" :loading="generatingStats" @click="triggerDurationStats">刷新</van-button>
+              </div>
+            </div>
+            <div class="duration-chart-container" :style="{ height: Math.max(180, durationStats.length * 40 + 60) + 'px' }">
+              <canvas ref="durationChartCanvas"></canvas>
+            </div>
+          </div>
+          <div v-else-if="!analysisStatus" class="bg-white rounded-xl shadow-sm p-4 text-center">
+            <p class="text-gray-400 text-sm mb-3">暂无耗时统计数据</p>
+            <van-button size="small" plain type="primary" icon="chart-trending-o" :loading="generatingStats" @click="triggerDurationStats">生成耗时图表</van-button>
+          </div>
+
+          <!-- Streaming / status -->
+          <div v-if="analysisStatus" class="bg-gray-50 rounded-lg p-3 text-sm">
+            <div class="flex items-center gap-2 mb-1">
+              <van-loading v-if="analysisStatus === 'running'" size="14" />
+              <van-icon v-else-if="analysisStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
+              <span class="text-gray-600">{{ analysisStatusText }}</span>
+            </div>
+            <pre v-if="analysisThinking" ref="analysisThinkingPre" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed mb-2">{{ analysisThinking }}</pre>
+            <div v-if="analysisStream" ref="analysisStreamEl" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(analysisStream)"></div>
+          </div>
+
+          <!-- Latest analysis (only show 1) -->
+          <div v-if="analyses.length > 0" class="bg-white rounded-xl shadow-sm p-4">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs text-purple-500 font-medium">{{ formatDateTime(analyses[0].created_at) }}</span>
+                <van-tag v-if="analyses[0].model_name" color="#8B5CF6" size="small" plain>{{ analyses[0].model_name }}</van-tag>
+              </div>
+              <van-button
+                v-if="!triggeringAnalysis"
+                size="mini"
+                plain
+                type="primary"
+                @click="triggerAnalysis"
+              >
+                重新生成
+              </van-button>
+            </div>
+            <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(analyses[0].content)"></div>
+          </div>
+
+          <!-- No analyses yet -->
+          <div v-if="analyses.length === 0 && !analysisStatus" class="bg-white rounded-xl shadow-sm p-8 text-center">
+            <p class="text-gray-400 text-sm mb-4">暂无效率分析报告</p>
+            <van-button
+              size="small"
+              plain
+              type="primary"
+              icon="chart-trending-o"
+              @click="triggerAnalysis"
+            >
+              生成效率分析
+            </van-button>
+          </div>
+        </div>
+      </van-tab>
+
     </van-tabs>
 
     <!-- Calendar for new todo deadline -->
@@ -1192,6 +1323,284 @@
       @confirm="handleDeleteTag"
     />
 
+    <!-- PM: Update Popup -->
+    <van-popup
+      v-model:show="showPmUpdatePopup"
+      position="bottom"
+      round
+      :style="{ maxHeight: '85vh' }"
+    >
+      <div class="p-4 space-y-4">
+        <h3 class="text-lg font-semibold text-gray-800">记录项目进展</h3>
+
+        <!-- Talent selector -->
+        <div>
+          <label class="text-sm text-gray-500 mb-1 block">队员</label>
+          <van-field
+            v-model="pmTalentSearch"
+            placeholder="搜索队员（支持拼音首字母）"
+            clearable
+            @focus="searchPmTalents"
+            @update:model-value="searchPmTalents"
+          />
+          <div v-if="pmShowTalentList && pmTalentResults.length > 0" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
+            <div
+              v-for="t in pmTalentResults"
+              :key="t.id"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
+              :class="pmSelectedTalent?.id === t.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
+              @click="pmSelectedTalent = t; pmTalentSearch = t.name; pmShowTalentList = false"
+            >
+              {{ t.name }}<span v-if="t.current_role" class="text-xs text-gray-400 ml-2">{{ t.current_role }}</span>
+            </div>
+          </div>
+          <div v-if="pmSelectedTalent" class="mt-1">
+            <van-tag type="primary" size="medium" closeable @close="pmSelectedTalent = null; pmTalentSearch = ''">{{ pmSelectedTalent.name }}</van-tag>
+          </div>
+        </div>
+
+        <!-- Parent project selector (optional) -->
+        <div>
+          <label class="text-sm text-gray-500 mb-1 block">父项目<span class="text-gray-300 ml-1">（可选，不选则记录到顶层项目）</span></label>
+          <div v-if="pmSelectedParentForCreate" class="flex items-center gap-1 mb-1">
+            <van-tag type="primary" size="medium" closeable @close="pmSelectedParentForCreate = null">{{ pmSelectedParentForCreate.name }}</van-tag>
+          </div>
+          <van-field
+            v-if="!pmSelectedParentForCreate"
+            v-model="pmParentProjectSearch"
+            placeholder="搜索父项目..."
+            clearable
+            @focus="searchPmParentProjects"
+            @update:model-value="searchPmParentProjects"
+          />
+          <div v-if="pmShowParentProjectList && (pmParentProjectResults.length > 0 || pmParentProjectSearch.trim())" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
+            <div
+              v-for="p in pmParentProjectResults"
+              :key="p.id"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
+              :class="pmSelectedParentForCreate?.id === p.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
+              @click="pmSelectedParentForCreate = p; pmParentProjectSearch = ''; pmShowParentProjectList = false; onParentSelected(p)"
+            >
+              <span class="font-medium">{{ p.name }}</span>
+              <span v-if="p.children?.length" class="text-xs text-gray-400 ml-2">{{ p.children.length }} 子项目</span>
+            </div>
+            <div
+              v-if="pmParentProjectSearch.trim() && !pmParentProjectResults.some(p => p.name === pmParentProjectSearch.trim())"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-green-50 text-green-600 border-t border-gray-100"
+              @click="createPmParentProjectInline"
+            >
+              + 创建父项目「{{ pmParentProjectSearch.trim() }}」
+            </div>
+          </div>
+        </div>
+
+        <!-- Project / sub-project selector -->
+        <div>
+          <label class="text-sm text-gray-500 mb-1 block">{{ pmSelectedParentForCreate ? '子项目' : '项目' }}</label>
+          <van-field
+            v-model="pmProjectSearch"
+            :placeholder="pmSelectedParentForCreate ? '搜索或新建子项目' : '搜索项目或输入新项目名'"
+            clearable
+            @focus="searchPmProjects"
+            @update:model-value="searchPmProjects"
+          />
+          <div v-if="pmShowProjectList && (pmFilteredProjectResults.length > 0 || pmProjectSearch.trim())" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
+            <div
+              v-for="p in pmFilteredProjectResults"
+              :key="p.id"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
+              :class="pmSelectedProject?.id === p.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
+              @click="selectPmProject(p)"
+            >
+              {{ p.name }}
+              <span v-if="p.parent_name && !pmSelectedParentForCreate" class="text-gray-400 text-xs ml-1">({{ p.parent_name }})</span>
+            </div>
+            <!-- Create new project/sub-project -->
+            <div
+              v-if="pmProjectSearch.trim() && !pmFilteredProjectResults.some(p => p.name === pmProjectSearch.trim())"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-green-50 text-green-600 border-t border-gray-100"
+              @click="createPmProjectInline(pmSelectedParentForCreate)"
+            >
+              + 创建{{ pmSelectedParentForCreate ? '子项目' : '项目' }}「{{ pmProjectSearch.trim() }}」{{ pmSelectedParentForCreate ? '（属于 ' + pmSelectedParentForCreate.name + '）' : '' }}
+            </div>
+          </div>
+          <!-- Selected display -->
+          <div v-if="pmSelectedProject" class="mt-1 flex items-center gap-1 flex-wrap">
+            <van-tag v-if="pmSelectedProject.parent_name" type="primary" size="small" plain>{{ pmSelectedProject.parent_name }}</van-tag>
+            <span v-if="pmSelectedProject.parent_name" class="text-gray-400 text-xs">›</span>
+            <van-tag type="success" size="medium" closeable @close="clearPmProjectSelection">{{ pmSelectedProject.name }}</van-tag>
+          </div>
+        </div>
+
+        <!-- Content input -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-sm text-gray-500">进展内容</label>
+            <div
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs cursor-pointer hover:bg-blue-100 transition"
+              @click="showPmModelPicker = true"
+            >
+              <span>{{ pmCurrentModel || '选择模型' }}</span>
+              <van-icon name="arrow-down" size="10" />
+            </div>
+          </div>
+          <van-field
+            v-model="pmUpdateContent"
+            type="textarea"
+            rows="4"
+            placeholder="描述该队员在该项目上的当前进展..."
+            maxlength="2000"
+            show-word-limit
+          />
+        </div>
+
+        <!-- Submit -->
+        <van-button
+          type="primary"
+          block
+          :loading="pmSubmitting"
+          :disabled="!pmSelectedTalent || !pmSelectedProject || !pmUpdateContent.trim()"
+          @click="submitPmUpdate"
+        >
+          提交
+        </van-button>
+
+        <!-- Show parsed result -->
+        <div v-if="pmLastResult" class="bg-gray-50 rounded-lg p-3 text-sm space-y-1">
+          <p class="font-medium text-green-600 mb-2">提交成功，LLM 解析结果：</p>
+          <p v-if="pmLastResult.parsed_data?.progress"><strong>进展：</strong>{{ pmLastResult.parsed_data.progress }}</p>
+          <p v-if="pmLastResult.parsed_data?.blockers"><strong>阻碍：</strong>{{ pmLastResult.parsed_data.blockers }}</p>
+          <p v-if="pmLastResult.parsed_data?.next_steps"><strong>下一步：</strong>{{ pmLastResult.parsed_data.next_steps }}</p>
+          <p v-if="pmLastResult.parsed_data?.completion_pct != null"><strong>完成度：</strong>{{ pmLastResult.parsed_data.completion_pct }}%</p>
+          <p v-if="pmLastResult.parsed_data?.role_hint"><strong>角色：</strong>{{ pmLastResult.parsed_data.role_hint }}</p>
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- PM: Model Picker -->
+    <van-action-sheet
+      v-model:show="showPmModelPicker"
+      :actions="pmModelActions"
+      cancel-text="取消"
+      close-on-click-action
+      @select="onPmModelSelect"
+    />
+
+    <!-- PM: Create Project Popup -->
+    <van-popup
+      v-model:show="showPmCreatePopup"
+      position="bottom"
+      round
+      :style="{ maxHeight: '60vh' }"
+    >
+      <div class="p-4 space-y-4">
+        <h3 class="text-lg font-semibold text-gray-800">创建项目</h3>
+        <van-field v-model="pmNewName" label="项目名" placeholder="输入项目名称" />
+        <van-field v-model="pmNewDesc" label="描述" type="textarea" rows="2" placeholder="项目描述（可选）" />
+        <div>
+          <label class="text-sm text-gray-500 mb-1 block">父项目（可选，创建为子项目）</label>
+          <van-field
+            v-model="pmParentSearch"
+            placeholder="搜索父项目"
+            clearable
+            @focus="pmShowParentList = true"
+            @update:model-value="searchPmParent"
+          />
+          <div v-if="pmShowParentList && pmParentResults.length > 0" class="border border-gray-200 rounded-lg mt-1 max-h-32 overflow-y-auto bg-white shadow">
+            <div
+              v-for="p in pmParentResults"
+              :key="p.id"
+              class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
+              @click="pmSelectedParent = p; pmParentSearch = p.name; pmShowParentList = false"
+            >
+              {{ p.name }}
+            </div>
+          </div>
+          <div v-if="pmSelectedParent" class="mt-1">
+            <van-tag type="primary" size="medium" closeable @close="pmSelectedParent = null; pmParentSearch = ''">{{ pmSelectedParent.name }}</van-tag>
+          </div>
+        </div>
+        <van-button type="primary" block :disabled="!pmNewName.trim()" :loading="pmCreating" @click="createPmProject">创建</van-button>
+      </div>
+    </van-popup>
+
+    <!-- PM: Project Info Popup -->
+    <van-popup
+      v-model:show="showPmInfoPopup"
+      position="bottom"
+      round
+      closeable
+      :style="{ height: '90vh' }"
+    >
+      <div v-if="pmInfoLoading" class="flex justify-center py-16">
+        <van-loading size="28px">加载项目信息...</van-loading>
+      </div>
+      <div v-else-if="pmInfoData" class="p-4 overflow-y-auto" style="max-height: calc(90vh - 40px)">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-xl font-bold text-gray-800">{{ pmInfoData.name }}</h3>
+          <div class="flex items-center gap-2">
+            <van-tag :type="pmInfoData.status === 'active' ? 'success' : 'primary'" size="medium">{{ pmInfoData.status === 'active' ? '进行中' : pmInfoData.status === 'completed' ? '已完成' : '已归档' }}</van-tag>
+            <van-button size="mini" plain type="primary" icon="replay" :loading="pmInfoRefreshing" @click="refreshPmInfo">刷新</van-button>
+          </div>
+        </div>
+
+        <!-- Stats cards -->
+        <div class="grid grid-cols-3 gap-3 mb-4">
+          <div class="bg-blue-50 rounded-lg p-3 text-center">
+            <p class="text-2xl font-bold text-blue-600">{{ pmInfoData.days_active }}</p>
+            <p class="text-xs text-blue-400">进行天数</p>
+          </div>
+          <div class="bg-green-50 rounded-lg p-3 text-center">
+            <p class="text-2xl font-bold text-green-600">{{ pmInfoData.member_count }}</p>
+            <p class="text-xs text-green-400">参与人数</p>
+          </div>
+          <div class="bg-purple-50 rounded-lg p-3 text-center">
+            <p class="text-2xl font-bold text-purple-600">{{ pmInfoData.update_count }}</p>
+            <p class="text-xs text-purple-400">更新次数</p>
+          </div>
+        </div>
+
+        <!-- Members -->
+        <div v-if="pmInfoData.members?.length > 0" class="mb-4">
+          <h4 class="text-sm font-semibold text-gray-600 mb-2">团队成员</h4>
+          <div class="flex flex-wrap gap-2">
+            <van-tag v-for="m in pmInfoData.members" :key="m.id" size="medium" plain type="primary">
+              {{ m.talent_name }}<span v-if="m.role" class="text-gray-400"> · {{ m.role }}</span>
+            </van-tag>
+          </div>
+        </div>
+
+        <!-- LLM Summary -->
+        <div v-if="pmInfoData.llm_summary" class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+          <h4 class="text-sm font-semibold text-gray-600 mb-2">项目概览（AI 生成）</h4>
+          <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(pmInfoData.llm_summary)"></div>
+        </div>
+
+        <!-- Update timeline -->
+        <div v-if="pmInfoData.recent_updates?.length > 0">
+          <h4 class="text-sm font-semibold text-gray-600 mb-2">更新记录</h4>
+          <div class="space-y-2">
+            <div v-for="upd in pmInfoData.recent_updates" :key="upd.id" class="border-l-2 border-blue-300 pl-3 py-1">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-xs text-gray-400">{{ formatDateTime(upd.created_at) }}</span>
+                <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
+              </div>
+              <p class="text-sm text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+              <p v-if="upd.parsed_data?.completion_pct != null" class="text-xs text-blue-500 mt-1">完成度: {{ upd.parsed_data.completion_pct }}%</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions: change status / delete -->
+        <div class="mt-6 flex gap-3">
+          <van-button v-if="pmInfoData.status === 'active'" size="small" type="primary" plain @click="changePmStatus(pmInfoData.id, 'completed')">标记完成</van-button>
+          <van-button v-if="pmInfoData.status === 'completed'" size="small" type="success" plain @click="changePmStatus(pmInfoData.id, 'archived')">归档</van-button>
+          <van-button v-if="pmInfoData.status !== 'active'" size="small" type="warning" plain @click="changePmStatus(pmInfoData.id, 'active')">重新激活</van-button>
+          <van-button size="small" type="danger" plain @click="deletePmProject(pmInfoData.id)">删除</van-button>
+        </div>
+      </div>
+    </van-popup>
+
     <!-- Improve Dialog -->
     <van-dialog
       v-model:show="showImproveDialog"
@@ -1221,6 +1630,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useTodosStore } from '../stores/todos'
+import { useProjectsStore } from '../stores/projects'
 import { showToast, showConfirmDialog } from 'vant'
 import api from '../api'
 import { Chart, BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js'
@@ -1230,10 +1640,71 @@ Chart.register(BarController, CategoryScale, LinearScale, BarElement, Tooltip, L
 import TopNavBar from '../components/TopNavBar.vue'
 
 const store = useTodosStore()
+const pmStore = useProjectsStore()
 
 // Tab state
 const activeTab = ref(0)
 const vibeTab = ref(0)
+const pmSubTab = ref(0)
+
+// ---- Project Management state ----
+const showPmUpdatePopup = ref(false)
+const showPmCreatePopup = ref(false)
+const showPmInfoPopup = ref(false)
+
+// Update form
+const pmTalentSearch = ref('')
+const pmShowTalentList = ref(false)
+const pmTalentResults = ref([])
+const pmSelectedTalent = ref(null)
+const pmProjectSearch = ref('')
+const pmShowProjectList = ref(false)
+const pmProjectResults = ref([])
+const pmSelectedProject = ref(null)
+const pmUpdateContent = ref('')
+const pmSubmitting = ref(false)
+const pmLastResult = ref(null)
+const showPmModelPicker = ref(false)
+const pmCurrentModel = ref('')
+const pmAvailableModels = ref([])
+
+// Create form
+const pmNewName = ref('')
+const pmNewDesc = ref('')
+const pmParentSearch = ref('')
+const pmShowParentList = ref(false)
+const pmParentResults = ref([])
+const pmSelectedParent = ref(null)
+const pmCreating = ref(false)
+
+// Project info
+const pmInfoData = ref(null)
+const pmInfoLoading = ref(false)
+const pmInfoRefreshing = ref(false)
+
+// Boards
+const pmTimeRange = ref('month')
+const pmTimeline = ref({ groups: {}, total: 0 })
+const pmMembers = ref([])
+
+// Projects list
+const pmProjects = computed(() => pmStore.projects)
+const pmTopProjects = computed(() => pmProjects.value.filter(p => !p.parent_id))
+const pmSelectedParentForCreate = ref(null)
+const pmParentProjectSearch = ref('')
+const pmShowParentProjectList = ref(false)
+const pmParentProjectResults = ref([])
+
+// Filtered project results: if a parent is selected, show only its children; otherwise show all
+const pmFilteredProjectResults = computed(() => {
+  const results = pmProjectResults.value
+  if (pmSelectedParentForCreate.value) {
+    // Show children of the selected parent
+    return results.filter(p => p.parent_id === pmSelectedParentForCreate.value.id)
+  }
+  // No parent selected: show all projects (flat, with parent_name for context)
+  return results
+})
 
 
 const newTitle = ref('')
@@ -1439,7 +1910,7 @@ const vibeCommitted = computed(() =>
 onMounted(async () => {
   loading.value = true
   try {
-    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats()])
+    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats(), loadPmProjects(), fetchPmModelSettings()])
     // Select all leaf tags (TODO scope)
     const leafs = allTags.value.filter(t => t.parent_id || !allTags.value.some(c => c.parent_id === t.id))
     selectedTagIds.value = new Set(leafs.map(t => t.id))
@@ -1455,7 +1926,12 @@ onMounted(async () => {
 
 // Auto-refresh duration stats when switching to 效率分析 tab (index 2)
 watch(activeTab, (tab) => {
-  if (tab === 2) {
+  if (tab === 1) {
+    loadPmProjects()
+    loadPmTimeline()
+    loadPmMembers()
+  }
+  if (tab === 4) {
     loadDurationStats()
   }
 })
@@ -2537,6 +3013,227 @@ async function checkCommitsForAll() {
   }
 }
 
+// ---- Project Management methods ----
+
+const pmModelActions = computed(() => {
+  return pmAvailableModels.value.map(m => ({
+    name: m.name,
+    subname: m.location === 'local' ? '本地' : '网络',
+    color: m.name === pmCurrentModel.value ? '#1989fa' : undefined,
+    className: m.name === pmCurrentModel.value ? 'font-bold' : '',
+  }))
+})
+
+async function fetchPmModelSettings() {
+  try {
+    const res = await api.get('/api/settings/model')
+    pmCurrentModel.value = res.data.current_model
+    pmAvailableModels.value = res.data.available_models
+  } catch (e) { /* ignore */ }
+}
+
+function onPmModelSelect(action) {
+  pmCurrentModel.value = action.name
+}
+
+async function loadPmProjects() {
+  try { await pmStore.fetchProjects() } catch (e) { console.error('Failed to load projects', e) }
+}
+
+async function loadPmTimeline() {
+  try {
+    const data = await pmStore.fetchTimeline(pmTimeRange.value)
+    pmTimeline.value = data
+  } catch (e) { console.error('Failed to load timeline', e) }
+}
+
+async function loadPmMembers() {
+  try {
+    pmMembers.value = await pmStore.fetchMemberBoard()
+  } catch (e) { console.error('Failed to load member board', e) }
+}
+
+async function searchPmTalents() {
+  try {
+    const res = await api.get('/api/talents/search', { params: { q: pmTalentSearch.value } })
+    pmTalentResults.value = res.data
+    pmShowTalentList.value = true
+  } catch (e) { pmTalentResults.value = [] }
+}
+
+async function searchPmParentProjects() {
+  try {
+    const res = await pmStore.searchProjects(pmParentProjectSearch.value)
+    // Only show top-level projects as potential parents
+    pmParentProjectResults.value = res.filter(p => !p.parent_id)
+    pmShowParentProjectList.value = true
+  } catch (e) { pmParentProjectResults.value = [] }
+}
+
+async function createPmParentProjectInline() {
+  const name = pmParentProjectSearch.value.trim()
+  if (!name) return
+  try {
+    const proj = await pmStore.createProject(name)
+    pmSelectedParentForCreate.value = proj
+    pmParentProjectSearch.value = ''
+    pmShowParentProjectList.value = false
+    onParentSelected(proj)
+    showToast('父项目已创建')
+  } catch (e) {
+    showToast('创建失败')
+  }
+}
+
+function onParentSelected(parent) {
+  // When parent is selected, clear current project selection and refresh project list
+  pmSelectedProject.value = null
+  pmProjectSearch.value = ''
+  searchPmProjects()
+}
+
+async function searchPmProjects() {
+  try {
+    const res = await pmStore.searchProjects(pmProjectSearch.value)
+    pmProjectResults.value = res
+    pmShowProjectList.value = true
+  } catch (e) { pmProjectResults.value = [] }
+}
+
+function selectPmProject(proj) {
+  // Attach parent info if parent is selected or project has one
+  if (pmSelectedParentForCreate.value) {
+    pmSelectedProject.value = { ...proj, parent_name: pmSelectedParentForCreate.value.name, parent_id: pmSelectedParentForCreate.value.id }
+  } else if (proj.parent_name) {
+    pmSelectedProject.value = proj
+  } else {
+    pmSelectedProject.value = proj
+  }
+  pmProjectSearch.value = ''
+  pmShowProjectList.value = false
+}
+
+function clearPmProjectSelection() {
+  pmSelectedProject.value = null
+  pmProjectSearch.value = ''
+}
+
+async function searchPmParent() {
+  try {
+    const res = await pmStore.searchProjects(pmParentSearch.value)
+    pmParentResults.value = res
+    pmShowParentList.value = true
+  } catch (e) { pmParentResults.value = [] }
+}
+
+async function createPmProjectInline(parentProj = null) {
+  const name = pmProjectSearch.value.trim()
+  if (!name) return
+  try {
+    const proj = await pmStore.createProject(name, '', parentProj?.id || null)
+    // Attach parent info for display
+    if (parentProj) {
+      pmSelectedProject.value = { ...proj, parent_name: parentProj.name, parent_id: parentProj.id }
+    } else {
+      pmSelectedProject.value = proj
+    }
+    pmProjectSearch.value = ''
+    pmShowProjectList.value = false
+    showToast(parentProj ? `已创建为「${parentProj.name}」的子项目` : '项目已创建')
+  } catch (e) {
+    showToast('创建失败')
+  }
+}
+
+async function createPmProject() {
+  if (!pmNewName.value.trim()) return
+  pmCreating.value = true
+  try {
+    await pmStore.createProject(pmNewName.value.trim(), pmNewDesc.value.trim(), pmSelectedParent.value?.id || null)
+    showToast('项目创建成功')
+    pmNewName.value = ''
+    pmNewDesc.value = ''
+    pmSelectedParent.value = null
+    pmParentSearch.value = ''
+    showPmCreatePopup.value = false
+  } catch (e) {
+    showToast('创建失败')
+  } finally {
+    pmCreating.value = false
+  }
+}
+
+async function submitPmUpdate() {
+  if (!pmSelectedTalent.value || !pmSelectedProject.value || !pmUpdateContent.value.trim()) return
+  pmSubmitting.value = true
+  pmLastResult.value = null
+  try {
+    const result = await pmStore.submitUpdate(
+      pmSelectedProject.value.id,
+      pmSelectedTalent.value.id,
+      pmUpdateContent.value.trim(),
+      pmCurrentModel.value || null
+    )
+    pmLastResult.value = result
+    pmUpdateContent.value = ''
+    showToast('提交成功')
+  } catch (e) {
+    showToast('提交失败')
+  } finally {
+    pmSubmitting.value = false
+  }
+}
+
+async function openProjectInfo(id) {
+  showPmInfoPopup.value = true
+  pmInfoLoading.value = true
+  pmInfoData.value = null
+  try {
+    pmInfoData.value = await pmStore.getProjectInfo(id)
+  } catch (e) {
+    showToast('加载项目信息失败')
+  } finally {
+    pmInfoLoading.value = false
+  }
+}
+
+async function refreshPmInfo() {
+  if (!pmInfoData.value) return
+  pmInfoRefreshing.value = true
+  try {
+    await pmStore.refreshProjectInfo(pmInfoData.value.id)
+    pmInfoData.value = await pmStore.getProjectInfo(pmInfoData.value.id)
+    showToast('已刷新')
+  } catch (e) {
+    showToast('刷新失败')
+  } finally {
+    pmInfoRefreshing.value = false
+  }
+}
+
+async function changePmStatus(id, status) {
+  try {
+    await pmStore.updateProject(id, { status })
+    pmInfoData.value = await pmStore.getProjectInfo(id)
+    showToast('状态已更新')
+  } catch (e) { showToast('更新失败') }
+}
+
+async function deletePmProject(id) {
+  try {
+    await showConfirmDialog({ title: '确认删除', message: '删除后不可恢复，确定？' })
+    await pmStore.deleteProject(id)
+    showPmInfoPopup.value = false
+    showToast('已删除')
+  } catch (e) { /* cancelled */ }
+}
+
+function formatShortDate(isoStr) {
+  if (!isoStr) return ''
+  const d = new Date(isoStr.endsWith('Z') ? isoStr : isoStr + 'Z')
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
 function renderMarkdown(text) {
   if (!text) return ''
   return text
@@ -2586,6 +3283,13 @@ function formatDateTime(isoStr) {
 </script>
 
 <style scoped>
+.pm-delete-btn {
+  opacity: 0.3;
+  transition: opacity 0.2s;
+}
+.pm-delete-btn:hover {
+  opacity: 1;
+}
 .nav-card {
   transition: all 0.15s ease;
 }

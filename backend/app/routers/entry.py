@@ -11,18 +11,22 @@ from app.database import get_db, SessionLocal
 from app.models.talent import Talent, Tag, TalentTag, EntryLog, CardDimension
 from app.middleware.auth_middleware import require_auth
 from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content, get_current_model_name, DEFAULT_PDF_PARSE_INSTRUCTIONS, DEFAULT_IMAGE_PARSE_INSTRUCTIONS
-from app.services.pdf_service import extract_text_from_pdf, extract_markdown_from_pdf, pdf_to_images
+from app.services.pdf_service import extract_text_from_pdf, extract_markdown_from_pdf, pdf_to_images, extract_text_from_docx, extract_markdown_from_docx
 from app.services.pinyin_service import get_pinyin_data
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/entry", tags=["entry"])
 
-# Directory for saving uploaded PDFs before background processing
-PDF_UPLOAD_DIR = os.path.join(os.environ.get("TEAMGR_DATA_DIR", "data"), "pdf-uploads")
+# Directory for saving uploaded documents (PDF/Word) before background processing
+DOC_UPLOAD_DIR = os.path.join(os.environ.get("TEAMGR_DATA_DIR", "data"), "doc-uploads")
+# Keep legacy alias for existing PDF references
+PDF_UPLOAD_DIR = DOC_UPLOAD_DIR
+
+ALLOWED_DOC_EXTENSIONS = {".pdf", ".docx"}
 
 
-def _ensure_pdf_upload_dir():
-    os.makedirs(PDF_UPLOAD_DIR, exist_ok=True)
+def _ensure_doc_upload_dir():
+    os.makedirs(DOC_UPLOAD_DIR, exist_ok=True)
 
 
 class TextEntryRequest(BaseModel):
@@ -163,6 +167,143 @@ async def _process_text_entry_bg(entry_log_id: int, talent_id: int, content: str
         except Exception:
             pass
     finally:
+        db.close()
+
+
+async def _process_docx_from_file_bg(entry_log_id: int):
+    """Background task: read saved DOCX from disk, extract content, call LLM, update talent card."""
+    t_start = time.monotonic()
+    docx_path = os.path.join(DOC_UPLOAD_DIR, f"{entry_log_id}.docx")
+    db = SessionLocal()
+    try:
+        entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+        if not entry_log:
+            logger.warning(f"Entry log {entry_log_id} not found, skipping")
+            return
+        talent = db.query(Talent).filter(Talent.id == entry_log.talent_id).first()
+        if not talent:
+            logger.warning(f"Talent {entry_log.talent_id} not found, skipping")
+            return
+
+        entry_log.status = "processing"
+        db.commit()
+        logger.info(f"[DOCX] Starting processing for entry {entry_log_id} (talent: {talent.name})")
+
+        if not os.path.exists(docx_path):
+            raise FileNotFoundError(f"DOCX file not found: {docx_path}")
+        with open(docx_path, "rb") as f:
+            docx_bytes = f.read()
+
+        # Extract structured markdown
+        t1 = time.monotonic()
+        docx_markdown = ""
+        try:
+            docx_markdown = extract_markdown_from_docx(docx_bytes)
+        except Exception as e:
+            logger.warning(f"DOCX markdown extraction failed: {e}")
+        logger.info(f"[TIMING] docx markdown extract: {time.monotonic() - t1:.2f}s ({len(docx_markdown)} chars)")
+
+        # Extract plain text as fallback
+        t2 = time.monotonic()
+        docx_text_fallback = ""
+        try:
+            docx_text_fallback = extract_text_from_docx(docx_bytes)
+        except Exception:
+            pass
+        logger.info(f"[TIMING] docx text extract: {time.monotonic() - t2:.2f}s")
+
+        # LLM parsing — reuse parse_pdf_content with text-first mode (no images)
+        dimensions = _get_dimensions(db)
+        t3 = time.monotonic()
+        result = await parse_pdf_content(
+            pdf_images=[],
+            dimensions=dimensions,
+            talent_name=talent.name,
+            pdf_text_fallback=docx_text_fallback,
+            pdf_markdown=docx_markdown,
+        )
+        logger.info(f"[TIMING] DOCX LLM parse: {time.monotonic() - t3:.1f}s (entry {entry_log_id})")
+
+        if not isinstance(result, dict):
+            result = {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": []}
+
+        # Re-fetch talent
+        talent = db.query(Talent).filter(Talent.id == entry_log.talent_id).first()
+        if not talent:
+            return
+
+        # Apply new dimensions
+        new_dims = result.get("new_dimensions", [])
+        if isinstance(new_dims, list):
+            new_dims = [d for d in new_dims if isinstance(d, dict)]
+            _apply_new_dimensions(db, new_dims)
+
+        # Update talent basic info
+        extracted = result.get("extracted_info", {})
+        if not isinstance(extracted, dict):
+            extracted = {}
+        if extracted.get("email") and not talent.email:
+            talent.email = extracted["email"]
+        if extracted.get("phone") and not talent.phone:
+            talent.phone = extracted["phone"]
+        if extracted.get("current_role") and not talent.current_role:
+            talent.current_role = extracted["current_role"]
+        if extracted.get("department") and not talent.department:
+            talent.department = extracted["department"]
+
+        # Merge card data
+        new_card_data = result.get("card_data", {})
+        if isinstance(new_card_data, dict) and new_card_data:
+            merged_card = dict(talent.card_data or {})
+            for key, value in new_card_data.items():
+                if value and value != "" and value != [] and value != {}:
+                    merged_card[key] = value
+            talent.card_data = merged_card
+
+        if result.get("summary"):
+            talent.summary = result["summary"]
+
+        # Handle tags
+        suggested_tags = result.get("suggested_tags", [])
+        if isinstance(suggested_tags, list) and suggested_tags:
+            tag_ids = _ensure_tags(db, [t for t in suggested_tags if isinstance(t, str)])
+            existing_tag_ids = {tt.tag_id for tt in db.query(TalentTag).filter(
+                TalentTag.talent_id == talent.id
+            ).all()}
+            for tid in tag_ids:
+                if tid not in existing_tag_ids:
+                    db.add(TalentTag(talent_id=talent.id, tag_id=tid))
+
+        # Update entry log
+        best_text = docx_markdown.strip() if docx_markdown else docx_text_fallback.strip()
+        result["_debug"] = {
+            "parse_mode": "text-first",
+            "extracted_text": best_text[:20000],
+            "extracted_text_length": len(best_text),
+        }
+        entry_log.llm_response = json.dumps(result, ensure_ascii=False)
+        entry_log.status = "done"
+        entry_log.model_name = get_current_model_name()
+
+        db.commit()
+        logger.info(f"DOCX processing done for entry {entry_log_id}, total: {time.monotonic() - t_start:.1f}s")
+
+    except Exception as e:
+        logger.error(f"Background DOCX processing failed for entry {entry_log_id}: {e}\n{traceback.format_exc()}")
+        try:
+            entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+            if entry_log:
+                entry_log.status = "failed"
+                entry_log.llm_response = json.dumps({"error": str(e)}, ensure_ascii=False)
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        try:
+            if os.path.exists(docx_path):
+                os.remove(docx_path)
+        except OSError:
+            pass
         db.close()
 
 
@@ -371,49 +512,57 @@ async def submit_text_entry(
 
 
 @router.post("/pdf")
-async def upload_pdf_resume(
+async def upload_document_resume(
     talent_id: int = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     _=Depends(require_auth),
 ):
-    """Upload a PDF resume. Phase 1: save to disk immediately. Phase 2: background processing.
+    """Upload a PDF or Word (.docx) resume. Phase 1: save to disk immediately. Phase 2: background processing.
 
     The upload completes in <1s (just file I/O + DB insert), so the user can
     safely close their laptop right after seeing the "已上传" confirmation.
     All heavy processing happens in the background task.
     """
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="请上传PDF文件")
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_DOC_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="请上传PDF或Word(.docx)文件")
 
     talent = db.query(Talent).filter(Talent.id == talent_id).first()
     if not talent:
         raise HTTPException(status_code=404, detail="人才不存在")
 
     # Phase 1: Read bytes and save to disk — fast, no heavy processing
-    pdf_bytes = await file.read()
+    file_bytes = await file.read()
+
+    is_docx = ext == ".docx"
+    source_label = "Word" if is_docx else "PDF"
 
     # Create entry log with "uploaded" status (not "processing" yet)
     entry_log = EntryLog(
         talent_id=talent.id,
-        content=f"[PDF上传] {file.filename}",
-        source="pdf",
+        content=f"[{source_label}上传] {filename}",
+        source="docx" if is_docx else "pdf",
         status="uploaded",
     )
     db.add(entry_log)
     db.commit()
     db.refresh(entry_log)
 
-    # Save PDF to disk
-    _ensure_pdf_upload_dir()
-    pdf_path = os.path.join(PDF_UPLOAD_DIR, f"{entry_log.id}.pdf")
-    with open(pdf_path, "wb") as f:
-        f.write(pdf_bytes)
+    # Save file to disk
+    _ensure_doc_upload_dir()
+    save_path = os.path.join(DOC_UPLOAD_DIR, f"{entry_log.id}{ext}")
+    with open(save_path, "wb") as f:
+        f.write(file_bytes)
 
-    logger.info(f"[PDF] Saved {file.filename} ({len(pdf_bytes)} bytes) as entry {entry_log.id}")
+    logger.info(f"[{source_label}] Saved {filename} ({len(file_bytes)} bytes) as entry {entry_log.id}")
 
     # Phase 2: Fire background processing (reads from disk, survives client disconnect)
-    asyncio.create_task(_process_pdf_from_file_bg(entry_log.id))
+    if is_docx:
+        asyncio.create_task(_process_docx_from_file_bg(entry_log.id))
+    else:
+        asyncio.create_task(_process_pdf_from_file_bg(entry_log.id))
 
     return {
         "message": "简历已上传，等待后台解析",
