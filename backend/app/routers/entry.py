@@ -270,14 +270,14 @@ async def _process_pdf_from_file_bg(entry_log_id: int):
         if extracted.get("department") and not talent.department:
             talent.department = extracted["department"]
 
-        # Merge card data
+        # Merge card data — MUST create new dict for SQLAlchemy JSON mutation detection
         new_card_data = result.get("card_data", {})
-        if isinstance(new_card_data, dict):
-            existing_card = talent.card_data or {}
+        if isinstance(new_card_data, dict) and new_card_data:
+            merged_card = dict(talent.card_data or {})  # new object
             for key, value in new_card_data.items():
                 if value and value != "" and value != [] and value != {}:
-                    existing_card[key] = value
-            talent.card_data = existing_card
+                    merged_card[key] = value
+            talent.card_data = merged_card
 
         if result.get("summary"):
             talent.summary = result["summary"]
@@ -470,14 +470,14 @@ async def _process_image_entry_bg(entry_log_id: int, talent_id: int,
         if extracted.get("department") and not talent.department:
             talent.department = extracted["department"]
 
-        # Merge card data
+        # Merge card data — MUST create new dict for SQLAlchemy JSON mutation detection
         new_card_data = result.get("card_data", {})
-        if isinstance(new_card_data, dict):
-            existing_card = talent.card_data or {}
+        if isinstance(new_card_data, dict) and new_card_data:
+            merged_card = dict(talent.card_data or {})  # new object
             for key, value in new_card_data.items():
                 if value and value != "" and value != [] and value != {}:
-                    existing_card[key] = value
-            talent.card_data = existing_card
+                    merged_card[key] = value
+            talent.card_data = merged_card
 
         if result.get("summary"):
             talent.summary = result["summary"]

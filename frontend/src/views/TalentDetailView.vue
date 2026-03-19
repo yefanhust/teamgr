@@ -225,27 +225,43 @@
               class="text-blue-500 cursor-pointer ml-1"
               @click="toggleLogExpand(log.id)"
             >{{ expandedLogs.has(log.id) ? '收起' : '...展开' }}</span></p>
-            <!-- Debug: raw extracted text & LLM response -->
-            <template v-if="log.llm_response && log.status === 'done'">
-              <div class="mt-2 flex gap-2 flex-wrap">
+            <!-- Parsed content summary for PDF/image entries -->
+            <template v-if="log.llm_response && log.status === 'done' && (log.source === 'pdf' || log.source === 'image')">
+              <div class="mt-2">
+                <span
+                  class="text-xs text-blue-600 cursor-pointer hover:underline"
+                  @click="toggleDebugSection(log.id, 'summary')"
+                >{{ debugSections[log.id + ':summary'] ? '▼ 收起解析结果' : '▶ 查看解析结果' }}
+                  <van-tag size="small" plain class="ml-1" style="font-size:10px">{{ getParsedSummaryLines(log).length }}项</van-tag>
+                </span>
+              </div>
+              <div v-if="debugSections[log.id + ':summary']" class="mt-1.5 bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-gray-700 space-y-1.5">
+                <template v-for="(line, li) in getParsedSummaryLines(log)" :key="li">
+                  <div>
+                    <span class="text-gray-500">{{ line.label }}：</span>
+                    <span class="text-gray-800">{{ line.value }}</span>
+                  </div>
+                </template>
+                <div v-if="getParsedSummaryLines(log).length === 0" class="text-gray-400">（未提取到信息）</div>
+              </div>
+              <!-- Debug expandable panels -->
+              <div class="mt-1.5 flex gap-2 flex-wrap">
                 <span
                   v-if="getParsedDebug(log).extracted_text"
                   class="text-xs text-orange-500 cursor-pointer hover:underline"
                   @click="toggleDebugSection(log.id, 'text')"
-                >{{ debugSections[log.id + ':text'] ? '▼ 收起原始文本' : '▶ 查看提取的原始文本' }}
+                >{{ debugSections[log.id + ':text'] ? '▼ 收起原始文本' : '▶ 原始文本' }}
                   <van-tag v-if="getParsedDebug(log).parse_mode" size="small" plain class="ml-1" style="font-size:10px">{{ getParsedDebug(log).parse_mode }}</van-tag>
                   <van-tag v-if="getParsedDebug(log).extracted_text_length" size="small" plain class="ml-1" style="font-size:10px">{{ getParsedDebug(log).extracted_text_length }}字</van-tag>
                 </span>
                 <span
                   class="text-xs text-purple-500 cursor-pointer hover:underline"
                   @click="toggleDebugSection(log.id, 'llm')"
-                >{{ debugSections[log.id + ':llm'] ? '▼ 收起LLM结果' : '▶ 查看LLM解析结果' }}</span>
+                >{{ debugSections[log.id + ':llm'] ? '▼ 收起原始JSON' : '▶ 原始JSON' }}</span>
               </div>
-              <!-- Extracted text panel -->
               <div v-if="debugSections[log.id + ':text']" class="mt-2 bg-orange-50 border border-orange-200 rounded-lg p-3 max-h-80 overflow-auto">
                 <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ getParsedDebug(log).extracted_text || '(无提取文本)' }}</pre>
               </div>
-              <!-- LLM response panel -->
               <div v-if="debugSections[log.id + ':llm']" class="mt-2 bg-purple-50 border border-purple-200 rounded-lg p-3 max-h-80 overflow-auto">
                 <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ formatLlmResponse(log.llm_response) }}</pre>
               </div>
@@ -433,6 +449,39 @@ function getParsedDebug(log) {
     return parsed._debug || {}
   } catch {
     return {}
+  }
+}
+
+function getParsedSummaryLines(log) {
+  if (!log.llm_response) return []
+  try {
+    const parsed = JSON.parse(log.llm_response)
+    const lines = []
+    const info = parsed.extracted_info || {}
+    if (info.name) lines.push({ label: '姓名', value: info.name })
+    if (info.email) lines.push({ label: '邮箱', value: info.email })
+    if (info.phone) lines.push({ label: '电话', value: info.phone })
+    if (info.current_role) lines.push({ label: '职位', value: info.current_role })
+    if (info.department) lines.push({ label: '部门', value: info.department })
+    if (parsed.summary) lines.push({ label: '摘要', value: parsed.summary })
+    const tags = parsed.suggested_tags
+    if (tags && tags.length) lines.push({ label: '标签', value: tags.join('、') })
+    const card = parsed.card_data || {}
+    for (const [key, val] of Object.entries(card)) {
+      if (!val || val === '' || (Array.isArray(val) && val.length === 0) || (typeof val === 'object' && !Array.isArray(val) && Object.keys(val).length === 0)) continue
+      const dimLabel = dimensions.value.find(d => d.key === key)?.label || key
+      if (typeof val === 'string') {
+        lines.push({ label: dimLabel, value: val })
+      } else if (Array.isArray(val)) {
+        lines.push({ label: dimLabel, value: val.map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(' | ') })
+      } else if (typeof val === 'object') {
+        const parts = Object.entries(val).filter(([, v]) => v && v !== '' && !(Array.isArray(v) && v.length === 0)).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+        if (parts.length) lines.push({ label: dimLabel, value: parts.join(' | ') })
+      }
+    }
+    return lines
+  } catch {
+    return []
   }
 }
 
