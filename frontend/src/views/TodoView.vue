@@ -1974,7 +1974,7 @@ const vibeCommitted = computed(() =>
 onMounted(async () => {
   loading.value = true
   try {
-    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats(), loadPmProjects(), fetchPmModelSettings()])
+    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats(), loadPmProjects(), loadPmTimeline(), loadPmMembers(), fetchPmModelSettings()])
     // Select all leaf tags (TODO scope)
     const leafs = allTags.value.filter(t => t.parent_id || !allTags.value.some(c => c.parent_id === t.id))
     selectedTagIds.value = new Set(leafs.map(t => t.id))
@@ -3171,6 +3171,8 @@ function selectPmProject(proj) {
     pmSelectedProject.value = { ...proj, parent_name: pmSelectedParentForCreate.value.name, parent_id: pmSelectedParentForCreate.value.id }
   } else if (proj.parent_name) {
     pmSelectedProject.value = proj
+    // Auto-fill parent project field
+    pmSelectedParentForCreate.value = { id: proj.parent_id, name: proj.parent_name }
   } else {
     pmSelectedProject.value = proj
   }
@@ -3246,6 +3248,9 @@ async function submitPmUpdate() {
     pmTalentResults.value = []
     pmUpdateContent.value = ''
     showToast('已提交，LLM 正在后台处理')
+    // Refresh boards in background
+    loadPmTimeline()
+    loadPmMembers()
   } catch (e) {
     showToast('提交失败')
   } finally {
