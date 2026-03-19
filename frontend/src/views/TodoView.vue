@@ -337,15 +337,21 @@
                     <span class="text-sm font-medium text-gray-600">{{ dateKey }}</span>
                     <span class="text-xs text-gray-400 ml-2">{{ updates.length }} 条更新</span>
                   </div>
-                  <div class="divide-y divide-gray-50">
-                    <div v-for="upd in updates" :key="upd.id" class="px-4 py-3">
-                      <div class="flex items-center gap-2 mb-1">
-                        <van-tag type="primary" size="small" plain>{{ upd.project_name }}</van-tag>
-                        <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
+                  <!-- Group by project within each date -->
+                  <div v-for="pg in groupUpdatesByProject(updates)" :key="pg.project_id" class="border-b border-gray-100 last:border-b-0">
+                    <div class="px-4 py-2 flex items-center gap-2 bg-blue-50/50">
+                      <van-tag type="primary" size="small" plain>{{ pg.project_name }}</van-tag>
+                      <span class="text-xs text-gray-400">{{ pg.updates.length }} 条</span>
+                    </div>
+                    <div class="divide-y divide-gray-50">
+                      <div v-for="upd in pg.updates" :key="upd.id" class="px-4 py-2 pl-6">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
+                        </div>
+                        <p class="text-sm text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+                        <div v-if="upd.parsed_data?.blockers" class="text-xs text-red-400 mt-1">阻碍: {{ upd.parsed_data.blockers }}</div>
+                        <div v-if="upd.parsed_data?.next_steps" class="text-xs text-blue-400 mt-1">下一步: {{ upd.parsed_data.next_steps }}</div>
                       </div>
-                      <p class="text-sm text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
-                      <div v-if="upd.parsed_data?.blockers" class="text-xs text-red-400 mt-1">阻碍: {{ upd.parsed_data.blockers }}</div>
-                      <div v-if="upd.parsed_data?.next_steps" class="text-xs text-blue-400 mt-1">下一步: {{ upd.parsed_data.next_steps }}</div>
                     </div>
                   </div>
                 </div>
@@ -3356,6 +3362,18 @@ async function deletePmProject(id) {
     showPmInfoPopup.value = false
     showToast('已删除')
   } catch (e) { /* cancelled */ }
+}
+
+function groupUpdatesByProject(updates) {
+  const map = {}
+  for (const upd of updates) {
+    const pid = upd.project_id
+    if (!map[pid]) {
+      map[pid] = { project_id: pid, project_name: upd.project_name, updates: [] }
+    }
+    map[pid].updates.push(upd)
+  }
+  return Object.values(map)
 }
 
 function formatShortDate(isoStr) {
