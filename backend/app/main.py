@@ -1,3 +1,4 @@
+import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
@@ -58,15 +59,31 @@ async def lifespan(app: FastAPI):
     load_config()
     init_db()
 
-    # Clean up stuck "processing" entries from previous runs
+    # Handle entries from previous runs
     from app.models.talent import EntryLog, Talent
     _db = SessionLocal()
     try:
+        # Mark stuck "processing" entries as failed
         stuck = _db.query(EntryLog).filter(EntryLog.status == "processing").all()
         for entry in stuck:
             entry.status = "failed"
             logger.warning(f"Marked stuck entry {entry.id} as failed (from previous run)")
         if stuck:
+            _db.commit()
+
+        # Resume "uploaded" PDF entries that weren't processed yet
+        from app.routers.entry import _process_pdf_from_file_bg, PDF_UPLOAD_DIR
+        uploaded = _db.query(EntryLog).filter(EntryLog.status == "uploaded").all()
+        for entry in uploaded:
+            pdf_path = os.path.join(PDF_UPLOAD_DIR, f"{entry.id}.pdf")
+            if os.path.exists(pdf_path):
+                asyncio.create_task(_process_pdf_from_file_bg(entry.id))
+                logger.info(f"Resumed uploaded PDF entry {entry.id} for background processing")
+            else:
+                entry.status = "failed"
+                entry.llm_response = '{"error": "PDF file lost during server restart"}'
+                logger.warning(f"Uploaded entry {entry.id} has no PDF file, marked as failed")
+        if uploaded:
             _db.commit()
 
         # Clean up card_data: remove schema definitions stored as values

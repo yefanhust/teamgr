@@ -321,9 +321,7 @@ def _fetch_latest_idea_insight() -> tuple[str, str] | None:
         for ins in insights:
             if not ins.content:
                 continue
-            text = ins.content.replace("\n", " ").strip()
-            if len(text) > 80:
-                text = text[:80] + "…"
+            text = ins.content.strip()
             lines.append(text)
         content = "\n".join(f"- {line}" for line in lines if line)
         return "灵感洞见", content

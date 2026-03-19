@@ -947,10 +947,6 @@
         </div>
       </van-tab>
 
-      <!-- ==================== Tab 5: 龙图阁 ==================== -->
-      <van-tab title="龙图阁">
-        <ScholarChat />
-      </van-tab>
     </van-tabs>
 
     <!-- Calendar for new todo deadline -->
@@ -1232,7 +1228,6 @@ import VoiceInputButton from '../components/VoiceInputButton.vue'
 
 Chart.register(BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 import TopNavBar from '../components/TopNavBar.vue'
-import ScholarChat from '../components/ScholarChat.vue'
 
 const store = useTodosStore()
 

@@ -279,7 +279,7 @@ const canSend = computed(() => {
 })
 
 const chatHeight = computed(() => {
-  return 'calc(100dvh - 96px)'
+  return 'calc(100dvh - 52px)'
 })
 
 // ──────────────── Markdown ────────────────

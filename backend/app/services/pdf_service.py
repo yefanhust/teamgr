@@ -62,6 +62,47 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     return "\n\n".join(text_parts)
 
 
+def extract_markdown_from_pdf(pdf_bytes: bytes) -> str:
+    """Extract structured markdown from a PDF using pymupdf4llm.
+
+    This produces high-quality markdown that preserves tables, headings,
+    lists, and multi-column layouts — much better than plain text extraction
+    for LLM consumption.
+
+    Falls back to PyMuPDF plain text if pymupdf4llm is not available.
+    """
+    try:
+        import pymupdf4llm
+
+        md_text = pymupdf4llm.to_markdown(
+            io.BytesIO(pdf_bytes),
+            show_progress=False,
+        )
+        if md_text and md_text.strip():
+            logger.info(f"pymupdf4llm markdown extraction: {len(md_text)} chars")
+            return md_text.strip()
+    except ImportError:
+        logger.warning("pymupdf4llm not installed, falling back to PyMuPDF text extraction")
+    except Exception as e:
+        logger.warning(f"pymupdf4llm extraction failed, falling back: {e}")
+
+    # Fallback: PyMuPDF plain text with block-level ordering
+    import fitz
+    text_parts = []
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page in doc:
+            text = page.get_text("text")
+            if text and text.strip():
+                text_parts.append(text.strip())
+    finally:
+        doc.close()
+
+    result = "\n\n".join(text_parts)
+    logger.info(f"PyMuPDF fallback text extraction: {len(result)} chars")
+    return result
+
+
 def pdf_to_images(pdf_bytes: bytes, dpi: int = 200) -> list[bytes]:
     """Convert each PDF page to a PNG image using PyMuPDF.
 

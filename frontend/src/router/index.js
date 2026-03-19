@@ -45,6 +45,11 @@ const routes = [
     component: () => import('../views/IdeasView.vue'),
   },
   {
+    path: '/scholar',
+    name: 'Scholar',
+    component: () => import('../views/ScholarView.vue'),
+  },
+  {
     path: '/todos',
     redirect: '/',
   },

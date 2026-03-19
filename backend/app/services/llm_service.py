@@ -14,14 +14,39 @@ logger = logging.getLogger(__name__)
 # ---------- Editable prompt defaults ----------
 
 DEFAULT_PDF_PARSE_INSTRUCTIONS = """\
-你是一个简历解析助手。请仔细查看以下简历图片，提取结构化信息，填入人才卡片。
+你是一个专业简历解析助手。你的任务是从简历中提取尽可能完整和详细的信息，填入人才卡片。
 
-## 要求:
-1. 仔细阅读简历图片中的所有内容（包括侧边栏、表格、图标旁文字等）
-2. 从简历中提取信息，填入对应的维度
-3. 如果能识别出姓名、邮箱、电话，请在返回的 extracted_info 中提供
-4. 如果简历中有信息无法归入现有维度，建议新维度
-5. 标签必须原子化，每个标签只表达一个独立概念，不要组合。例如"中科院硕士"应拆为"中科院"和"硕士"两个标签"""
+## 提取策略（请严格按照以下步骤）：
+
+### 第一步：通读全文
+仔细阅读简历的每一部分，包括页眉页脚、侧边栏、注脚等容易忽略的区域。不要遗漏任何信息。
+
+### 第二步：提取基本信息
+姓名、邮箱、电话、现任职位、部门/公司。
+
+### 第三步：提取工作经历（最重要，请详细提取）
+对于每段工作经历，必须提取：
+- 公司名称、职位、在职时间
+- 具体工作职责（逐条列出，不要合并或省略）
+- 项目经历及成果（保留具体数字和指标，如"提升30%性能"、"管理50人团队"）
+- 使用的技术栈
+
+### 第四步：提取教育背景
+学校、专业、学位、时间、GPA或排名（如有）
+
+### 第五步：提取技能和证书
+技术技能、语言能力、证书、获奖情况
+
+### 第六步：提取其他信息
+自我评价、兴趣爱好、个人作品/开源项目、论文发表等
+
+## 关键要求：
+1. 提取所有能看到的信息，不要遗漏任何细节
+2. 工作经历中的项目描述要保留完整，不要摘要化
+3. 如果看到具体的数字指标，必须原样保留
+4. 如果信息无法归入现有维度，务必在 new_dimensions 中建议新维度
+5. 标签必须原子化，每个标签只表达一个独立概念，不要组合。例如"中科院硕士"应拆为"中科院"和"硕士"两个标签
+6. 如果简历是英文或者其他语言，统一解析为中文"""
 
 DEFAULT_IMAGE_PARSE_INSTRUCTIONS = """\
 你是一个人才信息提取助手。请仔细查看以下图片，提取与人才相关的结构化信息，填入人才卡片。
@@ -348,17 +373,28 @@ async def parse_pdf_content(
     dimensions: list[dict],
     talent_name: str = "",
     pdf_text_fallback: str = "",
+    pdf_markdown: str = "",
 ) -> dict:
-    """Use VLM (multimodal) to extract structured info from PDF resume images.
+    """Extract structured info from PDF resume using text-first strategy.
+
+    Strategy:
+    - If rich markdown text is available (>100 chars), use TEXT as primary input
+      with only the first page image for visual cross-verification.
+    - If text is sparse (<= 100 chars, e.g. scanned PDF), fall back to
+      image-first mode with all page images.
 
     Args:
         pdf_images: List of PNG image bytes (one per page)
         dimensions: Card dimension definitions
         talent_name: Known talent name (optional)
-        pdf_text_fallback: Text extracted by pdfplumber as supplementary context
+        pdf_text_fallback: Legacy plain text fallback (kept for compatibility)
+        pdf_markdown: Structured markdown text from pymupdf4llm (preferred)
 
     Returns: dict with extracted_info, card_data, summary, suggested_tags, new_dimensions
     """
+    _empty_result = {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
+                     "extracted_info": {}}
+
     # Resolve model: per-type default > global default
     from app.config import get_model_defaults
     per_type = get_model_defaults().get("pdf-parse")
@@ -369,8 +405,7 @@ async def parse_pdf_content(
         model = _get_model()
         eff_name = _current_model_name or "unknown"
     if not model:
-        return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
-                "extracted_info": {}}
+        return _empty_result
 
     dimensions_desc = "\n".join(f"- {d['key']} ({d['label']}): 结构为 {d['schema']}" for d in dimensions)
 
@@ -392,33 +427,50 @@ async def parse_pdf_content(
     "current_role": "当前职位",
     "department": "部门"
   }},
-  "card_data": {{ ... 填充的卡片数据 ... }},
-  "summary": "一句话描述",
-  "suggested_tags": ["标签1"],
+  "card_data": {{ ... 按维度定义填充完整的卡片数据，每个维度都尽量填充 ... }},
+  "summary": "一句话描述此人核心竞争力",
+  "suggested_tags": ["原子化标签1", "标签2"],
   "new_dimensions": []
 }}
 """
 
-    # Build multimodal content: prompt text + resume page images
     from PIL import Image as PILImage
     import io
 
     t0 = time.monotonic()
     content_parts = [prompt]
 
-    if pdf_text_fallback and pdf_text_fallback.strip():
-        content_parts.append(f"\n## 补充：文本提取结果（可能有乱码，仅供参考）:\n{pdf_text_fallback[:4000]}")
+    # Determine the best available text
+    best_text = pdf_markdown.strip() if pdf_markdown else ""
+    if not best_text and pdf_text_fallback:
+        best_text = pdf_text_fallback.strip()
 
-    for i, img_bytes in enumerate(pdf_images):
-        img = PILImage.open(io.BytesIO(img_bytes))
-        content_parts.append(img)
-    logger.info(f"[TIMING] Image prep ({len(pdf_images)} pages): {time.monotonic() - t0:.2f}s")
+    # Decide strategy: text-first vs image-first
+    text_first = len(best_text) > 100
+
+    if text_first:
+        # TEXT-FIRST MODE: markdown/text is the primary content
+        content_parts.append(f"\n## 简历全文（结构化文本）:\n{best_text}")
+        # Attach only the first page image for visual cross-verification
+        if pdf_images:
+            img = PILImage.open(io.BytesIO(pdf_images[0]))
+            content_parts.append(img)
+        logger.info(f"[PDF-PARSE] Text-first mode: {len(best_text)} chars text + 1 reference image")
+    else:
+        # IMAGE-FIRST MODE: scanned PDF or empty text, rely on VLM
+        for img_bytes in pdf_images:
+            img = PILImage.open(io.BytesIO(img_bytes))
+            content_parts.append(img)
+        logger.info(f"[PDF-PARSE] Image-first mode (scanned PDF): {len(pdf_images)} page images")
+
+    logger.info(f"[TIMING] PDF content prep: {time.monotonic() - t0:.2f}s")
 
     try:
         t1 = time.monotonic()
         response = await asyncio.to_thread(model.generate_content, content_parts)
         duration_ms = int((time.monotonic() - t1) * 1000)
-        logger.info(f"[TIMING] Gemini pdf-parse API call: {duration_ms}ms")
+        mode_label = "text-first" if text_first else "image-first"
+        logger.info(f"[TIMING] Gemini pdf-parse ({mode_label}): {duration_ms}ms")
 
         # Record usage
         usage = getattr(response, 'usage_metadata', None)
@@ -430,13 +482,11 @@ async def parse_pdf_content(
         result = _extract_json(text)
         if not isinstance(result, dict):
             logger.warning(f"LLM returned non-dict type: {type(result)}")
-            return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
-                    "extracted_info": {}}
+            return _empty_result
         return result
     except Exception as e:
         logger.error(f"LLM PDF parsing failed: {e}")
-        return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
-                "extracted_info": {}}
+        return _empty_result
 
 
 async def parse_image_content(

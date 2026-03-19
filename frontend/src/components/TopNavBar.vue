@@ -50,12 +50,20 @@ const navItems = [
     inactiveClass: 'bg-orange-50 text-orange-700',
   },
   {
-    label: '人才卡',
+    label: '人才',
     route: '/talent-cards',
     icon: 'friends-o',
     color: '#3B82F6',
     activeClass: 'bg-blue-500 text-white shadow-md scale-105',
     inactiveClass: 'bg-blue-50 text-blue-700',
+  },
+  {
+    label: '龙图阁',
+    route: '/scholar',
+    icon: 'records-o',
+    color: '#8B5CF6',
+    activeClass: 'bg-purple-500 text-white shadow-md scale-105',
+    inactiveClass: 'bg-purple-50 text-purple-700',
   },
   {
     label: '统计',

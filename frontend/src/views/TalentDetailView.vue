@@ -13,16 +13,25 @@
       </div>
     </div>
 
-    <!-- Processing Banner -->
+    <!-- Phase 1: Uploaded, awaiting processing -->
     <div
-      v-if="hasProcessing"
+      v-if="hasUploaded"
       class="max-w-3xl mx-auto px-4 pt-3"
     >
-      <div class="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 flex items-center justify-between">
-        <div class="flex items-center gap-2 text-sm text-yellow-700">
-          <van-loading size="14px" color="#d97706" />
-          <span>后台正在整理信息...</span>
-        </div>
+      <div class="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center gap-2">
+        <van-icon name="passed" size="16" color="#16a34a" />
+        <span class="text-sm text-green-700">简历已上传，等待后台解析...</span>
+      </div>
+    </div>
+
+    <!-- Phase 2: Processing -->
+    <div
+      v-if="hasActiveProcessing"
+      class="max-w-3xl mx-auto px-4 pt-3"
+    >
+      <div class="bg-yellow-50 border border-yellow-200 rounded-xl px-4 py-3 flex items-center gap-2">
+        <van-loading size="14px" color="#d97706" />
+        <span class="text-sm text-yellow-700">后台解析中...</span>
       </div>
     </div>
 
@@ -197,7 +206,8 @@
                 <van-tag size="small" :type="log.source === 'pdf' ? 'warning' : log.source === 'image' ? 'success' : 'primary'">
                   {{ log.source === 'pdf' ? 'PDF' : log.source === 'image' ? '图片' : '手动' }}
                 </van-tag>
-                <van-tag v-if="log.status === 'processing'" size="small" type="warning" plain>整理中</van-tag>
+                <van-tag v-if="log.status === 'uploaded'" size="small" type="success" plain>已上传</van-tag>
+                <van-tag v-if="log.status === 'processing'" size="small" type="warning" plain>解析中</van-tag>
                 <van-tag v-if="log.status === 'failed'" size="small" type="danger" plain>失败</van-tag>
                 <van-tag v-if="log.model_name && (log.source === 'pdf' || log.source === 'image')" size="small" plain class="model-tag">{{ log.model_name }}</van-tag>
                 {{ formatDate(log.created_at) }}
@@ -215,6 +225,37 @@
               class="text-blue-500 cursor-pointer ml-1"
               @click="toggleLogExpand(log.id)"
             >{{ expandedLogs.has(log.id) ? '收起' : '...展开' }}</span></p>
+            <!-- Debug: raw extracted text & LLM response -->
+            <template v-if="log.llm_response && log.status === 'done'">
+              <div class="mt-2 flex gap-2 flex-wrap">
+                <span
+                  v-if="getParsedDebug(log).extracted_text"
+                  class="text-xs text-orange-500 cursor-pointer hover:underline"
+                  @click="toggleDebugSection(log.id, 'text')"
+                >{{ debugSections[log.id + ':text'] ? '▼ 收起原始文本' : '▶ 查看提取的原始文本' }}
+                  <van-tag v-if="getParsedDebug(log).parse_mode" size="small" plain class="ml-1" style="font-size:10px">{{ getParsedDebug(log).parse_mode }}</van-tag>
+                  <van-tag v-if="getParsedDebug(log).extracted_text_length" size="small" plain class="ml-1" style="font-size:10px">{{ getParsedDebug(log).extracted_text_length }}字</van-tag>
+                </span>
+                <span
+                  class="text-xs text-purple-500 cursor-pointer hover:underline"
+                  @click="toggleDebugSection(log.id, 'llm')"
+                >{{ debugSections[log.id + ':llm'] ? '▼ 收起LLM结果' : '▶ 查看LLM解析结果' }}</span>
+              </div>
+              <!-- Extracted text panel -->
+              <div v-if="debugSections[log.id + ':text']" class="mt-2 bg-orange-50 border border-orange-200 rounded-lg p-3 max-h-80 overflow-auto">
+                <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ getParsedDebug(log).extracted_text || '(无提取文本)' }}</pre>
+              </div>
+              <!-- LLM response panel -->
+              <div v-if="debugSections[log.id + ':llm']" class="mt-2 bg-purple-50 border border-purple-200 rounded-lg p-3 max-h-80 overflow-auto">
+                <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ formatLlmResponse(log.llm_response) }}</pre>
+              </div>
+            </template>
+            <!-- Failed entry: show error -->
+            <template v-if="log.llm_response && log.status === 'failed'">
+              <div class="mt-2 bg-red-50 border border-red-200 rounded-lg p-3">
+                <pre class="text-xs text-red-700 whitespace-pre-wrap break-words">{{ formatLlmResponse(log.llm_response) }}</pre>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -280,6 +321,7 @@ const talent = ref(null)
 const dimensions = ref([])
 const expandedLogs = ref(new Set())
 const entryLogs = ref([])
+const debugSections = ref({})
 const showActions = ref(false)
 const showDeleteConfirm = ref(false)
 const showDeleteLogConfirm = ref(false)
@@ -301,8 +343,16 @@ const actions = [
   { text: '删除', icon: 'delete', color: '#ee0a24' },
 ]
 
-const hasProcessing = computed(() => {
+const hasUploaded = computed(() => {
+  return entryLogs.value.some(l => l.status === 'uploaded')
+})
+
+const hasActiveProcessing = computed(() => {
   return entryLogs.value.some(l => l.status === 'processing')
+})
+
+const hasProcessing = computed(() => {
+  return hasUploaded.value || hasActiveProcessing.value
 })
 
 function isEmptyValue(v) {
@@ -371,6 +421,34 @@ function toggleLogExpand(logId) {
   expandedLogs.value = s
 }
 
+function toggleDebugSection(logId, section) {
+  const key = logId + ':' + section
+  debugSections.value = { ...debugSections.value, [key]: !debugSections.value[key] }
+}
+
+function getParsedDebug(log) {
+  if (!log.llm_response) return {}
+  try {
+    const parsed = JSON.parse(log.llm_response)
+    return parsed._debug || {}
+  } catch {
+    return {}
+  }
+}
+
+function formatLlmResponse(raw) {
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw)
+    // Remove _debug from display to keep it clean
+    const display = { ...parsed }
+    delete display._debug
+    return JSON.stringify(display, null, 2)
+  } catch {
+    return raw
+  }
+}
+
 function confirmDeleteLog(logId) {
   deleteLogId.value = logId
   showDeleteLogConfirm.value = true
@@ -407,10 +485,10 @@ async function pollProcessingEntries() {
     return
   }
 
-  const processingLogs = entryLogs.value.filter(l => l.status === 'processing')
+  const pendingLogs = entryLogs.value.filter(l => l.status === 'processing' || l.status === 'uploaded')
   let anyDone = false
 
-  for (const log of processingLogs) {
+  for (const log of pendingLogs) {
     try {
       const res = await api.get(`/api/entry/status/${log.id}`)
       if (res.data.status === 'done') {
@@ -418,6 +496,8 @@ async function pollProcessingEntries() {
         anyDone = true
       } else if (res.data.status === 'failed') {
         log.status = 'failed'
+      } else if (res.data.status !== log.status) {
+        log.status = res.data.status
       }
     } catch (e) {
       // ignore

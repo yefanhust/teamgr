@@ -84,11 +84,13 @@
                 'max-w-[80%] rounded-xl px-3 py-2 text-sm',
                 msg.role === 'user'
                   ? 'bg-blue-500 text-white'
-                  : msg.status === 'processing'
-                    ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
-                    : msg.status === 'failed'
-                      ? 'bg-red-50 text-red-600'
-                      : 'bg-gray-100 text-gray-700'
+                  : msg.status === 'uploaded'
+                    ? 'bg-green-50 text-green-700 border border-green-200'
+                    : msg.status === 'processing'
+                      ? 'bg-yellow-50 text-yellow-700 border border-yellow-200'
+                      : msg.status === 'failed'
+                        ? 'bg-red-50 text-red-600'
+                        : 'bg-gray-100 text-gray-700'
               ]"
             >
               <div v-if="msg.images && msg.images.length" class="flex flex-wrap gap-1.5 mb-1">
@@ -100,7 +102,11 @@
                   @click="previewImage(src)"
                 />
               </div>
-              <div v-if="msg.status === 'processing'" class="flex items-center gap-2">
+              <div v-if="msg.status === 'uploaded'" class="flex items-center gap-2">
+                <van-icon name="passed" size="14" color="#16a34a" />
+                <span>{{ msg.content }}</span>
+              </div>
+              <div v-else-if="msg.status === 'processing'" class="flex items-center gap-2">
                 <van-loading size="14px" />
                 <span>{{ msg.content }}</span>
               </div>
@@ -409,6 +415,15 @@ async function pollPendingEntries() {
           content: '整理失败，请重新输入',
         }
         pendingEntries.value.delete(entryId)
+      } else if (status === 'processing') {
+        // Transition from uploaded → processing: update message
+        if (messages.value[msgIndex]?.status === 'uploaded') {
+          messages.value[msgIndex] = {
+            role: 'assistant',
+            status: 'processing',
+            content: '后台解析中...',
+          }
+        }
       }
     } catch (e) {
       // ignore poll errors
@@ -503,7 +518,7 @@ async function handlePdfUpload(file) {
   messages.value.push({
     role: 'assistant',
     status: 'processing',
-    content: '简历解析中...',
+    content: '正在上传...',
   })
 
   await nextTick()
@@ -511,6 +526,12 @@ async function handlePdfUpload(file) {
 
   try {
     const result = await store.uploadPdf(selectedTalent.value.id, file.file)
+    // Phase 1 complete: file saved on server
+    messages.value[processingIdx] = {
+      role: 'assistant',
+      status: 'uploaded',
+      content: '✓ 简历已上传成功，正在排队等待后台解析（可安全关闭页面）',
+    }
     pendingEntries.value.set(result.entry_id, processingIdx)
     startPolling()
   } catch (e) {
