@@ -128,12 +128,12 @@
         </div>
 
         <div class="flex gap-2 items-end">
-          <div class="flex-1" @keydown.enter="handleEnterKey">
+          <div class="flex-1" ref="inputWrapper">
             <van-field
               v-model="inputText"
               type="textarea"
               :autosize="{ minHeight: 100 }"
-              placeholder="输入候选人的信息（支持粘贴/拖拽图片）..."
+              placeholder="输入候选人的信息...（Enter发送，⌘/Ctrl+Enter换行）"
               class="entry-input"
               @paste="handlePaste"
             />
@@ -285,6 +285,7 @@ const messages = ref([])
 const uploading = ref(false)
 const uploadingImage = ref(false)
 const chatContainer = ref(null)
+const inputWrapper = ref(null)
 const showNewTalent = ref(false)
 const newTalentName = ref('')
 const showModelPicker = ref(false)
@@ -366,12 +367,24 @@ onMounted(async () => {
       // ignore
     }
   }
+
+  // Attach keydown listener directly on the native <textarea> DOM element
+  // This bypasses all Vue/Vant component layers
+  await nextTick()
+  const textarea = inputWrapper.value?.querySelector('textarea')
+  if (textarea) {
+    textarea.addEventListener('keydown', handleTextareaKeydown)
+  }
 })
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
   document.removeEventListener('dragover', preventDragDefault)
   document.removeEventListener('drop', preventDragDefault)
+  const textarea = inputWrapper.value?.querySelector('textarea')
+  if (textarea) {
+    textarea.removeEventListener('keydown', handleTextareaKeydown)
+  }
 })
 
 if (typeof document !== 'undefined') {
@@ -476,13 +489,31 @@ function clearSelection() {
   stopPolling()
 }
 
-function handleEnterKey(event) {
-  // Modifier + Enter (Cmd/Ctrl/Shift/Alt): do nothing, let browser insert newline naturally
-  if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
+// Attached directly to native <textarea> element via addEventListener in onMounted
+function handleTextareaKeydown(event) {
+  if (event.key !== 'Enter') return
+
+  if (event.ctrlKey || event.metaKey) {
+    // Cmd+Enter (macOS) or Ctrl+Enter: insert newline
+    event.preventDefault()
+    event.stopPropagation()
+    const ta = event.target
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    const val = ta.value
+    const newVal = val.substring(0, start) + '\n' + val.substring(end)
+    // Update native DOM directly
+    ta.value = newVal
+    ta.selectionStart = ta.selectionEnd = start + 1
+    // Sync Vue v-model
+    inputText.value = newVal
     return
   }
-  // Plain Enter without any modifier: submit
+  // Shift+Enter: browser default inserts newline naturally
+  if (event.shiftKey || event.altKey) return
+  // Plain Enter: submit
   event.preventDefault()
+  event.stopPropagation()
   submitEntry()
 }
 

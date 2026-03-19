@@ -14,7 +14,6 @@ services:
       - ../data:/app/data
       - ../scripts:/workspace/scripts:ro
       - ../backend/app:/app/app:ro
-      - ../frontend/dist:/app/frontend/dist:ro
     environment:
       - TEAMGR_CONFIG=/app/config/config.yaml
       - TEAMGR_DATA_DIR=/app/data
