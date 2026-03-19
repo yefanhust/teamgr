@@ -55,6 +55,7 @@ def init_db():
     _migrate_schema()
     _seed_default_dimensions()
     _migrate_personal_info_birthday()
+    _migrate_add_career_history_dimension()
     _seed_default_preset_questions()
 
 
@@ -166,46 +167,53 @@ def _seed_default_dimensions():
                 sort_order=2,
             ),
             CardDimension(
+                key="career_history",
+                label="职业历程",
+                schema='[{"company": "", "position": "", "start_date": "", "end_date": "", "responsibilities": []}]',
+                is_default=True,
+                sort_order=3,
+            ),
+            CardDimension(
                 key="strengths",
                 label="优势",
                 schema='[]',
                 is_default=True,
-                sort_order=3,
+                sort_order=4,
             ),
             CardDimension(
                 key="weaknesses",
                 label="劣势",
                 schema='[]',
                 is_default=True,
-                sort_order=4,
+                sort_order=5,
             ),
             CardDimension(
                 key="personality",
                 label="性格特征",
                 schema='{"work_style": "", "communication": "", "leadership": ""}',
                 is_default=True,
-                sort_order=5,
+                sort_order=6,
             ),
             CardDimension(
                 key="potential",
                 label="发展潜力",
                 schema='{"growth_direction": "", "suitable_roles": [], "development_suggestions": []}',
                 is_default=True,
-                sort_order=6,
+                sort_order=7,
             ),
             CardDimension(
                 key="notes",
                 label="备注",
                 schema='""',
                 is_default=True,
-                sort_order=7,
+                sort_order=8,
             ),
             CardDimension(
                 key="one_liner",
                 label="一句话总结",
                 schema='""',
                 is_default=True,
-                sort_order=8,
+                sort_order=9,
             ),
         ]
         db.add_all(defaults)
@@ -242,6 +250,53 @@ def _migrate_personal_info_birthday():
                     {"data": _json.dumps(new_cd, ensure_ascii=False), "id": t.id},
                 )
         db.commit()
+    finally:
+        db.close()
+
+
+def _migrate_add_career_history_dimension():
+    """Add career_history dimension for existing databases that were seeded before it existed."""
+    import json as _json
+    from app.models.talent import CardDimension, Talent
+    db = SessionLocal()
+    try:
+        existing = db.query(CardDimension).filter(CardDimension.key == "career_history").first()
+        if existing:
+            return
+
+        max_order = db.query(CardDimension).count()
+        dim = CardDimension(
+            key="career_history",
+            label="职业历程",
+            schema='[{"company": "", "position": "", "start_date": "", "end_date": "", "responsibilities": []}]',
+            is_default=True,
+            sort_order=3,
+        )
+        db.add(dim)
+        db.flush()
+
+        # Re-order existing dimensions to make room at sort_order=3
+        others = db.query(CardDimension).filter(
+            CardDimension.key != "career_history",
+            CardDimension.sort_order >= 3,
+        ).order_by(CardDimension.sort_order).all()
+        for d in others:
+            d.sort_order = d.sort_order + 1
+
+        # Add empty career_history to all existing talent cards
+        from sqlalchemy import text
+        talents = db.query(Talent).all()
+        for t in talents:
+            cd = t.card_data or {}
+            if "career_history" not in cd:
+                cd["career_history"] = []
+                db.execute(
+                    text("UPDATE talents SET card_data = :data WHERE id = :id"),
+                    {"data": _json.dumps(cd, ensure_ascii=False), "id": t.id},
+                )
+
+        db.commit()
+        logger.info("Migration: added career_history dimension")
     finally:
         db.close()
 

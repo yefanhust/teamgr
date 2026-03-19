@@ -290,7 +290,20 @@ def generate_talent_card_pdf(talent_data: dict, dimensions: list[dict]) -> bytes
 
         if isinstance(value, list):
             for item in value:
-                elements.append(Paragraph(f"• {item}", body_style))
+                if isinstance(item, dict):
+                    # Array of objects (e.g. career_history entries)
+                    parts = []
+                    for k, v in item.items():
+                        if v and v != "" and v != []:
+                            if isinstance(v, list):
+                                v_text = ", ".join(str(i) for i in v)
+                            else:
+                                v_text = str(v)
+                            parts.append(f"<b>{k}:</b> {v_text}")
+                    if parts:
+                        elements.append(Paragraph(" | ".join(parts), body_style))
+                else:
+                    elements.append(Paragraph(f"• {item}", body_style))
         elif isinstance(value, dict):
             for k, v in value.items():
                 if v and v != [] and v != "":
