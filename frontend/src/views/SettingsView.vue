@@ -91,7 +91,44 @@
               <span class="inline-block w-1 h-4 rounded-full" :style="{ backgroundColor: group.color }"></span>
               {{ group.page }}
             </h3>
-            <div class="space-y-2 pl-4">
+
+            <!-- Parent group with children (e.g. Studio → TODO / 项目管理) -->
+            <div v-if="group.children" class="pl-4">
+              <div v-for="child in group.children" :key="child.page" class="mb-4">
+                <h4 class="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1.5">
+                  <span class="inline-block w-1 h-3 rounded-full" :style="{ backgroundColor: child.color }"></span>
+                  {{ child.page }}
+                </h4>
+                <div class="space-y-2 pl-4">
+                  <div
+                    v-for="callType in child.types"
+                    :key="callType"
+                    class="bg-white rounded-xl shadow-sm p-3 flex items-center justify-between gap-3"
+                  >
+                    <div class="flex-1 min-w-0">
+                      <div class="text-sm font-medium text-gray-800">{{ callTypes[callType] }}</div>
+                      <div class="text-xs text-gray-400">{{ callType }}</div>
+                    </div>
+                    <select
+                      :value="defaults[callType] || ''"
+                      @change="onModelChange(callType, $event.target.value)"
+                      class="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 text-gray-700 min-w-[140px] max-w-[200px]"
+                    >
+                      <option value="">Global Default</option>
+                      <optgroup v-if="networkModels.length" label="Cloud">
+                        <option v-for="m in networkModels" :key="m.name" :value="m.name">{{ m.name }}</option>
+                      </optgroup>
+                      <optgroup v-if="localModels.length" label="Local">
+                        <option v-for="m in localModels" :key="m.name" :value="m.name">{{ m.name }}</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Leaf group with types directly -->
+            <div v-else class="space-y-2 pl-4">
               <div
                 v-for="callType in group.types"
                 :key="callType"
@@ -151,12 +188,10 @@ const PAGE_GROUPS = [
   {
     page: 'Studio',
     color: '#8B5CF6',
-    types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis'],
-  },
-  {
-    page: '项目管理',
-    color: '#10B981',
-    types: ['project-summary', 'project-update-parse'],
+    children: [
+      { page: 'TODO', color: '#8B5CF6', types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis'] },
+      { page: '项目管理', color: '#10B981', types: ['project-summary', 'project-update-parse'] },
+    ],
   },
   {
     page: '灵感',
@@ -164,7 +199,7 @@ const PAGE_GROUPS = [
     types: ['idea-classify', 'idea-insight'],
   },
   {
-    page: '人才卡',
+    page: '人才',
     color: '#3B82F6',
     types: ['text-entry', 'pdf-parse', 'image-parse', 'semantic-search', 'chat-analyze', 'chat-answer', 'organize-tags'],
   },
@@ -202,11 +237,21 @@ const pageGroups = computed(() => {
   const grouped = new Set()
   const result = PAGE_GROUPS
     .map(g => {
+      if (g.children) {
+        const children = g.children
+          .map(c => {
+            const types = c.types.filter(t => known.includes(t))
+            types.forEach(t => grouped.add(t))
+            return { ...c, types }
+          })
+          .filter(c => c.types.length > 0)
+        return { ...g, children }
+      }
       const types = g.types.filter(t => known.includes(t))
       types.forEach(t => grouped.add(t))
       return { ...g, types }
     })
-    .filter(g => g.types.length > 0)
+    .filter(g => g.children ? g.children.length > 0 : g.types.length > 0)
   // Collect any ungrouped call types into a "其他" group
   const ungrouped = known.filter(t => !grouped.has(t))
   if (ungrouped.length) {
