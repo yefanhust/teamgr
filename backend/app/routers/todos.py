@@ -315,6 +315,12 @@ def get_analyses(db: Session = Depends(get_db)):
     ]
 
 
+@router.get("/analysis/status")
+async def get_todo_analysis_status():
+    """Check if a todo analysis background task is running."""
+    return {"status": _todo_analysis_bg["status"]}
+
+
 @router.get("/{todo_id}")
 def get_todo(todo_id: int, db: Session = Depends(get_db)):
     item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
@@ -1553,12 +1559,6 @@ async def _run_todo_analysis_bg(prompt):
             state["thinking_text"] = ""
             state["error"] = None
             state["task"] = None
-
-
-@router.get("/analysis/status")
-async def get_todo_analysis_status():
-    """Check if a todo analysis background task is running."""
-    return {"status": _todo_analysis_bg["status"]}
 
 
 @router.post("/analysis/trigger")

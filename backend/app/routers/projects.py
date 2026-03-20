@@ -240,6 +240,35 @@ async def board_members(
     return list(talent_map.values())
 
 
+# --- Analysis endpoints (must be before /{project_id} to avoid route collision) ---
+
+@router.get("/analysis")
+def get_project_analyses(db: Session = Depends(get_db)):
+    """Get the latest project analysis."""
+    analyses = (
+        db.query(ProjectAnalysis)
+        .order_by(ProjectAnalysis.created_at.desc())
+        .limit(1)
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "content": a.content,
+            "generated_date": a.generated_date,
+            "model_name": a.model_name,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in analyses
+    ]
+
+
+@router.get("/analysis/status")
+async def get_project_analysis_status():
+    """Check if a project analysis background task is running."""
+    return {"status": _project_analysis_bg["status"]}
+
+
 @router.get("/{project_id}")
 async def get_project(
     project_id: int,
@@ -665,27 +694,6 @@ def _build_project_analysis_prompt(db: Session):
     return prompt, len(active_projects)
 
 
-@router.get("/analysis")
-def get_project_analyses(db: Session = Depends(get_db)):
-    """Get the latest project analysis."""
-    analyses = (
-        db.query(ProjectAnalysis)
-        .order_by(ProjectAnalysis.created_at.desc())
-        .limit(1)
-        .all()
-    )
-    return [
-        {
-            "id": a.id,
-            "content": a.content,
-            "generated_date": a.generated_date,
-            "model_name": a.model_name,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in analyses
-    ]
-
-
 # --- Background project analysis task state ---
 _project_analysis_bg = {
     "status": "idle",       # idle | running | done | error
@@ -896,12 +904,6 @@ async def _run_project_analysis_bg(prompt):
             state["thinking_text"] = ""
             state["error"] = None
             state["task"] = None
-
-
-@router.get("/analysis/status")
-async def get_project_analysis_status():
-    """Check if a project analysis background task is running."""
-    return {"status": _project_analysis_bg["status"]}
 
 
 @router.post("/analysis/trigger")
