@@ -9,6 +9,10 @@ security = HTTPBearer(auto_error=False)
 TOKEN_EXPIRE_HOURS = 24
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
+# Access token cookie — allows the backend to authenticate requests even when
+# Safari has cleared localStorage (losing the Bearer header token).
+ACCESS_COOKIE_NAME = "teamgr_access"
+
 
 def create_token() -> str:
     expire = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
@@ -44,19 +48,25 @@ def verify_refresh_token(token: str) -> str | None:
 
 
 async def require_auth(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     """Dependency that requires valid JWT authentication.
     If no password is configured, block access — admin must set a password first.
+    Checks Authorization header first, then falls back to access token cookie
+    (for Safari where localStorage is cleared by ITP).
     """
     password = get_auth_password()
     if not password:
         raise HTTPException(status_code=403, detail="系统未配置密码，请联系管理员")
 
-    if not credentials:
-        raise HTTPException(status_code=401, detail="未提供认证凭据")
+    # 1. Check Authorization header (standard path)
+    if credentials and verify_token(credentials.credentials):
+        return credentials.credentials
 
-    if not verify_token(credentials.credentials):
-        raise HTTPException(status_code=401, detail="认证已过期，请重新登录")
+    # 2. Fallback: access token cookie (survives Safari localStorage clearing)
+    access_cookie = request.cookies.get(ACCESS_COOKIE_NAME)
+    if access_cookie and verify_token(access_cookie):
+        return access_cookie
 
-    return credentials.credentials
+    raise HTTPException(status_code=401, detail="认证已过期，请重新登录")

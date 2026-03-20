@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from app.config import get_auth_password
 from app.middleware.auth_middleware import (
     create_token, verify_token, create_refresh_token,
-    verify_refresh_token, require_auth,
+    verify_refresh_token, require_auth, ACCESS_COOKIE_NAME,
+    TOKEN_EXPIRE_HOURS,
 )
 from app.middleware.rate_limiter import (
     check_login_rate_limit, ban_manager, get_client_ip
@@ -40,6 +41,28 @@ def _set_refresh_cookie(response: Response, refresh_token: str):
 
 def _clear_refresh_cookie(response: Response):
     response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/auth")
+
+
+# --- HTTP-only cookie for access token ---
+# When Safari clears localStorage, the Bearer header token is lost.
+# Storing it as a cookie lets the backend authenticate without any frontend JS changes.
+ACCESS_COOKIE_MAX_AGE = TOKEN_EXPIRE_HOURS * 3600
+
+
+def _set_access_cookie(response: Response, access_token: str):
+    response.set_cookie(
+        key=ACCESS_COOKIE_NAME,
+        value=access_token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=ACCESS_COOKIE_MAX_AGE,
+        path="/api",
+    )
+
+
+def _clear_access_cookie(response: Response):
+    response.delete_cookie(key=ACCESS_COOKIE_NAME, path="/api")
 
 
 class LoginRequest(BaseModel):
@@ -103,12 +126,18 @@ async def auth_status(request: Request, response: Response):
         token = auth_header[7:]
         authenticated = verify_token(token)
 
+    # Fallback: check access token cookie (Safari clears localStorage but not cookies)
+    if not authenticated:
+        access_cookie = request.cookies.get(ACCESS_COOKIE_NAME)
+        if access_cookie:
+            authenticated = verify_token(access_cookie)
+
     # If no password required, always "authenticated"
     if not password_configured:
         authenticated = True
 
-    # Auto-refresh from HTTP-only cookie for trusted devices.
-    # This handles Safari clearing localStorage (losing the refresh token).
+    # Auto-refresh from refresh cookie for trusted devices.
+    # This handles when BOTH localStorage and access cookie have expired.
     if not authenticated and password_configured:
         refresh_cookie = request.cookies.get(REFRESH_COOKIE_NAME)
         if refresh_cookie:
@@ -118,6 +147,7 @@ async def auth_status(request: Request, response: Response):
                 new_token = create_token()
                 new_refresh = create_refresh_token(device_id)
                 _set_refresh_cookie(response, new_refresh)
+                _set_access_cookie(response, new_token)
                 return StatusResponse(
                     password_configured=True,
                     authenticated=True,
@@ -150,6 +180,7 @@ async def login(
 
     ban_manager.record_success(ip)
     token = create_token()
+    _set_access_cookie(response, token)
 
     if body.device_id:
         status = get_device_status(body.device_id)
@@ -243,11 +274,13 @@ async def refresh_token_endpoint(
     new_token = create_token()
     new_refresh_token = create_refresh_token(device_id)
     _set_refresh_cookie(response, new_refresh_token)
+    _set_access_cookie(response, new_token)
     return RefreshResponse(token=new_token, refresh_token=new_refresh_token)
 
 
 @router.post("/logout")
 async def logout(response: Response):
-    """Clear refresh token cookie."""
+    """Clear all auth cookies."""
     _clear_refresh_cookie(response)
+    _clear_access_cookie(response)
     return {"message": "已退出"}
