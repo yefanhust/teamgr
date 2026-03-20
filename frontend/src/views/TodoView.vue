@@ -1942,9 +1942,9 @@ const pmStore = useProjectsStore()
 
 // Tab state — restore from localStorage so refresh keeps the user on the same tab
 const activeTab = ref(parseInt(localStorage.getItem('todoActiveTab')) || 0)
-const vibeTab = ref(0)
-const pmSubTab = ref(0)
-const analysisSubTab = ref(0)
+const vibeTab = ref(parseInt(localStorage.getItem('todoVibeTab')) || 0)
+const pmSubTab = ref(parseInt(localStorage.getItem('todoPmSubTab')) || 0)
+const analysisSubTab = ref(parseInt(localStorage.getItem('todoAnalysisSubTab')) || 0)
 
 // ---- Project Management state ----
 const showPmUpdatePopup = ref(false)
@@ -2266,6 +2266,10 @@ watch(activeTab, async (tab) => {
     reconnectProjectAnalysisIfRunning()
   }
 }, { immediate: true })
+
+watch(vibeTab, (tab) => localStorage.setItem('todoVibeTab', tab))
+watch(pmSubTab, (tab) => localStorage.setItem('todoPmSubTab', tab))
+watch(analysisSubTab, (tab) => localStorage.setItem('todoAnalysisSubTab', tab))
 
 // Poll for status changes when there are implementing tasks
 let vibePollingTimer = null
