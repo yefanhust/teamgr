@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Request, Depends
+from fastapi import APIRouter, HTTPException, Request, Depends, Response
 from pydantic import BaseModel
 from app.config import get_auth_password
 from app.middleware.auth_middleware import (
@@ -17,6 +17,29 @@ from app.services.device_trust import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+# --- HTTP-only cookie for refresh token ---
+# Safari on iOS aggressively clears localStorage (ITP), which loses the
+# refresh token and forces trusted devices to re-enter the password.
+# Storing the refresh token in an HTTP-only cookie survives this clearing.
+REFRESH_COOKIE_NAME = "teamgr_refresh"
+REFRESH_COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str):
+    response.set_cookie(
+        key=REFRESH_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=REFRESH_COOKIE_MAX_AGE,
+        path="/api/auth",
+    )
+
+
+def _clear_refresh_cookie(response: Response):
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/auth")
 
 
 class LoginRequest(BaseModel):
@@ -35,6 +58,7 @@ class LoginResponse(BaseModel):
 class StatusResponse(BaseModel):
     password_configured: bool
     authenticated: bool
+    token: Optional[str] = None
 
 
 class DeviceRequest(BaseModel):
@@ -51,7 +75,7 @@ class BlacklistDeviceResponse(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: Optional[str] = None
 
 
 class RefreshResponse(BaseModel):
@@ -60,7 +84,7 @@ class RefreshResponse(BaseModel):
 
 
 @router.get("/status", response_model=StatusResponse)
-async def auth_status(request: Request):
+async def auth_status(request: Request, response: Response):
     """Check if password is configured and if user is authenticated."""
     password = get_auth_password()
     password_configured = bool(password)
@@ -83,6 +107,23 @@ async def auth_status(request: Request):
     if not password_configured:
         authenticated = True
 
+    # Auto-refresh from HTTP-only cookie for trusted devices.
+    # This handles Safari clearing localStorage (losing the refresh token).
+    if not authenticated and password_configured:
+        refresh_cookie = request.cookies.get(REFRESH_COOKIE_NAME)
+        if refresh_cookie:
+            device_id = verify_refresh_token(refresh_cookie)
+            if device_id and is_device_trusted(device_id):
+                update_last_used(device_id)
+                new_token = create_token()
+                new_refresh = create_refresh_token(device_id)
+                _set_refresh_cookie(response, new_refresh)
+                return StatusResponse(
+                    password_configured=True,
+                    authenticated=True,
+                    token=new_token,
+                )
+
     return StatusResponse(
         password_configured=password_configured,
         authenticated=authenticated,
@@ -93,6 +134,7 @@ async def auth_status(request: Request):
 async def login(
     body: LoginRequest,
     request: Request,
+    response: Response,
     _: None = Depends(check_login_rate_limit),
 ):
     """Login with password. Subject to rate limiting and progressive banning."""
@@ -115,6 +157,7 @@ async def login(
         if status == "trusted":
             update_last_used(body.device_id)
             refresh_token = create_refresh_token(body.device_id)
+            _set_refresh_cookie(response, refresh_token)
             return LoginResponse(
                 token=token, message="登录成功",
                 refresh_token=refresh_token, device_trusted=True,
@@ -133,6 +176,7 @@ async def login(
         if auto_adopt_device(body.device_id, user_agent):
             update_last_used(body.device_id)
             refresh_token = create_refresh_token(body.device_id)
+            _set_refresh_cookie(response, refresh_token)
             return LoginResponse(
                 token=token, message="登录成功",
                 refresh_token=refresh_token, device_trusted=True,
@@ -146,6 +190,7 @@ async def login(
 async def trust_device_endpoint(
     body: DeviceRequest,
     request: Request,
+    response: Response,
     _token: str = Depends(require_auth),
 ):
     """Trust the current device. Idempotent: re-trusting returns refresh_token."""
@@ -155,6 +200,7 @@ async def trust_device_endpoint(
         raise HTTPException(status_code=409, detail="该设备在黑名单中，无法信任")
 
     refresh_token = create_refresh_token(body.device_id)
+    _set_refresh_cookie(response, refresh_token)
     return TrustDeviceResponse(message="设备已信任", refresh_token=refresh_token)
 
 
@@ -174,16 +220,34 @@ async def blacklist_device_endpoint(
 
 
 @router.post("/refresh", response_model=RefreshResponse)
-async def refresh_token_endpoint(body: RefreshRequest):
-    """Refresh access token using a refresh token. Only for trusted devices."""
-    device_id = verify_refresh_token(body.refresh_token)
+async def refresh_token_endpoint(
+    body: RefreshRequest, request: Request, response: Response,
+):
+    """Refresh access token using a refresh token. Only for trusted devices.
+    Accepts refresh token from body or HTTP-only cookie (for Safari).
+    """
+    rt = body.refresh_token or request.cookies.get(REFRESH_COOKIE_NAME)
+    if not rt:
+        raise HTTPException(status_code=401, detail="Refresh token 无效或已过期")
+
+    device_id = verify_refresh_token(rt)
     if not device_id:
+        _clear_refresh_cookie(response)
         raise HTTPException(status_code=401, detail="Refresh token 无效或已过期")
 
     if not is_device_trusted(device_id):
+        _clear_refresh_cookie(response)
         raise HTTPException(status_code=401, detail="设备信任已撤销")
 
     update_last_used(device_id)
     new_token = create_token()
     new_refresh_token = create_refresh_token(device_id)
+    _set_refresh_cookie(response, new_refresh_token)
     return RefreshResponse(token=new_token, refresh_token=new_refresh_token)
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    """Clear refresh token cookie."""
+    _clear_refresh_cookie(response)
+    return {"message": "已退出"}

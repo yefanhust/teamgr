@@ -209,7 +209,7 @@
               ref="inputEl"
               v-model="inputText"
               class="scholar-input w-full border border-gray-200 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-100 bg-gray-50 focus:bg-white transition-colors"
-              :rows="inputRows"
+              rows="2"
               placeholder="向大学士提问... (支持拖拽PDF到此处)"
               @keydown.enter.exact="handleEnter"
               @input="autoResize"
@@ -268,10 +268,7 @@ const inputEl = ref(null)
 const pdfMenuIdx = ref(null)
 const pdfIncludeQuestion = ref(false)
 
-const inputRows = computed(() => {
-  const lines = (inputText.value.match(/\n/g) || []).length + 1
-  return Math.min(Math.max(lines, 2), 6)
-})
+// inputRows no longer needed — autoResize uses scrollHeight
 
 const canSend = computed(() => {
   if (streaming.value) return true // can stop
@@ -477,8 +474,16 @@ function handleEnter(e) {
 }
 
 function autoResize() {
-  // handled by computed inputRows
+  const el = inputEl.value
+  if (!el) return
+  el.style.height = 'auto'
+  const maxHeight = 6 * 20 // roughly 6 lines
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+  el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
 }
+
+// Re-run autoResize when inputText changes programmatically (clear, voice input)
+watch(inputText, () => nextTick(autoResize))
 
 let abortController = null
 

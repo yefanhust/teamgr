@@ -551,13 +551,18 @@ async def stream_response(query_id: str, conversation_id: str = ""):
             if answer.strip():
                 update_conversation_answer(conversation_id, query_id, answer)
 
+    heartbeat_interval = 15.0  # send SSE comment every 15s to keep proxy alive
+    since_last_send = 0.0
+
     while elapsed < _STREAM_TIMEOUT:
+        sent_data = False
         if os.path.exists(stream_file):
             lines = _read_new_lines()
             if lines:
                 sse_events, is_done = _lines_to_sse(lines)
                 for sse in sse_events:
                     yield sse
+                sent_data = True
                 if is_done:
                     _save_answer()
                     return
@@ -576,6 +581,14 @@ async def stream_response(query_id: str, conversation_id: str = ""):
 
         await asyncio.sleep(_STREAM_POLL_INTERVAL)
         elapsed += _STREAM_POLL_INTERVAL
+
+        if sent_data:
+            since_last_send = 0.0
+        else:
+            since_last_send += _STREAM_POLL_INTERVAL
+            if since_last_send >= heartbeat_interval:
+                yield ": heartbeat\n\n"
+                since_last_send = 0.0
 
     # Timeout
     _save_answer()

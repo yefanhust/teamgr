@@ -23,8 +23,13 @@ export const useAuthStore = defineStore('auth', () => {
       passwordConfigured.value = res.data.password_configured
       authenticated.value = res.data.authenticated
 
-      // Access token expired but have refresh token? Try auto-refresh.
-      // This is the key path for trusted devices returning after token expiry.
+      // Server auto-refreshed via HTTP-only cookie (e.g., Safari cleared localStorage)
+      if (res.data.token) {
+        token.value = res.data.token
+        localStorage.setItem('teamgr_token', res.data.token)
+      }
+
+      // Fallback: try localStorage refresh token
       if (!res.data.authenticated && localStorage.getItem('teamgr_refresh_token')) {
         await refreshToken()
       }
@@ -82,6 +87,8 @@ export const useAuthStore = defineStore('auth', () => {
     authenticated.value = false
     localStorage.removeItem('teamgr_token')
     localStorage.removeItem('teamgr_refresh_token')
+    // Clear server-side refresh cookie
+    api.post('/api/auth/logout').catch(() => {})
     // Keep device_id — persists across logins
   }
 

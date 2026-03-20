@@ -29,11 +29,12 @@ function addRefreshSubscriber(cb) {
 
 async function tryRefreshToken() {
   const refreshToken = localStorage.getItem('teamgr_refresh_token')
-  if (!refreshToken) return null
 
   try {
-    // Use raw axios to avoid interceptor loop
-    const res = await axios.post('/api/auth/refresh', { refresh_token: refreshToken })
+    // Always try refresh — HTTP-only cookie may exist even if localStorage
+    // was cleared (Safari ITP). Use raw axios to avoid interceptor loop.
+    const payload = refreshToken ? { refresh_token: refreshToken } : {}
+    const res = await axios.post('/api/auth/refresh', payload)
     const { token, refresh_token: newRefresh } = res.data
     localStorage.setItem('teamgr_token', token)
     localStorage.setItem('teamgr_refresh_token', newRefresh)
@@ -61,16 +62,7 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    const refreshToken = localStorage.getItem('teamgr_refresh_token')
-    if (!refreshToken) {
-      // No refresh token — go to login
-      localStorage.removeItem('teamgr_token')
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
-      }
-      return Promise.reject(error)
-    }
-
+    // Always try refresh — HTTP-only cookie may exist even if localStorage was cleared
     if (isRefreshing) {
       // Another refresh is in progress — wait for it
       return new Promise((resolve) => {
