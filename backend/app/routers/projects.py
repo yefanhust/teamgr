@@ -618,19 +618,28 @@ def _build_project_analysis_prompt(db: Session):
     if not active_projects:
         return None, 0
 
-    project_sections = []
+    # Build id→project map and separate top-level vs child projects
+    project_map = {p.id: p for p in active_projects}
+    top_projects = [p for p in active_projects if not p.parent_id or p.parent_id not in project_map]
+    child_map = {}  # parent_id -> [child_projects]
     for p in active_projects:
+        if p.parent_id and p.parent_id in project_map:
+            child_map.setdefault(p.parent_id, []).append(p)
+
+    def _format_project_section(p, indent="", is_child=False):
+        """Format a single project section, with optional indent for children."""
         days_active = (datetime.utcnow() - p.started_at).days if p.started_at else 0
 
-        # Members
+        # Members (direct)
         members_lines = []
         for m in p.members:
             name = m.talent.name if m.talent else "未知"
             role = m.role or "未指定"
-            members_lines.append(f"  - {name}（{role}）")
+            members_lines.append(f"{indent}  - {name}（{role}）")
 
-        # Recent updates (last 20)
-        sorted_updates = sorted(p.updates, key=lambda x: x.created_at or datetime.min, reverse=True)[:20]
+        # Recent updates (last 10 for children, 20 for top-level)
+        limit = 10 if is_child else 20
+        sorted_updates = sorted(p.updates, key=lambda x: x.created_at or datetime.min, reverse=True)[:limit]
         update_lines = []
         for u in sorted_updates:
             talent_name = u.talent.name if u.talent else "未知"
@@ -640,11 +649,11 @@ def _build_project_analysis_prompt(db: Session):
             blockers = parsed.get("blockers", "")
             next_steps = parsed.get("next_steps", "")
             completion_pct = parsed.get("completion_pct")
-            line = f"  - [{date_str}] {talent_name}: {progress}"
+            line = f"{indent}  - [{date_str}] {talent_name}: {progress}"
             if blockers:
-                line += f"\n    阻碍：{blockers}"
+                line += f"\n{indent}    阻碍：{blockers}"
             if next_steps:
-                line += f"\n    下一步：{next_steps}"
+                line += f"\n{indent}    下一步：{next_steps}"
             if completion_pct is not None:
                 line += f" (完成度: {completion_pct}%)"
             update_lines.append(line)
@@ -663,28 +672,61 @@ def _build_project_analysis_prompt(db: Session):
             days_since = (datetime.utcnow() - p.last_update_at).days
             last_update_str = f"{last_local.strftime('%Y-%m-%d')} ({days_since}天前)"
 
-        section = f"""### 项目：{p.name}
-- 描述：{p.description or '无'}
-- 状态：{p.status}
-- 已进行：{days_active}天
-- 参与人数：{len(p.members)}人
-- 最近更新：{last_update_str}
-- 更新频率：{freq}
+        heading = f"{'####' if is_child else '###'} {'子项目' if is_child else '项目'}：{p.name}"
+        lines = [heading]
+        lines.append(f"{indent}- 描述：{p.description or '无'}")
+        lines.append(f"{indent}- 状态：{p.status}")
+        lines.append(f"{indent}- 已进行：{days_active}天")
+        lines.append(f"{indent}- 参与人数：{len(p.members)}人")
+        lines.append(f"{indent}- 最近更新：{last_update_str}")
+        lines.append(f"{indent}- 更新频率：{freq}")
 
-成员：
-{chr(10).join(members_lines) if members_lines else '  暂无成员'}
+        # Children summary for parent projects
+        children = child_map.get(p.id, [])
+        if children:
+            active_children = [c for c in children if c.status == "active"]
+            lines.append(f"{indent}- 子项目数：{len(children)}个（活跃 {len(active_children)}个）")
+            # Aggregate child stats
+            all_child_members = set()
+            total_child_updates = 0
+            for c in children:
+                for m in c.members:
+                    all_child_members.add(m.talent_id)
+                total_child_updates += len(c.updates)
+            if all_child_members:
+                lines.append(f"{indent}- 子项目合计参与人数：{len(all_child_members)}人")
+            if total_child_updates:
+                lines.append(f"{indent}- 子项目合计更新数：{total_child_updates}条")
 
-最近进展记录：
-{chr(10).join(update_lines) if update_lines else '  暂无进展记录'}"""
+        if members_lines:
+            lines.append(f"\n{indent}成员：")
+            lines.extend(members_lines)
+
+        if update_lines:
+            lines.append(f"\n{indent}最近进展记录：")
+            lines.extend(update_lines)
+        elif not children:
+            lines.append(f"\n{indent}最近进展记录：")
+            lines.append(f"{indent}  暂无进展记录")
+
+        return "\n".join(lines)
+
+    project_sections = []
+    for p in top_projects:
+        section = _format_project_section(p)
+        children = child_map.get(p.id, [])
+        if children:
+            for child in children:
+                section += "\n\n" + _format_project_section(child, indent="  ", is_child=True)
         project_sections.append(section)
 
     projects_text = "\n\n".join(project_sections)
-    prompt = f"""你是一个项目管理效率顾问。以下是当前所有活跃项目的详细信息，包括项目描述、成员、进展记录、更新频率等。
+    prompt = f"""你是一个项目管理效率顾问。以下是当前所有活跃项目的详细信息，项目按层级结构组织（父项目下包含子项目）。父项目是组织容器，实际工作在子项目中推进，因此父项目本身没有成员和进展记录是正常的。
 
 {projects_text}
 
 请对这些项目进行全面分析，给出以下方面的评估和建议：
-1. **项目健康度**：各项目的整体状态评估，是否有停滞或进展缓慢的项目
+1. **项目健康度**：各项目的整体状态评估，是否有停滞或进展缓慢的项目（注意：评估父项目时应综合其子项目的活跃度）
 2. **进展频率与节奏**：更新是否规律，是否有长期无更新的项目需要关注
 3. **资源分配**：成员在各项目间的分布是否合理，是否有项目缺少人手
 4. **阻碍与风险**：从进展记录中提取的关键阻碍和潜在风险汇总
