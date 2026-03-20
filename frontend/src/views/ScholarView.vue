@@ -9,4 +9,6 @@
 <script setup>
 import TopNavBar from '../components/TopNavBar.vue'
 import ScholarChat from '../components/ScholarChat.vue'
+
+defineOptions({ name: 'ScholarView' })
 </script>

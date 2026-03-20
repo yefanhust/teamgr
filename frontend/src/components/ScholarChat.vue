@@ -529,6 +529,10 @@ async function sendMessage() {
   } finally {
     streaming.value = false
     abortController = null
+    // Clean up any messages still in streaming state (e.g. if stream failed mid-flight)
+    for (const msg of messages.value) {
+      if (msg.streaming) msg.streaming = false
+    }
     scrollToBottom()
   }
 }

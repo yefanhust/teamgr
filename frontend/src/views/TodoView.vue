@@ -650,8 +650,8 @@
                       @update:model-value="toggleReqSelection(item.id)"
                     />
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
-                      <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-800 font-medium truncate min-w-0">{{ item.title }}</span>
+                      <div class="flex items-start gap-2">
+                        <span class="text-sm text-gray-800 font-medium min-w-0 break-words">{{ item.title }}</span>
                         <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
                       </div>
                       <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-3">{{ item.description }}</p>
@@ -707,11 +707,14 @@
 
                 <!-- Requirement input -->
                 <div class="bg-white rounded-xl shadow-sm p-4">
-                  <div class="flex gap-2 items-center">
+                  <div class="flex gap-2 items-start">
                     <van-field
                       v-model="newReqTitle"
+                      type="textarea"
                       placeholder="添加新需求..."
                       class="todo-input flex-1"
+                      autosize
+                      rows="1"
                       @keyup.enter="addRequirement"
                     />
                     <VoiceInputButton v-model="newReqTitle" />
@@ -746,8 +749,8 @@
                       <span class="inline-block w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
                     </div>
                     <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-800 font-medium truncate min-w-0">{{ item.title }}</span>
+                      <div class="flex items-start gap-2">
+                        <span class="text-sm text-gray-800 font-medium min-w-0 break-words">{{ item.title }}</span>
                         <van-tag color="#6366F1" size="small" class="flex-shrink-0">规划中</van-tag>
                         <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
                       </div>
@@ -856,8 +859,8 @@
                       <span class="inline-block w-2 h-2 rounded-full" :class="item.vibe_status === 'implementing' ? 'bg-yellow-400 animate-pulse' : 'bg-blue-400'"></span>
                     </div>
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
-                      <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-800 font-medium truncate min-w-0">{{ item.title }}</span>
+                      <div class="flex items-start gap-2">
+                        <span class="text-sm text-gray-800 font-medium min-w-0 break-words">{{ item.title }}</span>
                         <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
                         <van-tag v-if="item.vibe_status === 'implementing'" color="#F59E0B" size="small" class="flex-shrink-0">实现中</van-tag>
                       </div>
@@ -901,8 +904,8 @@
                   <div class="flex items-start gap-3">
                     <van-loading v-if="item.vibe_status === 'committing'" size="20px" class="mt-0.5" />
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
-                      <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-800">{{ item.title }}</span>
+                      <div class="flex items-start gap-2">
+                        <span class="text-sm text-gray-800 min-w-0 break-words">{{ item.title }}</span>
                         <van-tag v-if="item.vibe_status === 'committing'" color="#F59E0B" size="small">
                           <van-loading size="10" class="mr-1" />提交中
                         </van-tag>
@@ -981,8 +984,8 @@
                   <div class="flex items-center gap-3">
                     <van-icon name="passed" size="20" color="#10B981" />
                     <div class="flex-1 min-w-0" @click="openDetail(item)">
-                      <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-600">{{ item.title }}</span>
+                      <div class="flex items-start gap-2">
+                        <span class="text-sm text-gray-600 min-w-0 break-words">{{ item.title }}</span>
                         <van-tag color="#10B981" size="small" plain>已提交</van-tag>
                       </div>
                       <!-- Git commit ID -->
@@ -1127,8 +1130,8 @@
                   @update:model-value="handleRestart(item.id)"
                 />
                 <div class="flex-1 min-w-0" @click="openDetail(item)">
-                  <div class="flex items-center gap-2">
-                    <span class="text-sm text-gray-500 line-through truncate min-w-0">{{ item.title }}</span>
+                  <div class="flex items-start gap-2">
+                    <span class="text-sm text-gray-500 line-through min-w-0 break-words">{{ item.title }}</span>
                     <van-tag v-if="item.high_priority" type="danger" size="small" plain class="flex-shrink-0">高优</van-tag>
                   </div>
                   <p v-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-2">{{ item.description }}</p>
@@ -1363,11 +1366,13 @@
           <van-field
             v-if="!detailItem.completed"
             v-model="detailItem.title"
+            type="textarea"
             class="detail-field"
             autosize
+            rows="1"
             @blur="saveDetail"
           />
-          <p v-else class="text-sm text-gray-600">{{ detailItem.title }}</p>
+          <p v-else class="text-sm text-gray-600 break-words">{{ detailItem.title }}</p>
         </div>
 
         <!-- Description -->
