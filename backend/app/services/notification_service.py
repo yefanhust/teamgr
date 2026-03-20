@@ -269,6 +269,8 @@ def generate_trigger_content(trigger_name: str) -> tuple[str, str] | None:
         return _fetch_latest_idea_insight()
     elif trigger_name == "todo_analysis":
         return _fetch_latest_todo_analysis()
+    elif trigger_name == "project_analysis":
+        return _fetch_latest_project_analysis()
     elif trigger_name == "scholar_scheduled":
         return _fetch_latest_scholar_scheduled()
     return None
@@ -380,5 +382,23 @@ def _fetch_latest_todo_analysis() -> tuple[str, str] | None:
         if not analysis:
             return None
         return "任务效率分析", analysis.content
+    finally:
+        db.close()
+
+
+def _fetch_latest_project_analysis() -> tuple[str, str] | None:
+    from app.database import SessionLocal
+    from app.models.project import ProjectAnalysis
+
+    db = SessionLocal()
+    try:
+        analysis = (
+            db.query(ProjectAnalysis)
+            .order_by(ProjectAnalysis.created_at.desc())
+            .first()
+        )
+        if not analysis:
+            return None
+        return "项目效率分析", analysis.content
     finally:
         db.close()

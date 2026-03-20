@@ -196,6 +196,17 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f"Duration stats job registered: daily at {ds.get('cron_hour', 3):02d}:{ds.get('cron_minute', 35):02d}")
 
+        from app.routers.projects import run_daily_project_analysis_sync
+        pa = sc.get("daily_project_analysis", {})
+        _scheduler.add_job(
+            run_daily_project_analysis_sync,
+            "cron",
+            hour=pa.get("cron_hour", 3),
+            minute=pa.get("cron_minute", 40),
+            id="daily_project_analysis",
+        )
+        logger.info(f"Project analysis job registered: daily at {pa.get('cron_hour', 3):02d}:{pa.get('cron_minute', 40):02d}")
+
         from app.routers.todos import check_and_spawn_repeat_todos_sync
         rt = sc.get("repeat_todo_check", {})
         _scheduler.add_job(

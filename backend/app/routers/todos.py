@@ -1342,179 +1342,282 @@ def _build_analysis_prompt(db):
     return prompt, len(completed_items)
 
 
-@router.post("/analysis/trigger")
-async def trigger_analysis_stream(db: Session = Depends(get_db)):
-    """Stream todo analysis via SSE."""
+# --- Background analysis task state ---
+_todo_analysis_bg = {
+    "status": "idle",       # idle | running | done | error
+    "subscribers": [],      # list[asyncio.Queue]
+    "full_text": "",        # accumulated analysis text (for replay on reconnect)
+    "thinking_text": "",    # accumulated thinking text
+    "task": None,           # asyncio.Task reference
+    "error": None,          # error message if failed
+}
+
+
+def _broadcast_todo(event):
+    """Send event to all subscriber queues."""
+    dead = []
+    for q in _todo_analysis_bg["subscribers"]:
+        try:
+            q.put_nowait(event)
+        except Exception:
+            dead.append(q)
+    for q in dead:
+        try:
+            _todo_analysis_bg["subscribers"].remove(q)
+        except ValueError:
+            pass
+
+
+async def _run_todo_analysis_bg(prompt):
+    """Background coroutine: runs LLM, broadcasts events, saves to DB."""
     import asyncio
     import time
     import threading
     from app.services.llm_service import _record_llm_usage, _get_local_model_config, get_current_model_name
     from app.config import get_gemini_config, get_model_defaults
 
-    prompt, count = _build_analysis_prompt(db)
+    state = _todo_analysis_bg
+    full_text = ""
+    usage = None
+    t0 = time.monotonic()
+
+    model_name = get_model_defaults().get("todo-analysis") or get_current_model_name()
+    local_cfg = _get_local_model_config(model_name)
+
+    try:
+        if local_cfg:
+            import httpx
+            api_base = local_cfg["api_base"].rstrip("/")
+            api_key = local_cfg.get("api_key", "")
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            payload = {
+                "messages": [
+                    {"role": "system", "content": "请直接回答，不要输出思考过程。"},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 4096,
+                "stream": True,
+            }
+            if local_cfg.get("model_id"):
+                payload["model"] = local_cfg["model_id"]
+
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                async with client.stream("POST", f"{api_base}/chat/completions", json=payload, headers=headers) as resp:
+                    resp.raise_for_status()
+                    isl, osl = 0, 0
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            text = delta.get("content", "")
+                            if text:
+                                full_text += text
+                                state["full_text"] = full_text
+                                _broadcast_todo({"type": "chunk", "content": text})
+                            u = chunk.get("usage")
+                            if u:
+                                isl = u.get("prompt_tokens", isl)
+                                osl = u.get("completion_tokens", osl)
+                        except (json.JSONDecodeError, IndexError, KeyError):
+                            pass
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            _record_llm_usage(model_name, "todo-analysis", duration_ms, isl, osl)
+        else:
+            from google import genai
+            from google.genai import types as genai_types
+
+            cfg = get_gemini_config()
+            api_key = cfg.get("api_key", "")
+            if not api_key or api_key == "your-gemini-api-key-here":
+                _broadcast_todo({"type": "error", "content": "LLM模型不可用"})
+                state["status"] = "error"
+                state["error"] = "LLM模型不可用"
+                return
+
+            client = genai.Client(api_key=api_key)
+            queue = asyncio.Queue()
+            loop = asyncio.get_event_loop()
+            stream_error = [None]
+
+            def produce():
+                try:
+                    response = client.models.generate_content_stream(
+                        model=model_name,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            thinking_config=genai_types.ThinkingConfig(
+                                include_thoughts=True,
+                            ),
+                        ),
+                    )
+                    last_usage = None
+                    for chunk in response:
+                        parts = []
+                        try:
+                            for part in chunk.candidates[0].content.parts:
+                                is_thought = getattr(part, 'thought', False)
+                                text = getattr(part, 'text', '') or ''
+                                if text:
+                                    parts.append(('thought' if is_thought else 'text', text))
+                        except (IndexError, AttributeError):
+                            pass
+                        if parts:
+                            loop.call_soon_threadsafe(queue.put_nowait, ('_parts', parts))
+                        last_usage = getattr(chunk, 'usage_metadata', None) or last_usage
+                    loop.call_soon_threadsafe(queue.put_nowait, ('_meta', last_usage))
+                except Exception as e:
+                    stream_error[0] = e
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            threading.Thread(target=produce, daemon=True).start()
+
+            in_thinking = False
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    elapsed = int(time.monotonic() - t0)
+                    _broadcast_todo({"type": "thinking", "elapsed": elapsed})
+                    continue
+                if item is None:
+                    break
+                if isinstance(item, tuple) and item[0] == '_meta':
+                    usage = item[1]
+                    continue
+                if isinstance(item, tuple) and item[0] == '_parts':
+                    for kind, text in item[1]:
+                        if kind == 'thought':
+                            if not in_thinking:
+                                in_thinking = True
+                            state["thinking_text"] += text
+                            _broadcast_todo({"type": "thinking_chunk", "content": text})
+                        else:
+                            if in_thinking:
+                                in_thinking = False
+                                elapsed = int(time.monotonic() - t0)
+                                _broadcast_todo({"type": "thinking_done", "elapsed": elapsed})
+                            full_text += text
+                            state["full_text"] = full_text
+                            _broadcast_todo({"type": "chunk", "content": text})
+
+            if stream_error[0]:
+                raise stream_error[0]
+
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            isl = getattr(usage, 'prompt_token_count', 0) or getattr(usage, 'input_tokens', 0) if usage else 0
+            osl = getattr(usage, 'candidates_token_count', 0) or getattr(usage, 'output_tokens', 0) if usage else 0
+            _record_llm_usage(model_name, "todo-analysis", duration_ms, isl, osl)
+
+        # Save to DB
+        if full_text.strip():
+            from app.database import SessionLocal
+            save_db = SessionLocal()
+            try:
+                today = datetime.utcnow().strftime("%Y-%m-%d")
+                old = save_db.query(TodoAnalysis).order_by(TodoAnalysis.created_at.desc()).offset(6).all()
+                for o in old:
+                    save_db.delete(o)
+                save_db.add(TodoAnalysis(content=full_text.strip(), generated_date=today, model_name=model_name))
+                save_db.commit()
+            finally:
+                save_db.close()
+
+        state["status"] = "done"
+        _broadcast_todo({"type": "done", "content": full_text.strip()})
+
+    except Exception as e:
+        logger.error(f"Todo analysis background task error: {e}")
+        state["status"] = "error"
+        state["error"] = str(e)
+        _broadcast_todo({"type": "error", "content": str(e)})
+
+    finally:
+        # Clean up after a delay so late subscribers can still see the final event
+        await asyncio.sleep(5)
+        state["status"] = "idle"
+        state["subscribers"].clear()
+        state["full_text"] = ""
+        state["thinking_text"] = ""
+        state["error"] = None
+        state["task"] = None
+
+
+@router.get("/analysis/status")
+async def get_todo_analysis_status():
+    """Check if a todo analysis background task is running."""
+    return {"status": _todo_analysis_bg["status"]}
+
+
+@router.post("/analysis/trigger")
+async def trigger_analysis_stream(db: Session = Depends(get_db)):
+    """Stream todo analysis via SSE. Idempotent: if already running, subscribes to existing task."""
+    import asyncio
+
+    state = _todo_analysis_bg
+
+    if state["status"] != "running":
+        # Start a new background task
+        prompt, count = _build_analysis_prompt(db)
+        if not prompt:
+            async def error_stream():
+                yield f"data: {json.dumps({'type': 'error', 'content': '最近7天没有已完成的任务'}, ensure_ascii=False)}\n\n"
+            return StreamingResponse(error_stream(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        state["status"] = "running"
+        state["subscribers"] = []
+        state["full_text"] = ""
+        state["thinking_text"] = ""
+        state["error"] = None
+        state["task"] = asyncio.create_task(_run_todo_analysis_bg(prompt))
+
+    # Subscribe to the running task
+    sub_queue = asyncio.Queue()
+    state["subscribers"].append(sub_queue)
 
     async def event_stream():
-        if not prompt:
-            yield f"data: {json.dumps({'type': 'error', 'content': '最近7天没有已完成的任务'}, ensure_ascii=False)}\n\n"
-            return
-
-        full_text = ""
-        usage = None
-        t0 = time.monotonic()
-
-        # Determine model
-        model_name = get_model_defaults().get("todo-analysis") or get_current_model_name()
-        local_cfg = _get_local_model_config(model_name)
-
         try:
-            if local_cfg:
-                # Stream from local model via OpenAI-compatible API
-                import httpx
-                api_base = local_cfg["api_base"].rstrip("/")
-                api_key = local_cfg.get("api_key", "")
-                headers = {"Content-Type": "application/json"}
-                if api_key:
-                    headers["Authorization"] = f"Bearer {api_key}"
-                payload = {
-                    "messages": [
-                        {"role": "system", "content": "请直接回答，不要输出思考过程。"},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "temperature": 0.7,
-                    "max_tokens": 4096,
-                    "stream": True,
-                }
-                if local_cfg.get("model_id"):
-                    payload["model"] = local_cfg["model_id"]
+            # Replay accumulated content for late joiners
+            if state["thinking_text"]:
+                yield f"data: {json.dumps({'type': 'thinking_chunk', 'content': state['thinking_text']}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'thinking_done', 'elapsed': 0}, ensure_ascii=False)}\n\n"
+            if state["full_text"]:
+                yield f"data: {json.dumps({'type': 'chunk', 'content': state['full_text']}, ensure_ascii=False)}\n\n"
 
-                async with httpx.AsyncClient(timeout=300.0) as client:
-                    async with client.stream("POST", f"{api_base}/chat/completions", json=payload, headers=headers) as resp:
-                        resp.raise_for_status()
-                        isl, osl = 0, 0
-                        async for line in resp.aiter_lines():
-                            if not line.startswith("data: "):
-                                continue
-                            data_str = line[6:]
-                            if data_str.strip() == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data_str)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                text = delta.get("content", "")
-                                if text:
-                                    full_text += text
-                                    yield f"data: {json.dumps({'type': 'chunk', 'content': text}, ensure_ascii=False)}\n\n"
-                                u = chunk.get("usage")
-                                if u:
-                                    isl = u.get("prompt_tokens", isl)
-                                    osl = u.get("completion_tokens", osl)
-                            except (json.JSONDecodeError, IndexError, KeyError):
-                                pass
-                duration_ms = int((time.monotonic() - t0) * 1000)
-                _record_llm_usage(model_name, "todo-analysis", duration_ms, isl, osl)
-            else:
-                # Stream from Gemini
-                from google import genai
-                from google.genai import types as genai_types
+            # If task already finished before we subscribed, send final event
+            if state["status"] == "done":
+                yield f"data: {json.dumps({'type': 'done', 'content': state['full_text']}, ensure_ascii=False)}\n\n"
+                return
+            elif state["status"] == "error":
+                yield f"data: {json.dumps({'type': 'error', 'content': state.get('error', 'Unknown error')}, ensure_ascii=False)}\n\n"
+                return
 
-                cfg = get_gemini_config()
-                api_key = cfg.get("api_key", "")
-                if not api_key or api_key == "your-gemini-api-key-here":
-                    yield f"data: {json.dumps({'type': 'error', 'content': 'LLM模型不可用'}, ensure_ascii=False)}\n\n"
-                    return
-
-                client = genai.Client(api_key=api_key)
-                queue = asyncio.Queue()
-                loop = asyncio.get_event_loop()
-                stream_error = [None]
-
-                def produce():
-                    try:
-                        response = client.models.generate_content_stream(
-                            model=model_name,
-                            contents=prompt,
-                            config=genai_types.GenerateContentConfig(
-                                thinking_config=genai_types.ThinkingConfig(
-                                    include_thoughts=True,
-                                ),
-                            ),
-                        )
-                        last_usage = None
-                        for chunk in response:
-                            parts = []
-                            try:
-                                for part in chunk.candidates[0].content.parts:
-                                    is_thought = getattr(part, 'thought', False)
-                                    text = getattr(part, 'text', '') or ''
-                                    if text:
-                                        parts.append(('thought' if is_thought else 'text', text))
-                            except (IndexError, AttributeError):
-                                pass
-                            if parts:
-                                loop.call_soon_threadsafe(queue.put_nowait, ('_parts', parts))
-                            last_usage = getattr(chunk, 'usage_metadata', None) or last_usage
-                        loop.call_soon_threadsafe(queue.put_nowait, ('_meta', last_usage))
-                    except Exception as e:
-                        stream_error[0] = e
-                    finally:
-                        loop.call_soon_threadsafe(queue.put_nowait, None)
-
-                threading.Thread(target=produce, daemon=True).start()
-
-                in_thinking = False
-                while True:
-                    try:
-                        item = await asyncio.wait_for(queue.get(), timeout=2.0)
-                    except asyncio.TimeoutError:
-                        elapsed = int(time.monotonic() - t0)
-                        yield f"data: {json.dumps({'type': 'thinking', 'elapsed': elapsed}, ensure_ascii=False)}\n\n"
-                        continue
-                    if item is None:
-                        break
-                    if isinstance(item, tuple) and item[0] == '_meta':
-                        usage = item[1]
-                        continue
-                    if isinstance(item, tuple) and item[0] == '_parts':
-                        for kind, text in item[1]:
-                            if kind == 'thought':
-                                if not in_thinking:
-                                    in_thinking = True
-                                yield f"data: {json.dumps({'type': 'thinking_chunk', 'content': text}, ensure_ascii=False)}\n\n"
-                            else:
-                                if in_thinking:
-                                    in_thinking = False
-                                    elapsed = int(time.monotonic() - t0)
-                                    yield f"data: {json.dumps({'type': 'thinking_done', 'elapsed': elapsed}, ensure_ascii=False)}\n\n"
-                                full_text += text
-                                yield f"data: {json.dumps({'type': 'chunk', 'content': text}, ensure_ascii=False)}\n\n"
-
-                if stream_error[0]:
-                    raise stream_error[0]
-
-                duration_ms = int((time.monotonic() - t0) * 1000)
-                isl = getattr(usage, 'prompt_token_count', 0) or getattr(usage, 'input_tokens', 0) if usage else 0
-                osl = getattr(usage, 'candidates_token_count', 0) or getattr(usage, 'output_tokens', 0) if usage else 0
-                _record_llm_usage(model_name, "todo-analysis", duration_ms, isl, osl)
-
-            # Save to DB
-            if full_text.strip():
-                from app.database import SessionLocal
-                save_db = SessionLocal()
+            # Stream events from the background task
+            while True:
                 try:
-                    today = datetime.utcnow().strftime("%Y-%m-%d")
-                    old = save_db.query(TodoAnalysis).order_by(TodoAnalysis.created_at.desc()).offset(6).all()
-                    for o in old:
-                        save_db.delete(o)
-                    save_db.add(TodoAnalysis(content=full_text.strip(), generated_date=today, model_name=model_name))
-                    save_db.commit()
-                finally:
-                    save_db.close()
-
-            yield f"data: {json.dumps({'type': 'done', 'content': full_text.strip()}, ensure_ascii=False)}\n\n"
-
-        except Exception as e:
-            logger.error(f"Todo analysis stream error: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)}, ensure_ascii=False)}\n\n"
+                    event = await asyncio.wait_for(sub_queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    # Send keepalive to detect disconnection
+                    yield f"data: {json.dumps({'type': 'thinking', 'elapsed': 0}, ensure_ascii=False)}\n\n"
+                    continue
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") in ("done", "error"):
+                    break
+        finally:
+            # Unsubscribe on disconnect
+            try:
+                state["subscribers"].remove(sub_queue)
+            except ValueError:
+                pass
 
     return StreamingResponse(
         event_stream(),

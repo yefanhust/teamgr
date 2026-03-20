@@ -3,12 +3,13 @@ import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.middleware.auth_middleware import require_auth
-from app.models.project import Project, ProjectUpdate, ProjectMember
+from app.models.project import Project, ProjectUpdate, ProjectMember, ProjectAnalysis
 from app.models.talent import Talent
 from app.services.pinyin_service import get_pinyin_data, match_pinyin
 
@@ -570,3 +571,440 @@ async def _generate_project_summary(project: Project, db: Session) -> str:
     except Exception as e:
         logger.warning(f"LLM generate project summary failed: {e}")
         return "项目摘要生成失败，请稍后重试。"
+
+
+# ---- Project Efficiency Analysis ----
+
+def _build_project_analysis_prompt(db: Session):
+    """Build analysis prompt from all active projects. Returns (prompt, count) or (None, 0)."""
+    from zoneinfo import ZoneInfo
+    tz_shanghai = ZoneInfo("Asia/Shanghai")
+
+    active_projects = (
+        db.query(Project)
+        .filter(Project.status == "active")
+        .order_by(Project.last_update_at.desc().nullslast(), Project.created_at.desc())
+        .all()
+    )
+    if not active_projects:
+        return None, 0
+
+    project_sections = []
+    for p in active_projects:
+        days_active = (datetime.utcnow() - p.started_at).days if p.started_at else 0
+
+        # Members
+        members_lines = []
+        for m in p.members:
+            name = m.talent.name if m.talent else "未知"
+            role = m.role or "未指定"
+            members_lines.append(f"  - {name}（{role}）")
+
+        # Recent updates (last 20)
+        sorted_updates = sorted(p.updates, key=lambda x: x.created_at or datetime.min, reverse=True)[:20]
+        update_lines = []
+        for u in sorted_updates:
+            talent_name = u.talent.name if u.talent else "未知"
+            date_str = u.created_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai).strftime("%Y-%m-%d %H:%M") if u.created_at else "未知"
+            parsed = u.parsed_data or {}
+            progress = parsed.get("progress", u.raw_input)
+            blockers = parsed.get("blockers", "")
+            next_steps = parsed.get("next_steps", "")
+            completion_pct = parsed.get("completion_pct")
+            line = f"  - [{date_str}] {talent_name}: {progress}"
+            if blockers:
+                line += f"\n    阻碍：{blockers}"
+            if next_steps:
+                line += f"\n    下一步：{next_steps}"
+            if completion_pct is not None:
+                line += f" (完成度: {completion_pct}%)"
+            update_lines.append(line)
+
+        # Update frequency
+        total_updates = len(p.updates)
+        if days_active > 0 and total_updates > 0:
+            freq = f"{total_updates}条/{days_active}天 (平均{total_updates/days_active:.1f}条/天)"
+        else:
+            freq = f"{total_updates}条"
+
+        # Last update time
+        last_update_str = "无"
+        if p.last_update_at:
+            last_local = p.last_update_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai)
+            days_since = (datetime.utcnow() - p.last_update_at).days
+            last_update_str = f"{last_local.strftime('%Y-%m-%d')} ({days_since}天前)"
+
+        section = f"""### 项目：{p.name}
+- 描述：{p.description or '无'}
+- 状态：{p.status}
+- 已进行：{days_active}天
+- 参与人数：{len(p.members)}人
+- 最近更新：{last_update_str}
+- 更新频率：{freq}
+
+成员：
+{chr(10).join(members_lines) if members_lines else '  暂无成员'}
+
+最近进展记录：
+{chr(10).join(update_lines) if update_lines else '  暂无进展记录'}"""
+        project_sections.append(section)
+
+    projects_text = "\n\n".join(project_sections)
+    prompt = f"""你是一个项目管理效率顾问。以下是当前所有活跃项目的详细信息，包括项目描述、成员、进展记录、更新频率等。
+
+{projects_text}
+
+请对这些项目进行全面分析，给出以下方面的评估和建议：
+1. **项目健康度**：各项目的整体状态评估，是否有停滞或进展缓慢的项目
+2. **进展频率与节奏**：更新是否规律，是否有长期无更新的项目需要关注
+3. **资源分配**：成员在各项目间的分布是否合理，是否有项目缺少人手
+4. **阻碍与风险**：从进展记录中提取的关键阻碍和潜在风险汇总
+5. **具体建议**：3-5条可操作的项目管理优化建议
+
+请用简洁的中文回答，使用 Markdown 格式，方便阅读。"""
+    return prompt, len(active_projects)
+
+
+@router.get("/analysis")
+def get_project_analyses(db: Session = Depends(get_db)):
+    """Get the latest project analysis."""
+    analyses = (
+        db.query(ProjectAnalysis)
+        .order_by(ProjectAnalysis.created_at.desc())
+        .limit(1)
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "content": a.content,
+            "generated_date": a.generated_date,
+            "model_name": a.model_name,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in analyses
+    ]
+
+
+# --- Background project analysis task state ---
+_project_analysis_bg = {
+    "status": "idle",       # idle | running | done | error
+    "subscribers": [],      # list[asyncio.Queue]
+    "full_text": "",
+    "thinking_text": "",
+    "task": None,
+    "error": None,
+}
+
+
+def _broadcast_project(event):
+    """Send event to all subscriber queues."""
+    dead = []
+    for q in _project_analysis_bg["subscribers"]:
+        try:
+            q.put_nowait(event)
+        except Exception:
+            dead.append(q)
+    for q in dead:
+        try:
+            _project_analysis_bg["subscribers"].remove(q)
+        except ValueError:
+            pass
+
+
+async def _run_project_analysis_bg(prompt):
+    """Background coroutine: runs LLM, broadcasts events, saves to DB."""
+    import asyncio
+    import time
+    import threading
+    from app.services.llm_service import _record_llm_usage, _get_local_model_config, get_current_model_name
+    from app.config import get_gemini_config, get_model_defaults
+
+    state = _project_analysis_bg
+    full_text = ""
+    usage = None
+    t0 = time.monotonic()
+
+    model_name = get_model_defaults().get("project-analysis") or get_current_model_name()
+    local_cfg = _get_local_model_config(model_name)
+
+    try:
+        if local_cfg:
+            import httpx
+            api_base = local_cfg["api_base"].rstrip("/")
+            api_key = local_cfg.get("api_key", "")
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            payload = {
+                "messages": [
+                    {"role": "system", "content": "请直接回答，不要输出思考过程。"},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 4096,
+                "stream": True,
+            }
+            if local_cfg.get("model_id"):
+                payload["model"] = local_cfg["model_id"]
+
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                async with client.stream("POST", f"{api_base}/chat/completions", json=payload, headers=headers) as resp:
+                    resp.raise_for_status()
+                    isl, osl = 0, 0
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            text = delta.get("content", "")
+                            if text:
+                                full_text += text
+                                state["full_text"] = full_text
+                                _broadcast_project({"type": "chunk", "content": text})
+                            u = chunk.get("usage")
+                            if u:
+                                isl = u.get("prompt_tokens", isl)
+                                osl = u.get("completion_tokens", osl)
+                        except (json.JSONDecodeError, IndexError, KeyError):
+                            pass
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            _record_llm_usage(model_name, "project-analysis", duration_ms, isl, osl)
+        else:
+            from google import genai
+            from google.genai import types as genai_types
+
+            cfg = get_gemini_config()
+            api_key = cfg.get("api_key", "")
+            if not api_key or api_key == "your-gemini-api-key-here":
+                _broadcast_project({"type": "error", "content": "LLM模型不可用"})
+                state["status"] = "error"
+                state["error"] = "LLM模型不可用"
+                return
+
+            client = genai.Client(api_key=api_key)
+            queue = asyncio.Queue()
+            loop = asyncio.get_event_loop()
+            stream_error = [None]
+
+            def produce():
+                try:
+                    response = client.models.generate_content_stream(
+                        model=model_name,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            thinking_config=genai_types.ThinkingConfig(
+                                include_thoughts=True,
+                            ),
+                        ),
+                    )
+                    last_usage = None
+                    for chunk in response:
+                        parts = []
+                        try:
+                            for part in chunk.candidates[0].content.parts:
+                                is_thought = getattr(part, 'thought', False)
+                                text = getattr(part, 'text', '') or ''
+                                if text:
+                                    parts.append(('thought' if is_thought else 'text', text))
+                        except (IndexError, AttributeError):
+                            pass
+                        if parts:
+                            loop.call_soon_threadsafe(queue.put_nowait, ('_parts', parts))
+                        last_usage = getattr(chunk, 'usage_metadata', None) or last_usage
+                    loop.call_soon_threadsafe(queue.put_nowait, ('_meta', last_usage))
+                except Exception as e:
+                    stream_error[0] = e
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            threading.Thread(target=produce, daemon=True).start()
+
+            in_thinking = False
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    elapsed = int(time.monotonic() - t0)
+                    _broadcast_project({"type": "thinking", "elapsed": elapsed})
+                    continue
+                if item is None:
+                    break
+                if isinstance(item, tuple) and item[0] == '_meta':
+                    usage = item[1]
+                    continue
+                if isinstance(item, tuple) and item[0] == '_parts':
+                    for kind, text in item[1]:
+                        if kind == 'thought':
+                            if not in_thinking:
+                                in_thinking = True
+                            state["thinking_text"] += text
+                            _broadcast_project({"type": "thinking_chunk", "content": text})
+                        else:
+                            if in_thinking:
+                                in_thinking = False
+                                elapsed = int(time.monotonic() - t0)
+                                _broadcast_project({"type": "thinking_done", "elapsed": elapsed})
+                            full_text += text
+                            state["full_text"] = full_text
+                            _broadcast_project({"type": "chunk", "content": text})
+
+            if stream_error[0]:
+                raise stream_error[0]
+
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            isl = getattr(usage, 'prompt_token_count', 0) or getattr(usage, 'input_tokens', 0) if usage else 0
+            osl = getattr(usage, 'candidates_token_count', 0) or getattr(usage, 'output_tokens', 0) if usage else 0
+            _record_llm_usage(model_name, "project-analysis", duration_ms, isl, osl)
+
+        # Save to DB
+        if full_text.strip():
+            from app.database import SessionLocal
+            save_db = SessionLocal()
+            try:
+                today = datetime.utcnow().strftime("%Y-%m-%d")
+                old = save_db.query(ProjectAnalysis).order_by(ProjectAnalysis.created_at.desc()).offset(6).all()
+                for o in old:
+                    save_db.delete(o)
+                save_db.add(ProjectAnalysis(content=full_text.strip(), generated_date=today, model_name=model_name))
+                save_db.commit()
+            finally:
+                save_db.close()
+
+        state["status"] = "done"
+        _broadcast_project({"type": "done", "content": full_text.strip()})
+
+    except Exception as e:
+        logger.error(f"Project analysis background task error: {e}")
+        state["status"] = "error"
+        state["error"] = str(e)
+        _broadcast_project({"type": "error", "content": str(e)})
+
+    finally:
+        await asyncio.sleep(5)
+        state["status"] = "idle"
+        state["subscribers"].clear()
+        state["full_text"] = ""
+        state["thinking_text"] = ""
+        state["error"] = None
+        state["task"] = None
+
+
+@router.get("/analysis/status")
+async def get_project_analysis_status():
+    """Check if a project analysis background task is running."""
+    return {"status": _project_analysis_bg["status"]}
+
+
+@router.post("/analysis/trigger")
+async def trigger_project_analysis_stream(db: Session = Depends(get_db)):
+    """Stream project analysis via SSE. Idempotent: if already running, subscribes to existing task."""
+    import asyncio
+
+    state = _project_analysis_bg
+
+    if state["status"] != "running":
+        prompt, count = _build_project_analysis_prompt(db)
+        if not prompt:
+            async def error_stream():
+                yield f"data: {json.dumps({'type': 'error', 'content': '没有活跃的项目'}, ensure_ascii=False)}\n\n"
+            return StreamingResponse(error_stream(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        state["status"] = "running"
+        state["subscribers"] = []
+        state["full_text"] = ""
+        state["thinking_text"] = ""
+        state["error"] = None
+        state["task"] = asyncio.create_task(_run_project_analysis_bg(prompt))
+
+    # Subscribe to the running task
+    sub_queue = asyncio.Queue()
+    state["subscribers"].append(sub_queue)
+
+    async def event_stream():
+        try:
+            # Replay accumulated content for late joiners
+            if state["thinking_text"]:
+                yield f"data: {json.dumps({'type': 'thinking_chunk', 'content': state['thinking_text']}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'thinking_done', 'elapsed': 0}, ensure_ascii=False)}\n\n"
+            if state["full_text"]:
+                yield f"data: {json.dumps({'type': 'chunk', 'content': state['full_text']}, ensure_ascii=False)}\n\n"
+
+            if state["status"] == "done":
+                yield f"data: {json.dumps({'type': 'done', 'content': state['full_text']}, ensure_ascii=False)}\n\n"
+                return
+            elif state["status"] == "error":
+                yield f"data: {json.dumps({'type': 'error', 'content': state.get('error', 'Unknown error')}, ensure_ascii=False)}\n\n"
+                return
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(sub_queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'type': 'thinking', 'elapsed': 0}, ensure_ascii=False)}\n\n"
+                    continue
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") in ("done", "error"):
+                    break
+        finally:
+            try:
+                state["subscribers"].remove(sub_queue)
+            except ValueError:
+                pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+async def run_daily_project_analysis():
+    """Run by scheduler at 3:40 AM. Analyzes active projects with LLM."""
+    from app.database import SessionLocal
+    from app.services.llm_service import _call_model_text, get_current_model_name
+    from app.config import get_model_defaults
+
+    db = SessionLocal()
+    try:
+        prompt, count = _build_project_analysis_prompt(db)
+        if not prompt:
+            logger.info("No active projects to analyze")
+            return
+
+        result = await _call_model_text(prompt, call_type="project-analysis")
+        if not result:
+            logger.warning("Project analysis LLM call returned empty result")
+            return
+
+        effective_model = get_model_defaults().get("project-analysis") or get_current_model_name()
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        old = db.query(ProjectAnalysis).order_by(ProjectAnalysis.created_at.desc()).offset(6).all()
+        for o in old:
+            db.delete(o)
+        db.add(ProjectAnalysis(content=result, generated_date=today, model_name=effective_model))
+        db.commit()
+        logger.info(f"Project analysis generated for {today} ({count} projects)")
+
+    except Exception as e:
+        logger.error(f"Project analysis failed: {e}")
+    finally:
+        db.close()
+
+
+def run_daily_project_analysis_sync():
+    """Synchronous wrapper for APScheduler."""
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(run_daily_project_analysis())
+        else:
+            loop.run_until_complete(run_daily_project_analysis())
+    except RuntimeError:
+        asyncio.run(run_daily_project_analysis())

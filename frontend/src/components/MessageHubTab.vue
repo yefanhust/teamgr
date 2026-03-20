@@ -6,15 +6,9 @@
     </div>
 
     <template v-else>
-      <!-- Group bots by channel -->
-      <div v-for="(group, channel) in botsByChannel" :key="channel" class="mb-6">
-        <h3 class="text-sm font-bold text-gray-500 mb-3 flex items-center gap-1.5">
-          <span class="inline-block w-1 h-4 rounded-full bg-amber-500"></span>
-          {{ channelLabels[channel] || channel }}
-        </h3>
-
-        <!-- Bot cards -->
-        <div v-for="bot in group" :key="bot.id" class="bg-white rounded-xl shadow-sm mb-4 overflow-hidden">
+      <!-- Bot cards -->
+      <div>
+        <div v-for="bot in bots" :key="bot.id" class="bg-white rounded-xl shadow-sm mb-4 overflow-hidden">
           <!-- Bot header -->
           <div class="px-4 py-3 flex items-center justify-between border-b border-gray-100">
             <div class="flex items-center gap-2 flex-1 min-w-0">
@@ -205,7 +199,6 @@ import api from '../api'
 import { showToast, showConfirmDialog } from 'vant'
 import DrumTimePicker from './DrumTimePicker.vue'
 
-const channelLabels = { wecom: '企微' }
 const triggerDescriptions = {
   todo_deadline: '提醒已逾期和当天截止的未完成任务',
 }
@@ -241,17 +234,6 @@ const showTimePicker = ref(false)
 const timePickerHour = ref(8)
 const timePickerMinute = ref(0)
 const timePickerContext = ref(null) // { bot, trigger, isNew }
-
-// Computed: group bots by channel
-const botsByChannel = computed(() => {
-  const groups = {}
-  for (const bot of bots.value) {
-    const ch = bot.channel || 'wecom'
-    if (!groups[ch]) groups[ch] = []
-    groups[ch].push(bot)
-  }
-  return groups
-})
 
 // Computed: available triggers for a bot (not yet subscribed)
 function getAvailableTriggers(bot) {

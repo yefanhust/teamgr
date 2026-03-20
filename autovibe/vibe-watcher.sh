@@ -249,8 +249,11 @@ $([ -n "$description" ] && echo "描述: $description")
     # Fallback: if Claude forgot to update status, do it ourselves
     local result_text=""
     [ -s "$CLAUDE_OUTPUT_FILE" ] && result_text=$(cat "$CLAUDE_OUTPUT_FILE")
+    local fallback_summary
+    fallback_summary=$(echo "$result_text" | head -c 500 | sed 's/"/\\"/g')
+    [ -z "$(echo "$fallback_summary" | tr -d '[:space:]')" ] && fallback_summary="(auto-fallback: Claude 未提供变更总结)"
     ensure_status_left "$task_id" "implementing" "verifying" \
-        "{\"status\": \"verifying\", \"summary\": \"$(echo "$result_text" | head -c 500 | sed 's/"/\\"/g' || echo '(auto-fallback: Claude 未更新状态)')\"}"
+        "{\"status\": \"verifying\", \"summary\": \"$fallback_summary\"}"
 
     if has_code_changes; then
         rebuild_service
@@ -329,8 +332,11 @@ $feedback
     # Fallback: if Claude forgot to update status, do it ourselves
     local result_text=""
     [ -s "$CLAUDE_OUTPUT_FILE" ] && result_text=$(cat "$CLAUDE_OUTPUT_FILE")
+    local fallback_summary
+    fallback_summary=$(echo "$result_text" | head -c 500 | sed 's/"/\\"/g')
+    [ -z "$(echo "$fallback_summary" | tr -d '[:space:]')" ] && fallback_summary="(auto-fallback: Claude 未提供变更总结)"
     ensure_status_left "$task_id" "implementing" "verifying" \
-        "{\"status\": \"verifying\", \"summary\": \"$(echo "$result_text" | head -c 500 | sed 's/"/\\"/g' || echo '(auto-fallback: Claude 未更新状态)')\"}"
+        "{\"status\": \"verifying\", \"summary\": \"$fallback_summary\"}"
 
     if has_code_changes; then
         rebuild_service

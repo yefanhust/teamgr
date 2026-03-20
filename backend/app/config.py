@@ -100,6 +100,7 @@ SCHEDULER_TYPES = {
     "daily_todo_analysis": "任务效率分析",
     "daily_duration_stats": "任务耗时统计",
     "repeat_todo_check": "周期任务自动创建",
+    "daily_project_analysis": "项目效率分析",
     "daily_backup": "数据库备份",
     "daily_tag_organize": "人才卡标签自动整理",
 }
@@ -110,6 +111,7 @@ SCHEDULER_DESCRIPTIONS = {
     "daily_todo_analysis": "分析任务完成效率，生成统计报告",
     "daily_duration_stats": "统计已完成任务的实际耗时数据",
     "repeat_todo_check": "检查设置了重复规则的已完成任务，自动创建下一周期的待办（如每日/每周/每月重复）",
+    "daily_project_analysis": "分析活跃项目的健康度、进展、资源分配和风险",
     "daily_backup": "将数据库备份到腾讯云 COS",
     "daily_tag_organize": "每日自动执行人才卡标签一键整理（合并同义标签、建立层级分类）",
 }
@@ -119,6 +121,7 @@ _SCHEDULER_DEFAULTS = {
     "daily_idea_aggregation": {"cron_hour": 3, "cron_minute": 0},
     "daily_todo_analysis": {"cron_hour": 3, "cron_minute": 30},
     "daily_duration_stats": {"cron_hour": 3, "cron_minute": 35},
+    "daily_project_analysis": {"cron_hour": 3, "cron_minute": 40},
     "repeat_todo_check": {"interval_hours": 1},
     "daily_backup": {"cron_hour": 3, "cron_minute": 0},
     "daily_tag_organize": {"cron_hour": 22, "cron_minute": 0},
@@ -189,6 +192,7 @@ _DEFAULT_TRIGGER_TIMES = {
     "todo_deadline": (8, 0),
     "todo_daily_list": (8, 5),
     "scholar_scheduled": (6, 30),
+    "project_analysis": (4, 10),
 }
 
 # All available trigger types with display labels
@@ -196,6 +200,7 @@ TRIGGER_TYPES = {
     "scheduled_query": "每日定时查询",
     "idea_insight": "灵感洞见推送",
     "todo_analysis": "任务效率分析",
+    "project_analysis": "项目效率分析",
     "todo_deadline": "任务截止提醒",
     "todo_daily_list": "每日任务清单",
     "scholar_scheduled": "龙图阁定时报告",
@@ -347,6 +352,7 @@ LLM_CALL_TYPES = {
     "scholar-categorize": "大学士-历史对话分类",
     "project-summary": "项目概览生成",
     "project-update-parse": "项目进展解析",
+    "project-analysis": "项目效率分析",
 }
 
 

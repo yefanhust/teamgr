@@ -910,14 +910,20 @@
                         <span v-if="item.vibe_verified_at" class="text-xs text-gray-400">{{ formatDateTime(item.vibe_verified_at) }}</span>
                       </div>
                       <!-- Vibe Summary -->
-                      <div v-if="item.vibe_summary" class="mt-2 bg-purple-50 rounded-lg p-2 border border-purple-100">
+                      <div v-if="item.vibe_summary && item.vibe_summary.trim()" class="mt-2 bg-purple-50 rounded-lg p-2 border border-purple-100">
                         <div class="flex items-center gap-1 mb-0.5">
                           <van-icon name="description" size="12" color="#8B5CF6" />
                           <span class="text-xs font-medium text-purple-600">变更总结</span>
                         </div>
                         <div class="text-sm text-gray-600 leading-snug vibe-summary-content" v-html="renderMarkdown(item.vibe_summary)"></div>
                       </div>
-                      <p v-else-if="item.description" class="text-xs text-gray-400 mt-1 whitespace-pre-wrap line-clamp-3">{{ item.description }}</p>
+                      <div v-else class="mt-2 bg-purple-50 rounded-lg p-2 border border-purple-100">
+                        <div class="flex items-center gap-1 mb-0.5">
+                          <van-icon name="description" size="12" color="#8B5CF6" />
+                          <span class="text-xs font-medium text-purple-600">变更总结</span>
+                        </div>
+                        <p class="text-xs text-gray-400 italic">暂无变更总结</p>
+                      </div>
                       <div class="flex items-center gap-1 mt-1 flex-wrap">
                         <van-tag
                           v-for="tag in (item.tags || [])"
@@ -1178,69 +1184,104 @@
 
       <!-- ==================== Tab 5: 效率分析 ==================== -->
       <van-tab title="效率分析">
-        <div class="max-w-3xl mx-auto px-4 py-4 space-y-3">
-          <!-- Duration Stats Chart -->
-          <div v-if="durationStats.length > 0" class="bg-white rounded-xl shadow-sm p-4">
-            <div class="flex items-center justify-between mb-3">
-              <span class="text-sm font-medium text-gray-700">各类任务平均耗时</span>
-              <div class="flex items-center gap-2">
-                <span class="text-xs text-gray-400">{{ durationStats[0]?.generated_date }}</span>
-                <van-button size="mini" plain type="primary" :loading="generatingStats" @click="triggerDurationStats">刷新</van-button>
+        <div class="max-w-3xl mx-auto px-4 py-2">
+          <van-tabs v-model:active="analysisSubTab" type="card" class="vibe-tabs">
+
+            <!-- Sub-tab: 任务效率 -->
+            <van-tab title="任务效率">
+              <div class="space-y-3 mt-3">
+                <!-- Duration Stats Chart -->
+                <div v-if="durationStats.length > 0" class="bg-white rounded-xl shadow-sm p-4">
+                  <div class="flex items-center justify-between mb-3">
+                    <span class="text-sm font-medium text-gray-700">各类任务平均耗时</span>
+                    <div class="flex items-center gap-2">
+                      <span class="text-xs text-gray-400">{{ durationStats[0]?.generated_date }}</span>
+                      <van-button size="mini" plain type="primary" :loading="generatingStats" @click="triggerDurationStats">刷新</van-button>
+                    </div>
+                  </div>
+                  <div class="duration-chart-container" :style="{ height: Math.max(180, durationStats.length * 40 + 60) + 'px' }">
+                    <canvas ref="durationChartCanvas"></canvas>
+                  </div>
+                </div>
+                <div v-else-if="!analysisStatus" class="bg-white rounded-xl shadow-sm p-4 text-center">
+                  <p class="text-gray-400 text-sm mb-3">暂无耗时统计数据</p>
+                  <van-button size="small" plain type="primary" icon="chart-trending-o" :loading="generatingStats" @click="triggerDurationStats">生成耗时图表</van-button>
+                </div>
+
+                <!-- Task analysis streaming / status -->
+                <div v-if="analysisStatus" class="bg-gray-50 rounded-lg p-3 text-sm">
+                  <div class="flex items-center gap-2 mb-1">
+                    <van-loading v-if="analysisStatus === 'running'" size="14" />
+                    <van-icon v-else-if="analysisStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
+                    <span class="text-gray-600">{{ analysisStatusText }}</span>
+                  </div>
+                  <pre v-if="analysisThinking" ref="analysisThinkingPre" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed mb-2">{{ analysisThinking }}</pre>
+                  <div v-if="analysisStream" ref="analysisStreamEl" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(analysisStream)"></div>
+                </div>
+
+                <!-- Latest task analysis -->
+                <div v-if="analyses.length > 0" class="bg-white rounded-xl shadow-sm p-4">
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="text-xs text-purple-500 font-medium">{{ formatDateTime(analyses[0].created_at) }}</span>
+                      <van-tag v-if="analyses[0].model_name" color="#8B5CF6" size="small" plain>{{ analyses[0].model_name }}</van-tag>
+                    </div>
+                    <van-button
+                      v-if="!triggeringAnalysis"
+                      size="mini" plain type="primary"
+                      @click="triggerAnalysis"
+                    >重新生成</van-button>
+                  </div>
+                  <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(analyses[0].content)"></div>
+                </div>
+
+                <!-- No task analyses yet -->
+                <div v-if="analyses.length === 0 && !analysisStatus" class="bg-white rounded-xl shadow-sm p-8 text-center">
+                  <p class="text-gray-400 text-sm mb-4">暂无任务效率分析报告</p>
+                  <van-button size="small" plain type="primary" icon="chart-trending-o" @click="triggerAnalysis">生成效率分析</van-button>
+                </div>
               </div>
-            </div>
-            <div class="duration-chart-container" :style="{ height: Math.max(180, durationStats.length * 40 + 60) + 'px' }">
-              <canvas ref="durationChartCanvas"></canvas>
-            </div>
-          </div>
-          <div v-else-if="!analysisStatus" class="bg-white rounded-xl shadow-sm p-4 text-center">
-            <p class="text-gray-400 text-sm mb-3">暂无耗时统计数据</p>
-            <van-button size="small" plain type="primary" icon="chart-trending-o" :loading="generatingStats" @click="triggerDurationStats">生成耗时图表</van-button>
-          </div>
+            </van-tab>
 
-          <!-- Streaming / status -->
-          <div v-if="analysisStatus" class="bg-gray-50 rounded-lg p-3 text-sm">
-            <div class="flex items-center gap-2 mb-1">
-              <van-loading v-if="analysisStatus === 'running'" size="14" />
-              <van-icon v-else-if="analysisStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
-              <span class="text-gray-600">{{ analysisStatusText }}</span>
-            </div>
-            <pre v-if="analysisThinking" ref="analysisThinkingPre" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed mb-2">{{ analysisThinking }}</pre>
-            <div v-if="analysisStream" ref="analysisStreamEl" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(analysisStream)"></div>
-          </div>
+            <!-- Sub-tab: 项目效率 -->
+            <van-tab title="项目效率">
+              <div class="space-y-3 mt-3">
+                <!-- Project analysis streaming / status -->
+                <div v-if="projectAnalysisStatus" class="bg-gray-50 rounded-lg p-3 text-sm">
+                  <div class="flex items-center gap-2 mb-1">
+                    <van-loading v-if="projectAnalysisStatus === 'running'" size="14" />
+                    <van-icon v-else-if="projectAnalysisStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
+                    <span class="text-gray-600">{{ projectAnalysisStatusText }}</span>
+                  </div>
+                  <pre v-if="projectAnalysisThinking" ref="projectAnalysisThinkingPre" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed mb-2">{{ projectAnalysisThinking }}</pre>
+                  <div v-if="projectAnalysisStream" ref="projectAnalysisStreamEl" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(projectAnalysisStream)"></div>
+                </div>
 
-          <!-- Latest analysis (only show 1) -->
-          <div v-if="analyses.length > 0" class="bg-white rounded-xl shadow-sm p-4">
-            <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs text-purple-500 font-medium">{{ formatDateTime(analyses[0].created_at) }}</span>
-                <van-tag v-if="analyses[0].model_name" color="#8B5CF6" size="small" plain>{{ analyses[0].model_name }}</van-tag>
+                <!-- Latest project analysis -->
+                <div v-if="projectAnalyses.length > 0" class="bg-white rounded-xl shadow-sm p-4">
+                  <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="text-xs text-teal-500 font-medium">{{ formatDateTime(projectAnalyses[0].created_at) }}</span>
+                      <van-tag v-if="projectAnalyses[0].model_name" color="#14B8A6" size="small" plain>{{ projectAnalyses[0].model_name }}</van-tag>
+                    </div>
+                    <van-button
+                      v-if="!triggeringProjectAnalysis"
+                      size="mini" plain type="primary"
+                      @click="triggerProjectAnalysis"
+                    >重新生成</van-button>
+                  </div>
+                  <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(projectAnalyses[0].content)"></div>
+                </div>
+
+                <!-- No project analyses yet -->
+                <div v-if="projectAnalyses.length === 0 && !projectAnalysisStatus" class="bg-white rounded-xl shadow-sm p-8 text-center">
+                  <p class="text-gray-400 text-sm mb-4">暂无项目效率分析报告</p>
+                  <van-button size="small" plain type="primary" icon="chart-trending-o" @click="triggerProjectAnalysis">生成项目分析</van-button>
+                </div>
               </div>
-              <van-button
-                v-if="!triggeringAnalysis"
-                size="mini"
-                plain
-                type="primary"
-                @click="triggerAnalysis"
-              >
-                重新生成
-              </van-button>
-            </div>
-            <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(analyses[0].content)"></div>
-          </div>
+            </van-tab>
 
-          <!-- No analyses yet -->
-          <div v-if="analyses.length === 0 && !analysisStatus" class="bg-white rounded-xl shadow-sm p-8 text-center">
-            <p class="text-gray-400 text-sm mb-4">暂无效率分析报告</p>
-            <van-button
-              size="small"
-              plain
-              type="primary"
-              icon="chart-trending-o"
-              @click="triggerAnalysis"
-            >
-              生成效率分析
-            </van-button>
-          </div>
+          </van-tabs>
         </div>
       </van-tab>
 
@@ -1903,6 +1944,7 @@ const pmStore = useProjectsStore()
 const activeTab = ref(0)
 const vibeTab = ref(0)
 const pmSubTab = ref(0)
+const analysisSubTab = ref(0)
 
 // ---- Project Management state ----
 const showPmUpdatePopup = ref(false)
@@ -2024,6 +2066,16 @@ const analysisStreamEl = ref(null)
 const durationStats = ref([])
 const durationChartCanvas = ref(null)
 const generatingStats = ref(false)
+
+// Project Analysis
+const projectAnalyses = ref([])
+const triggeringProjectAnalysis = ref(false)
+const projectAnalysisStatus = ref('')
+const projectAnalysisStatusText = ref('')
+const projectAnalysisStream = ref('')
+const projectAnalysisThinking = ref('')
+const projectAnalysisThinkingPre = ref(null)
+const projectAnalysisStreamEl = ref(null)
 let durationChartInstance = null
 
 // Tag filter state (TODO scope)
@@ -2070,6 +2122,8 @@ watch(reqThinkingStream, () => autoScroll(reqThinkingPre.value), { flush: 'post'
 watch(reqOrganizeStream, () => autoScroll(reqOrganizePre.value), { flush: 'post' })
 watch(analysisThinking, () => autoScroll(analysisThinkingPre.value), { flush: 'post' })
 watch(analysisStream, () => autoScroll(analysisStreamEl.value), { flush: 'post' })
+watch(projectAnalysisThinking, () => autoScroll(projectAnalysisThinkingPre.value), { flush: 'post' })
+watch(projectAnalysisStream, () => autoScroll(projectAnalysisStreamEl.value), { flush: 'post' })
 
 // All tags shorthand
 const allTags = computed(() => store.tags)
@@ -2182,7 +2236,7 @@ const vibeCommitted = computed(() =>
 onMounted(async () => {
   loading.value = true
   try {
-    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats(), loadPmProjects(), loadPmTimeline(), loadPmMembers(), fetchPmModelSettings()])
+    await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats(), loadProjectAnalyses(), loadPmProjects(), loadPmTimeline(), loadPmMembers(), fetchPmModelSettings()])
     // Select all leaf tags (TODO scope)
     const leafs = allTags.value.filter(t => t.parent_id || !allTags.value.some(c => c.parent_id === t.id))
     selectedTagIds.value = new Set(leafs.map(t => t.id))
@@ -2197,7 +2251,7 @@ onMounted(async () => {
 })
 
 // Auto-refresh duration stats when switching to 效率分析 tab (index 2)
-watch(activeTab, (tab) => {
+watch(activeTab, async (tab) => {
   if (tab === 1) {
     loadPmProjects()
     loadPmTimeline()
@@ -2205,6 +2259,10 @@ watch(activeTab, (tab) => {
   }
   if (tab === 4) {
     loadDurationStats()
+    loadProjectAnalyses()
+    // Check if background analysis tasks are running and reconnect
+    reconnectAnalysisIfRunning()
+    reconnectProjectAnalysisIfRunning()
   }
 })
 
@@ -3055,6 +3113,105 @@ async function triggerAnalysis() {
     setTimeout(() => { analysisStatus.value = ''; analysisStatusText.value = '' }, 5000)
   } finally {
     triggeringAnalysis.value = false
+  }
+}
+
+async function reconnectAnalysisIfRunning() {
+  if (triggeringAnalysis.value) return  // already streaming
+  try {
+    const res = await api.get('/api/todos/analysis/status')
+    if (res.data.status === 'running') {
+      // Background task is still running, reconnect to stream
+      triggerAnalysis()
+    } else if (res.data.status === 'done') {
+      // Task finished while we were away, reload results
+      await loadAnalyses()
+    }
+  } catch (e) { /* silent */ }
+}
+
+async function reconnectProjectAnalysisIfRunning() {
+  if (triggeringProjectAnalysis.value) return
+  try {
+    const res = await api.get('/api/projects/analysis/status')
+    if (res.data.status === 'running') {
+      triggerProjectAnalysis()
+    } else if (res.data.status === 'done') {
+      await loadProjectAnalyses()
+    }
+  } catch (e) { /* silent */ }
+}
+
+// --- Project Analysis ---
+
+async function loadProjectAnalyses() {
+  try {
+    const res = await api.get('/api/projects/analysis')
+    projectAnalyses.value = res.data
+  } catch (e) {
+    // silent
+  }
+}
+
+async function triggerProjectAnalysis() {
+  triggeringProjectAnalysis.value = true
+  projectAnalysisStream.value = ''
+  projectAnalysisThinking.value = ''
+  projectAnalysisStatus.value = 'running'
+  projectAnalysisStatusText.value = '正在分析活跃项目...'
+
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    const res = await fetch('/api/projects/analysis/trigger', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          if (data.type === 'thinking' || data.type === 'thinking_chunk') {
+            projectAnalysisStatusText.value = `模型正在思考中... ${data.elapsed ? '(' + data.elapsed + 's)' : ''}`
+            if (data.content) projectAnalysisThinking.value += data.content
+          } else if (data.type === 'thinking_done') {
+            projectAnalysisStatusText.value = `思考完成 (${data.elapsed}s)，正在生成分析...`
+          } else if (data.type === 'chunk') {
+            if (!projectAnalysisStatusText.value.includes('思考')) {
+              projectAnalysisStatusText.value = '正在生成分析...'
+            }
+            projectAnalysisStream.value += data.content
+          } else if (data.type === 'done') {
+            projectAnalysisStatus.value = ''
+            projectAnalysisStatusText.value = ''
+            projectAnalysisStream.value = ''
+            projectAnalysisThinking.value = ''
+            await loadProjectAnalyses()
+          } else if (data.type === 'error') {
+            projectAnalysisStatus.value = 'error'
+            projectAnalysisStatusText.value = `分析失败：${data.content}`
+            setTimeout(() => { projectAnalysisStatus.value = ''; projectAnalysisStatusText.value = '' }, 5000)
+          }
+        } catch (e) { /* skip malformed */ }
+      }
+    }
+  } catch (e) {
+    projectAnalysisStatus.value = 'error'
+    projectAnalysisStatusText.value = `分析失败：${e.message}`
+    setTimeout(() => { projectAnalysisStatus.value = ''; projectAnalysisStatusText.value = '' }, 5000)
+  } finally {
+    triggeringProjectAnalysis.value = false
   }
 }
 

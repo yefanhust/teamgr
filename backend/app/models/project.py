@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, Integer, Float, String, Text, DateTime, ForeignKey, JSON
 from sqlalchemy.orm import relationship, backref
 from app.database import Base
 
@@ -51,3 +51,14 @@ class Project(Base):
     children = relationship("Project", backref=backref("parent", remote_side="Project.id"))
     updates = relationship("ProjectUpdate", back_populates="project", cascade="all, delete-orphan")
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
+
+
+class ProjectAnalysis(Base):
+    """Daily LLM-generated efficiency analysis of active projects."""
+    __tablename__ = "project_analyses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    content = Column(Text, nullable=False)
+    generated_date = Column(String(10), nullable=False)  # "YYYY-MM-DD"
+    model_name = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
