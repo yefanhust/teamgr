@@ -162,6 +162,33 @@ def update_last_used(device_id: str):
             return
 
 
+_TRUST_DURATION_DAYS = 30
+
+
+def get_active_trusted_by_ua(user_agent: str) -> dict | None:
+    """Check if User-Agent matches a trusted device with active trust (within 30 days).
+    Used as last-resort auth when cookies/tokens are all unavailable
+    (e.g., iOS Safari with self-signed cert may not persist cookies).
+    Returns the trusted device entry, or None.
+    """
+    device_name = _parse_device_name(user_agent)
+    if device_name == "Unknown Device":
+        return None
+    data = _read()
+    now = datetime.now(timezone.utc)
+    for d in data.get("trusted", []):
+        if d.get("device_name") == device_name:
+            last_active = d.get("last_used_at") or d.get("trusted_at")
+            if last_active:
+                try:
+                    dt = datetime.fromisoformat(last_active)
+                    if (now - dt).days <= _TRUST_DURATION_DAYS:
+                        return d
+                except (ValueError, TypeError):
+                    pass
+    return None
+
+
 def _parse_device_name(user_agent: str) -> str:
     ua = user_agent.lower()
     if "iphone" in ua:

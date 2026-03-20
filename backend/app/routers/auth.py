@@ -14,6 +14,7 @@ from app.middleware.rate_limiter import (
 from app.services.device_trust import (
     is_device_trusted, is_device_blacklisted, get_device_status,
     trust_device, blacklist_device, update_last_used, auto_adopt_device,
+    get_active_trusted_by_ua,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str):
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        samesite="lax",
         max_age=REFRESH_COOKIE_MAX_AGE,
         path="/api/auth",
     )
@@ -54,8 +54,7 @@ def _set_access_cookie(response: Response, access_token: str):
         key=ACCESS_COOKIE_NAME,
         value=access_token,
         httponly=True,
-        secure=True,
-        samesite="strict",
+        samesite="lax",
         max_age=ACCESS_COOKIE_MAX_AGE,
         path="/api",
     )
@@ -148,6 +147,30 @@ async def auth_status(request: Request, response: Response):
                 new_refresh = create_refresh_token(device_id)
                 _set_refresh_cookie(response, new_refresh)
                 _set_access_cookie(response, new_token)
+                return StatusResponse(
+                    password_configured=True,
+                    authenticated=True,
+                    token=new_token,
+                )
+
+    # Last resort: User-Agent matches a trusted device (within 30 days).
+    # This handles iOS Safari where self-signed certs may prevent cookie persistence.
+    # No tokens or cookies needed — just the User-Agent header.
+    if not authenticated and password_configured:
+        user_agent = request.headers.get("User-Agent", "")
+        if user_agent:
+            trusted_entry = get_active_trusted_by_ua(user_agent)
+            if trusted_entry:
+                device_id = trusted_entry["device_id"]
+                update_last_used(device_id)
+                new_token = create_token()
+                new_refresh = create_refresh_token(device_id)
+                _set_refresh_cookie(response, new_refresh)
+                _set_access_cookie(response, new_token)
+                logger.info(
+                    f"Auto-login via User-Agent: "
+                    f"{trusted_entry.get('device_name')}"
+                )
                 return StatusResponse(
                     password_configured=True,
                     authenticated=True,

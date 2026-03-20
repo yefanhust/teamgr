@@ -69,4 +69,13 @@ async def require_auth(
     if access_cookie and verify_token(access_cookie):
         return access_cookie
 
+    # 3. Last resort: User-Agent matches a trusted device (within 30 days).
+    #    Handles iOS Safari where self-signed certs may prevent cookie persistence.
+    from app.services.device_trust import get_active_trusted_by_ua
+    user_agent = request.headers.get("User-Agent", "")
+    if user_agent:
+        trusted_entry = get_active_trusted_by_ua(user_agent)
+        if trusted_entry:
+            return trusted_entry["device_id"]
+
     raise HTTPException(status_code=401, detail="认证已过期，请重新登录")

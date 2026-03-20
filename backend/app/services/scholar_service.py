@@ -154,11 +154,17 @@ def _load_category_cache() -> dict | None:
     return None
 
 
-def _save_category_cache(fingerprint: str, categories: list[dict]):
-    """Save categorization result to cache."""
+def _save_category_cache(fingerprint: str, categories: list[dict], assignments: dict[str, str] | None = None):
+    """Save categorization result to cache, including per-conversation assignments for incremental updates."""
+    if assignments is None:
+        # Build assignments from categories
+        assignments = {}
+        for cat in categories:
+            for conv in cat.get("conversations", []):
+                assignments[conv.get("conversation_id", "")] = cat["category"]
     try:
         with open(_CATEGORY_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump({"fingerprint": fingerprint, "categories": categories}, f, ensure_ascii=False)
+            json.dump({"fingerprint": fingerprint, "categories": categories, "assignments": assignments}, f, ensure_ascii=False)
     except OSError as e:
         logger.warning(f"Failed to save category cache: {e}")
 
@@ -188,39 +194,84 @@ def _rebuild_cached_categories(cached_categories: list[dict], convs: list[dict])
     return result
 
 
-async def categorize_conversations() -> list[dict]:
-    """Use LLM to categorize conversations by topic. Cached until conversation list changes."""
-    convs = _load_conversations()
-    if not convs:
-        return []
-
-    fingerprint = _conv_fingerprint(convs)
-
-    # Check cache
-    cache = _load_category_cache()
-    if cache and cache.get("fingerprint") == fingerprint:
-        logger.info("Scholar categorization: using cache")
-        return _rebuild_cached_categories(cache["categories"], convs)
-
-    # Build a summary of conversations for the LLM
-    conv_summaries = []
+def _build_conv_summaries(convs: list[dict]) -> list[dict]:
+    """Build conversation summaries for LLM classification prompt."""
+    summaries = []
     for c in convs:
         titles_and_questions = [c.get("title", "")]
         for msg in c.get("messages", [])[:3]:  # first 3 questions
             q = msg.get("question", "")
             if q and q != c.get("title", ""):
                 titles_and_questions.append(q[:80])
-        conv_summaries.append({
+        summaries.append({
             "id": c["conversation_id"],
             "content": " | ".join(titles_and_questions),
         })
+    return summaries
 
-    # Build prompt
+
+def _build_conv_map(convs: list[dict]) -> dict[str, dict]:
+    """Build conversation detail map from raw conversations."""
+    conv_map = {}
+    for c in convs:
+        conv_map[c["conversation_id"]] = {
+            "conversation_id": c["conversation_id"],
+            "title": c.get("title", ""),
+            "created_at": c.get("created_at", ""),
+            "updated_at": c.get("updated_at", ""),
+            "message_count": len(c.get("messages", [])),
+        }
+    return conv_map
+
+
+def _build_categories_from_assignments(assignments: dict[str, str], conv_map: dict[str, dict]) -> list[dict]:
+    """Build grouped category list from per-conversation assignments."""
+    cat_groups: dict[str, list[dict]] = {}
+    for cid, cat_name in assignments.items():
+        if cid in conv_map:
+            cat_groups.setdefault(cat_name, []).append(conv_map[cid])
+
+    categories = []
+    for name, items in cat_groups.items():
+        items.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+        categories.append({"category": name, "conversations": items})
+
+    # Add unassigned conversations to "其他"
+    assigned_ids = set(assignments.keys())
+    unassigned = [v for k, v in conv_map.items() if k not in assigned_ids]
+    if unassigned:
+        unassigned.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+        categories.append({"category": "其他", "conversations": unassigned})
+
+    return categories
+
+
+async def _classify_conversations_via_llm(convs: list[dict], existing_categories: list[str] | None = None) -> dict[str, str] | None:
+    """Call LLM to classify conversations. Returns {conversation_id: category_name} or None on failure.
+    If existing_categories is provided, the LLM will prefer assigning to those categories."""
+    summaries = _build_conv_summaries(convs)
     conv_list = "\n".join(
         f'{i+1}. [{s["id"]}] {s["content"]}'
-        for i, s in enumerate(conv_summaries)
+        for i, s in enumerate(summaries)
     )
-    prompt = f"""请将以下对话按主题分类。每个分类包含一个简短的中文类别名（2-4个字）。
+
+    if existing_categories:
+        cat_hint = "、".join(existing_categories)
+        prompt = f"""请将以下新对话按主题分类。每个分类包含一个简短的中文类别名（2-4个字）。
+一个对话只能属于一个分类。
+
+已有的分类: {cat_hint}
+请优先将新对话归入已有分类。如果新对话确实不属于任何已有分类，可以创建新分类，但总分类数（已有+新建）不要超过6个。
+
+新对话列表:
+{conv_list}
+
+请直接输出JSON数组，格式如下（不要输出其他内容）:
+[
+  {{"category": "分类名", "conversation_ids": ["id1", "id2"]}}
+]"""
+    else:
+        prompt = f"""请将以下对话按主题分类。每个分类包含一个简短的中文类别名（2-4个字）。
 一个对话只能属于一个分类。分类数量控制在2-6个。如果只有少量对话，可以只分1-2类。
 
 对话列表:
@@ -235,58 +286,95 @@ async def categorize_conversations() -> list[dict]:
         from app.services.llm_service import _call_model_text, _extract_json
         result = await _call_model_text(prompt, call_type="scholar-categorize")
         if not result:
-            return _fallback_categories(convs)
+            return None
 
         parsed = _extract_json(result)
         if not isinstance(parsed, list):
-            return _fallback_categories(convs)
+            return None
 
-        # Build lookup for conversation details
-        conv_map = {}
-        for c in convs:
-            conv_map[c["conversation_id"]] = {
-                "conversation_id": c["conversation_id"],
-                "title": c.get("title", ""),
-                "created_at": c.get("created_at", ""),
-                "updated_at": c.get("updated_at", ""),
-                "message_count": len(c.get("messages", [])),
-            }
-
-        # Build categorized result
-        assigned = set()
-        categories = []
+        # Build assignments dict
+        valid_ids = {c["conversation_id"] for c in convs}
+        assignments: dict[str, str] = {}
         for cat in parsed:
             name = cat.get("category", "其他")
-            ids = cat.get("conversation_ids", [])
-            items = []
-            for cid in ids:
-                if cid in conv_map and cid not in assigned:
-                    items.append(conv_map[cid])
-                    assigned.add(cid)
-            if items:
-                # Sort items within category by updated_at descending
-                items.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
-                categories.append({"category": name, "conversations": items})
-
-        # Add uncategorized conversations
-        uncategorized = [
-            conv_map[c["conversation_id"]]
-            for c in convs
-            if c["conversation_id"] not in assigned
-        ]
-        if uncategorized:
-            uncategorized.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
-            categories.append({"category": "其他", "conversations": uncategorized})
-
-        # Save to cache
-        _save_category_cache(fingerprint, categories)
-        logger.info(f"Scholar categorization: LLM called, {len(categories)} categories cached")
-
-        return categories
+            for cid in cat.get("conversation_ids", []):
+                if cid in valid_ids and cid not in assignments:
+                    assignments[cid] = name
+        return assignments
 
     except Exception as e:
-        logger.error(f"Conversation categorization failed: {e}")
-        return _fallback_categories(convs)
+        logger.error(f"LLM classification failed: {e}")
+        return None
+
+
+async def categorize_conversations() -> list[dict]:
+    """Use LLM to categorize conversations by topic. Supports incremental classification:
+    only new/unclassified conversations are sent to the LLM."""
+    convs = _load_conversations()
+    if not convs:
+        return []
+
+    fingerprint = _conv_fingerprint(convs)
+    conv_map = _build_conv_map(convs)
+    current_ids = set(conv_map.keys())
+
+    # Check cache
+    cache = _load_category_cache()
+    if cache and cache.get("fingerprint") == fingerprint:
+        logger.info("Scholar categorization: using cache (fingerprint match)")
+        return _rebuild_cached_categories(cache["categories"], convs)
+
+    # Incremental classification: check which conversations are already classified
+    cached_assignments: dict[str, str] = {}
+    if cache:
+        cached_assignments = cache.get("assignments", {})
+        if not cached_assignments and cache.get("categories"):
+            # Migrate from old cache format: reconstruct assignments from categories
+            for cat in cache["categories"]:
+                for conv in cat.get("conversations", []):
+                    cid = conv.get("conversation_id", "")
+                    if cid:
+                        cached_assignments[cid] = cat["category"]
+    # Remove deleted conversations from cached assignments
+    cached_assignments = {cid: cat for cid, cat in cached_assignments.items() if cid in current_ids}
+    # Find new (unclassified) conversations
+    new_ids = current_ids - set(cached_assignments.keys())
+
+    if not new_ids:
+        # Only deletions happened, no new conversations - rebuild from existing assignments
+        logger.info("Scholar categorization: only deletions, rebuilding from cache")
+        categories = _build_categories_from_assignments(cached_assignments, conv_map)
+        _save_category_cache(fingerprint, categories, cached_assignments)
+        return categories
+
+    if cached_assignments:
+        # Incremental: only classify new conversations, with existing categories as hint
+        existing_cat_names = sorted(set(cached_assignments.values()))
+        new_convs = [c for c in convs if c["conversation_id"] in new_ids]
+        logger.info(f"Scholar categorization: incremental, {len(new_convs)} new of {len(convs)} total")
+
+        new_assignments = await _classify_conversations_via_llm(new_convs, existing_categories=existing_cat_names)
+        if new_assignments is None:
+            # LLM failed, put new conversations in "其他"
+            new_assignments = {cid: "其他" for cid in new_ids}
+
+        # Merge assignments
+        merged_assignments = {**cached_assignments, **new_assignments}
+        categories = _build_categories_from_assignments(merged_assignments, conv_map)
+        _save_category_cache(fingerprint, categories, merged_assignments)
+        return categories
+
+    else:
+        # Full classification: no cache or empty cache
+        logger.info(f"Scholar categorization: full classification of {len(convs)} conversations")
+        assignments = await _classify_conversations_via_llm(convs)
+        if assignments is None:
+            return _fallback_categories(convs)
+
+        categories = _build_categories_from_assignments(assignments, conv_map)
+        _save_category_cache(fingerprint, categories, assignments)
+        logger.info(f"Scholar categorization: {len(categories)} categories cached")
+        return categories
 
 
 def _fallback_categories(convs: list[dict]) -> list[dict]:
