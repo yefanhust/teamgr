@@ -256,6 +256,43 @@ async def create_todo(body: TodoCreate, db: Session = Depends(get_db)):
     return _serialize(item)
 
 
+@router.get("/duration-stats")
+def get_duration_stats(db: Session = Depends(get_db)):
+    """Get latest duration statistics per tag."""
+    stats = db.query(TodoDurationStats).order_by(TodoDurationStats.avg_duration_minutes.desc()).all()
+    return [
+        {
+            "tag_name": s.tag_name,
+            "avg_duration_minutes": s.avg_duration_minutes,
+            "std_dev_minutes": s.std_dev_minutes,
+            "task_count": s.task_count,
+            "generated_date": s.generated_date,
+        }
+        for s in stats
+    ]
+
+
+@router.get("/analysis")
+def get_analyses(db: Session = Depends(get_db)):
+    """Get the latest todo analysis."""
+    analyses = (
+        db.query(TodoAnalysis)
+        .order_by(TodoAnalysis.created_at.desc())
+        .limit(1)
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "content": a.content,
+            "generated_date": a.generated_date,
+            "model_name": a.model_name or "",
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in analyses
+    ]
+
+
 @router.get("/{todo_id}")
 def get_todo(todo_id: int, db: Session = Depends(get_db)):
     item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
@@ -1093,50 +1130,11 @@ def run_daily_duration_stats():
         db.close()
 
 
-# ---- Analysis API Endpoints ----
-
-@router.get("/duration-stats")
-def get_duration_stats(db: Session = Depends(get_db)):
-    """Get latest duration statistics per tag."""
-    stats = db.query(TodoDurationStats).order_by(TodoDurationStats.avg_duration_minutes.desc()).all()
-    return [
-        {
-            "tag_name": s.tag_name,
-            "avg_duration_minutes": s.avg_duration_minutes,
-            "std_dev_minutes": s.std_dev_minutes,
-            "task_count": s.task_count,
-            "generated_date": s.generated_date,
-        }
-        for s in stats
-    ]
-
-
 @router.post("/duration-stats/trigger")
 def trigger_duration_stats(db: Session = Depends(get_db)):
     """Manually trigger duration stats computation."""
     compute_duration_stats(db)
     return {"ok": True}
-
-
-@router.get("/analysis")
-def get_analyses(db: Session = Depends(get_db)):
-    """Get the latest todo analysis."""
-    analyses = (
-        db.query(TodoAnalysis)
-        .order_by(TodoAnalysis.created_at.desc())
-        .limit(1)
-        .all()
-    )
-    return [
-        {
-            "id": a.id,
-            "content": a.content,
-            "generated_date": a.generated_date,
-            "model_name": a.model_name or "",
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in analyses
-    ]
 
 
 def _build_analysis_prompt(db):

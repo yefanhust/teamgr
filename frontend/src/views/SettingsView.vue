@@ -17,10 +17,11 @@
       <template v-else>
         <!-- Scheduler Config -->
         <div class="mb-6" v-if="Object.keys(schedulerTypes).length">
-          <h2 class="text-sm font-bold text-gray-600 mb-1 flex items-center gap-1.5">
-            <span class="inline-block w-1 h-4 rounded-full bg-emerald-500"></span>
+          <h2 class="text-base font-bold text-gray-600 mb-2 flex items-center gap-1.5">
+            <span class="inline-block w-1.5 h-5 rounded-full bg-emerald-500"></span>
             定时任务
           </h2>
+          <div class="pl-5">
           <p class="text-xs text-gray-400 mb-3">配置各定时任务的执行时间，修改后即时生效</p>
 
           <div class="space-y-2">
@@ -61,24 +62,28 @@
           <div class="mt-4 flex justify-end">
             <van-button type="primary" size="small" :loading="savingSchedulers" @click="saveSchedulers">Save</van-button>
           </div>
+          </div>
         </div>
 
         <!-- 企微推送设置 -->
         <div class="mb-6">
-          <h2 class="text-sm font-bold text-gray-600 mb-1 flex items-center gap-1.5">
-            <span class="inline-block w-1 h-4 rounded-full bg-amber-500"></span>
+          <h2 class="text-base font-bold text-gray-600 mb-2 flex items-center gap-1.5">
+            <span class="inline-block w-1.5 h-5 rounded-full bg-amber-500"></span>
             企微推送
           </h2>
+          <div class="pl-5">
           <p class="text-xs text-gray-400 mb-3">管理推送机器人及订阅功能</p>
           <MessageHubTab />
+          </div>
         </div>
 
         <!-- Model Defaults -->
         <div class="mb-4">
-          <h2 class="text-sm font-bold text-gray-600 mb-1 flex items-center gap-1.5">
-            <span class="inline-block w-1 h-4 rounded-full bg-violet-500"></span>
+          <h2 class="text-base font-bold text-gray-600 mb-2 flex items-center gap-1.5">
+            <span class="inline-block w-1.5 h-5 rounded-full bg-violet-500"></span>
             模型配置
           </h2>
+          <div class="pl-5">
           <p class="text-xs text-gray-400 mb-3">Choose a model for each task. Blank means use the global default ({{ globalModel }}).</p>
 
           <div v-for="group in pageGroups" :key="group.page" class="mb-5">
@@ -86,7 +91,7 @@
               <span class="inline-block w-1 h-4 rounded-full" :style="{ backgroundColor: group.color }"></span>
               {{ group.page }}
             </h3>
-            <div class="space-y-2">
+            <div class="space-y-2 pl-4">
               <div
                 v-for="callType in group.types"
                 :key="callType"
@@ -115,6 +120,7 @@
 
           <div class="mt-4 flex justify-end">
             <van-button type="primary" size="small" :loading="saving" @click="saveDefaults">Save</van-button>
+          </div>
           </div>
         </div>
       </template>

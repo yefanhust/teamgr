@@ -605,6 +605,9 @@
                       </div>
                       <!-- Plan content -->
                       <div v-if="editingPlanId === item.id" class="mt-2">
+                        <div class="flex items-center gap-1 mb-1">
+                          <VoiceInputButton v-model="editingPlanContent" :size="14" />
+                        </div>
                         <textarea
                           ref="planEditArea"
                           v-model="editingPlanContent"
@@ -646,6 +649,9 @@
                       </div>
                       <!-- User suggestion input -->
                       <div class="mt-2">
+                        <div class="flex items-center gap-1 mb-1">
+                          <VoiceInputButton v-model="rethinkComments[item.id]" :size="14" />
+                        </div>
                         <textarea
                           v-model="rethinkComments[item.id]"
                           class="w-full text-sm text-gray-700 bg-amber-50 border border-amber-200 rounded-lg p-2 leading-relaxed resize-y min-h-[48px] max-h-[200px] outline-none focus:border-amber-400"
@@ -1445,7 +1451,10 @@
         <!-- Content input -->
         <div>
           <div class="flex items-center justify-between mb-1">
-            <label class="text-sm text-gray-500">进展内容</label>
+            <div class="flex items-center gap-1">
+              <label class="text-sm text-gray-500">进展内容</label>
+              <VoiceInputButton v-model="pmUpdateContent" :size="14" />
+            </div>
             <div
               class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs cursor-pointer hover:bg-blue-100 transition"
               @click="showPmModelPicker = true"
@@ -1499,7 +1508,10 @@
       <div class="p-4 space-y-4">
         <h3 class="text-lg font-semibold text-gray-800">创建项目</h3>
         <van-field v-model="pmNewName" label="项目名" placeholder="输入项目名称" />
-        <van-field v-model="pmNewDesc" label="描述" type="textarea" rows="2" placeholder="项目描述（可选）" />
+        <div class="flex items-center gap-1">
+          <van-field v-model="pmNewDesc" label="描述" type="textarea" rows="2" placeholder="项目描述（可选）" class="flex-1" />
+          <VoiceInputButton v-model="pmNewDesc" :size="14" />
+        </div>
         <div>
           <label class="text-sm text-gray-500 mb-1 block">父项目（可选，创建为子项目）</label>
           <van-field
@@ -1540,7 +1552,16 @@
       </div>
       <div v-else-if="pmInfoData" class="p-4 overflow-y-auto" style="max-height: calc(90vh - 40px)">
         <div class="flex items-center justify-between mb-4">
-          <h3 class="text-xl font-bold text-gray-800">{{ pmInfoData.name }}</h3>
+          <input
+            v-if="pmEditingName"
+            v-model="pmEditNameText"
+            ref="pmNameInput"
+            class="text-xl font-bold text-gray-800 border-b-2 border-blue-400 outline-none bg-transparent w-full"
+            @blur="savePmName"
+            @keydown.enter="$event.target.blur()"
+            @keydown.escape="pmEditingName = false"
+          />
+          <h3 v-else class="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600" @dblclick="startEditPmName">{{ pmInfoData.name }}</h3>
           <div class="flex items-center gap-2">
             <van-tag :type="pmInfoData.status === 'active' ? 'success' : 'primary'" size="medium">{{ pmInfoData.status === 'active' ? '进行中' : pmInfoData.status === 'completed' ? '已完成' : '已归档' }}</van-tag>
             <van-button size="mini" plain type="primary" icon="replay" :loading="pmInfoRefreshing" @click="refreshPmInfo">刷新</van-button>
@@ -1549,14 +1570,18 @@
 
         <!-- Description (double-click to edit) -->
         <div class="mb-4">
-          <textarea
-            v-if="pmEditingDesc"
-            v-model="pmEditDescText"
-            class="w-full text-sm border border-blue-300 rounded-lg p-2 outline-none resize-y min-h-[60px]"
-            @blur="savePmDesc"
-            @keydown.escape="pmEditingDesc = false"
-            ref="pmDescTextarea"
-          ></textarea>
+          <div v-if="pmEditingDesc">
+            <div class="flex items-center gap-1 mb-1">
+              <VoiceInputButton v-model="pmEditDescText" :size="14" />
+            </div>
+            <textarea
+              v-model="pmEditDescText"
+              class="w-full text-sm border border-blue-300 rounded-lg p-2 outline-none resize-y min-h-[60px]"
+              @blur="savePmDesc"
+              @keydown.escape="pmEditingDesc = false"
+              ref="pmDescTextarea"
+            ></textarea>
+          </div>
           <p
             v-else
             class="text-sm text-gray-500 cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
@@ -1744,6 +1769,9 @@ const pmCreating = ref(false)
 const pmInfoData = ref(null)
 const pmInfoLoading = ref(false)
 const pmInfoRefreshing = ref(false)
+const pmEditingName = ref(false)
+const pmEditNameText = ref('')
+const pmNameInput = ref(null)
 const pmEditingDesc = ref(false)
 const pmEditDescText = ref('')
 const pmDescTextarea = ref(null)
@@ -3271,6 +3299,7 @@ async function openProjectInfo(id) {
   pmInfoSettingParent.value = false
   pmInfoParentSearch.value = ''
   pmInfoParentResults.value = []
+  pmEditingName.value = false
   pmEditingDesc.value = false
   try {
     pmInfoData.value = await pmStore.getProjectInfo(id)
@@ -3292,6 +3321,30 @@ async function refreshPmInfo() {
     showToast('刷新失败')
   } finally {
     pmInfoRefreshing.value = false
+  }
+}
+
+function startEditPmName() {
+  pmEditNameText.value = pmInfoData.value?.name || ''
+  pmEditingName.value = true
+  nextTick(() => { pmNameInput.value?.focus(); pmNameInput.value?.select() })
+}
+
+async function savePmName() {
+  pmEditingName.value = false
+  if (!pmInfoData.value) return
+  const newName = pmEditNameText.value.trim()
+  if (!newName || newName === pmInfoData.value.name) return
+  try {
+    await pmStore.updateProject(pmInfoData.value.id, { name: newName })
+    pmInfoData.value.name = newName
+    // Also update the name in the project list
+    const proj = pmProjects.value.find(p => p.id === pmInfoData.value.id)
+    if (proj) proj.name = newName
+    const sub = pmProjects.value.flatMap(p => p.children || []).find(c => c.id === pmInfoData.value.id)
+    if (sub) sub.name = newName
+  } catch (e) {
+    showToast('保存失败')
   }
 }
 
