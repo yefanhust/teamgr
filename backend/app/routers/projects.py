@@ -721,6 +721,7 @@ async def _run_project_analysis_bg(prompt):
     from app.config import get_gemini_config, get_model_defaults
 
     state = _project_analysis_bg
+    my_task = asyncio.current_task()
     full_text = ""
     usage = None
     t0 = time.monotonic()
@@ -876,6 +877,7 @@ async def _run_project_analysis_bg(prompt):
                 save_db.close()
 
         state["status"] = "done"
+        logger.info(f"Project analysis completed, text length={len(full_text)}, subscribers={len(state['subscribers'])}")
         _broadcast_project({"type": "done", "content": full_text.strip()})
 
     except Exception as e:
@@ -886,12 +888,14 @@ async def _run_project_analysis_bg(prompt):
 
     finally:
         await asyncio.sleep(5)
-        state["status"] = "idle"
-        state["subscribers"].clear()
-        state["full_text"] = ""
-        state["thinking_text"] = ""
-        state["error"] = None
-        state["task"] = None
+        # Only clean up if no new task has replaced us
+        if state["task"] is my_task:
+            state["status"] = "idle"
+            state["subscribers"].clear()
+            state["full_text"] = ""
+            state["thinking_text"] = ""
+            state["error"] = None
+            state["task"] = None
 
 
 @router.get("/analysis/status")

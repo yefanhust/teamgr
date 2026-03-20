@@ -1940,8 +1940,8 @@ import TopNavBar from '../components/TopNavBar.vue'
 const store = useTodosStore()
 const pmStore = useProjectsStore()
 
-// Tab state
-const activeTab = ref(0)
+// Tab state — restore from localStorage so refresh keeps the user on the same tab
+const activeTab = ref(parseInt(localStorage.getItem('todoActiveTab')) || 0)
 const vibeTab = ref(0)
 const pmSubTab = ref(0)
 const analysisSubTab = ref(0)
@@ -2252,6 +2252,7 @@ onMounted(async () => {
 
 // Auto-refresh duration stats when switching to 效率分析 tab (index 2)
 watch(activeTab, async (tab) => {
+  localStorage.setItem('todoActiveTab', tab)
   if (tab === 1) {
     loadPmProjects()
     loadPmTimeline()
@@ -2264,7 +2265,7 @@ watch(activeTab, async (tab) => {
     reconnectAnalysisIfRunning()
     reconnectProjectAnalysisIfRunning()
   }
-})
+}, { immediate: true })
 
 // Poll for status changes when there are implementing tasks
 let vibePollingTimer = null
@@ -3059,6 +3060,7 @@ async function triggerAnalysis() {
   analysisStatus.value = 'running'
   analysisStatusText.value = '正在分析已完成的任务...'
 
+  let receivedDone = false
   try {
     const token = localStorage.getItem('teamgr_token')
     const res = await fetch('/api/todos/analysis/trigger', {
@@ -3094,12 +3096,24 @@ async function triggerAnalysis() {
             }
             analysisStream.value += data.content
           } else if (data.type === 'done') {
+            receivedDone = true
+            await loadAnalyses()
+            // Fallback: if DB load returned empty, use stream content directly
+            if (analyses.value.length === 0 && (analysisStream.value || data.content)) {
+              analyses.value = [{
+                id: 0,
+                content: analysisStream.value || data.content,
+                generated_date: new Date().toISOString().slice(0, 10),
+                model_name: '',
+                created_at: new Date().toISOString(),
+              }]
+            }
             analysisStatus.value = ''
             analysisStatusText.value = ''
             analysisStream.value = ''
             analysisThinking.value = ''
-            await loadAnalyses()
           } else if (data.type === 'error') {
+            receivedDone = true
             analysisStatus.value = 'error'
             analysisStatusText.value = `分析失败：${data.content}`
             setTimeout(() => { analysisStatus.value = ''; analysisStatusText.value = '' }, 5000)
@@ -3108,11 +3122,31 @@ async function triggerAnalysis() {
       }
     }
   } catch (e) {
-    analysisStatus.value = 'error'
-    analysisStatusText.value = `分析失败：${e.message}`
-    setTimeout(() => { analysisStatus.value = ''; analysisStatusText.value = '' }, 5000)
+    if (!receivedDone) {
+      analysisStatus.value = 'error'
+      analysisStatusText.value = `分析失败：${e.message}`
+      setTimeout(() => { analysisStatus.value = ''; analysisStatusText.value = '' }, 5000)
+    }
   } finally {
     triggeringAnalysis.value = false
+    // Safety net: if stream ended without done event, the background task
+    // may have completed and saved to DB. Try loading results.
+    if (!receivedDone && analysisStatus.value === 'running') {
+      const streamContent = analysisStream.value
+      await loadAnalyses()
+      // Fallback: use stream content if DB load returned empty
+      if (analyses.value.length === 0 && streamContent) {
+        analyses.value = [{
+          id: 0, content: streamContent,
+          generated_date: new Date().toISOString().slice(0, 10),
+          model_name: '', created_at: new Date().toISOString(),
+        }]
+      }
+      analysisStatus.value = ''
+      analysisStatusText.value = ''
+      analysisStream.value = ''
+      analysisThinking.value = ''
+    }
   }
 }
 
@@ -3160,6 +3194,7 @@ async function triggerProjectAnalysis() {
   projectAnalysisStatus.value = 'running'
   projectAnalysisStatusText.value = '正在分析活跃项目...'
 
+  let receivedDone = false
   try {
     const token = localStorage.getItem('teamgr_token')
     const res = await fetch('/api/projects/analysis/trigger', {
@@ -3193,12 +3228,24 @@ async function triggerProjectAnalysis() {
             }
             projectAnalysisStream.value += data.content
           } else if (data.type === 'done') {
+            receivedDone = true
+            await loadProjectAnalyses()
+            // Fallback: if DB load returned empty, use stream content directly
+            if (projectAnalyses.value.length === 0 && (projectAnalysisStream.value || data.content)) {
+              projectAnalyses.value = [{
+                id: 0,
+                content: projectAnalysisStream.value || data.content,
+                generated_date: new Date().toISOString().slice(0, 10),
+                model_name: '',
+                created_at: new Date().toISOString(),
+              }]
+            }
             projectAnalysisStatus.value = ''
             projectAnalysisStatusText.value = ''
             projectAnalysisStream.value = ''
             projectAnalysisThinking.value = ''
-            await loadProjectAnalyses()
           } else if (data.type === 'error') {
+            receivedDone = true
             projectAnalysisStatus.value = 'error'
             projectAnalysisStatusText.value = `分析失败：${data.content}`
             setTimeout(() => { projectAnalysisStatus.value = ''; projectAnalysisStatusText.value = '' }, 5000)
@@ -3207,11 +3254,31 @@ async function triggerProjectAnalysis() {
       }
     }
   } catch (e) {
-    projectAnalysisStatus.value = 'error'
-    projectAnalysisStatusText.value = `分析失败：${e.message}`
-    setTimeout(() => { projectAnalysisStatus.value = ''; projectAnalysisStatusText.value = '' }, 5000)
+    if (!receivedDone) {
+      projectAnalysisStatus.value = 'error'
+      projectAnalysisStatusText.value = `分析失败：${e.message}`
+      setTimeout(() => { projectAnalysisStatus.value = ''; projectAnalysisStatusText.value = '' }, 5000)
+    }
   } finally {
     triggeringProjectAnalysis.value = false
+    // Safety net: if stream ended without done event, the background task
+    // may have completed and saved to DB. Try loading results.
+    if (!receivedDone && projectAnalysisStatus.value === 'running') {
+      const streamContent = projectAnalysisStream.value
+      await loadProjectAnalyses()
+      // Fallback: use stream content if DB load returned empty
+      if (projectAnalyses.value.length === 0 && streamContent) {
+        projectAnalyses.value = [{
+          id: 0, content: streamContent,
+          generated_date: new Date().toISOString().slice(0, 10),
+          model_name: '', created_at: new Date().toISOString(),
+        }]
+      }
+      projectAnalysisStatus.value = ''
+      projectAnalysisStatusText.value = ''
+      projectAnalysisStream.value = ''
+      projectAnalysisThinking.value = ''
+    }
   }
 }
 
