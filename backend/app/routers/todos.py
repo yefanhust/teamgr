@@ -63,7 +63,20 @@ def _write_queue_file(filename: str, data: dict):
         json.dump(data, f, ensure_ascii=False)
 
 
-def _serialize(item: TodoItem) -> dict:
+class SubtaskCreate(BaseModel):
+    title: str
+    high_priority: bool = False
+
+
+def _serialize(item: TodoItem, include_children: bool = True) -> dict:
+    children = []
+    children_count = 0
+    children_completed_count = 0
+    if include_children and hasattr(item, 'children') and item.children:
+        for c in item.children:
+            children.append(_serialize(c, include_children=False))
+        children_count = len(children)
+        children_completed_count = sum(1 for c in item.children if c.completed)
     return {
         "id": item.id,
         "title": item.title,
@@ -81,6 +94,12 @@ def _serialize(item: TodoItem) -> dict:
         "repeat_next_at": item.repeat_next_at.isoformat() if item.repeat_next_at else None,
         "repeat_include_weekends": bool(item.repeat_include_weekends),
         "repeat_source_id": item.repeat_source_id,
+        "parent_id": item.parent_id,
+        "work_status": item.work_status or "waiting",
+        "started_at": item.started_at.isoformat() if item.started_at else None,
+        "paused_at": item.paused_at.isoformat() if item.paused_at else None,
+        "total_working_seconds": item.total_working_seconds or 0,
+        "stop_count": item.stop_count or 0,
         "vibe_status": item.vibe_status,
         "vibe_plan": item.vibe_plan or "",
         "vibe_summary": item.vibe_summary or "",
@@ -88,6 +107,9 @@ def _serialize(item: TodoItem) -> dict:
         "vibe_session_id": item.vibe_session_id or "",
         "vibe_verified_at": item.vibe_verified_at.isoformat() if item.vibe_verified_at else None,
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in item.tags],
+        "children": children,
+        "children_count": children_count,
+        "children_completed_count": children_completed_count,
     }
 
 
@@ -205,7 +227,7 @@ def list_todos(db: Session = Depends(get_db)):
 
     pending = (
         db.query(TodoItem)
-        .filter(TodoItem.completed == False)
+        .filter(TodoItem.completed == False, TodoItem.parent_id.is_(None))
         .order_by(TodoItem.high_priority.desc(), TodoItem.created_at.desc())
         .all()
     )
@@ -222,7 +244,7 @@ def list_todos(db: Session = Depends(get_db)):
 
     completed = (
         db.query(TodoItem)
-        .filter(TodoItem.completed == True)
+        .filter(TodoItem.completed == True, TodoItem.parent_id.is_(None))
         .order_by(TodoItem.completed_at.desc())
         .all()
     )
@@ -364,8 +386,16 @@ def complete_todo(todo_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Todo not found")
     item.completed = True
     item.completed_at = datetime.utcnow()
+    # If task was in_progress, accumulate the last working segment
+    # paused_at is used as "last resume time" when status is in_progress
+    if item.work_status == "in_progress":
+        resume_time = item.paused_at or item.started_at
+        if resume_time:
+            elapsed = (item.completed_at - resume_time).total_seconds()
+            if elapsed > 0:
+                item.total_working_seconds = (item.total_working_seconds or 0) + int(elapsed)
+    item.work_status = "completed"
     # If this is a repeating todo, set repeat_next_at so it revives later
-    # (not immediately — _check_and_spawn_repeat_todos will spawn it when due)
     if item.repeat_rule:
         item.repeat_next_at = _calc_next_repeat(
             date.today(), item.repeat_rule, item.repeat_interval or 1,
@@ -420,6 +450,105 @@ def delete_todo(todo_id: int, db: Session = Depends(get_db)):
     db.delete(item)
     db.commit()
     return {"ok": True}
+
+
+# --- Sub-task endpoints ---
+
+@router.post("/{todo_id}/subtasks")
+def create_subtask(todo_id: int, body: SubtaskCreate, db: Session = Depends(get_db)):
+    """Create a sub-task under a parent todo."""
+    parent = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent todo not found")
+    if parent.parent_id is not None:
+        raise HTTPException(status_code=400, detail="不支持多层子任务")
+    if not body.title.strip():
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+    child = TodoItem(
+        title=body.title.strip(),
+        high_priority=body.high_priority,
+        parent_id=todo_id,
+    )
+    db.add(child)
+    db.flush()
+    # Inherit parent's tags
+    for tag in parent.tags:
+        db.add(TodoItemTag(todo_id=child.id, tag_id=tag.id))
+    db.commit()
+    db.refresh(parent)
+    return _serialize(parent)
+
+
+# --- Start / Pause endpoints ---
+
+@router.post("/{todo_id}/start")
+def start_todo(todo_id: int, db: Session = Depends(get_db)):
+    """Start working on a task (begin timing). Auto-promotes to high priority."""
+    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if item.completed:
+        raise HTTPException(status_code=400, detail="已完成的任务不能开始")
+    now = datetime.utcnow()
+    if not item.started_at:
+        item.started_at = now
+    item.work_status = "in_progress"
+    # Auto-promote to high priority when started
+    item.high_priority = True
+    # paused_at is used as a reference for when we resume; set it to now so
+    # the next pause can calculate elapsed = pause_time - paused_at
+    item.paused_at = now
+    db.commit()
+    db.refresh(item)
+    return _serialize(item)
+
+
+@router.post("/{todo_id}/pause")
+def pause_todo(todo_id: int, db: Session = Depends(get_db)):
+    """Pause working on a task (stop timing)."""
+    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if item.work_status != "in_progress":
+        raise HTTPException(status_code=400, detail="只有进行中的任务可以暂停")
+    now = datetime.utcnow()
+    # Calculate elapsed since last resume (paused_at was set to resume time)
+    resume_time = item.paused_at or item.started_at
+    if resume_time:
+        elapsed = (now - resume_time).total_seconds()
+        if elapsed > 0:
+            item.total_working_seconds = (item.total_working_seconds or 0) + int(elapsed)
+    item.work_status = "paused"
+    item.paused_at = now
+    db.commit()
+    db.refresh(item)
+    return _serialize(item)
+
+
+@router.post("/{todo_id}/stop")
+def stop_todo(todo_id: int, db: Session = Depends(get_db)):
+    """Stop working on a task — accumulate time, revert priority, increment stop_count."""
+    item = db.query(TodoItem).filter(TodoItem.id == todo_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Todo not found")
+    if item.work_status not in ("in_progress", "paused"):
+        raise HTTPException(status_code=400, detail="只有进行中或已暂停的任务可以停止")
+    now = datetime.utcnow()
+    # Accumulate remaining working time if currently in_progress
+    if item.work_status == "in_progress":
+        resume_time = item.paused_at or item.started_at
+        if resume_time:
+            elapsed = (now - resume_time).total_seconds()
+            if elapsed > 0:
+                item.total_working_seconds = (item.total_working_seconds or 0) + int(elapsed)
+    item.work_status = "waiting"
+    # Revert priority, but keep high if deadline is urgent
+    item.high_priority = _is_deadline_urgent(item.deadline)
+    item.stop_count = (item.stop_count or 0) + 1
+    item.paused_at = now
+    db.commit()
+    db.refresh(item)
+    return _serialize(item)
 
 
 def _get_git_root():
@@ -1019,6 +1148,18 @@ def _format_duration(created_at, completed_at):
     return f"{minutes}分钟" if minutes > 0 else "不到1分钟"
 
 
+def _format_seconds(seconds: int) -> str:
+    """Format seconds as human-readable Chinese string."""
+    if seconds <= 0:
+        return "未记录"
+    minutes = seconds // 60
+    hours = minutes // 60
+    mins = minutes % 60
+    if hours > 0:
+        return f"{hours}小时{mins}分钟" if mins > 0 else f"{hours}小时"
+    return f"{mins}分钟" if mins > 0 else "不到1分钟"
+
+
 async def run_daily_todo_analysis():
     """Run by scheduler at 3:30 AM. Analyzes recently completed todos with LLM."""
     from app.database import SessionLocal
@@ -1163,10 +1304,21 @@ def _build_analysis_prompt(db):
         duration = _format_duration(item.created_at, item.completed_at)
         priority = "高优先级" if item.high_priority else "普通"
         desc = item.description.strip() if item.description else ""
-        line = f"- 任务：{item.title}"
+        is_subtask = item.parent_id is not None
+        line = f"- {'[子任务] ' if is_subtask else ''}任务：{item.title}"
         if desc:
             line += f"\n  详情：{desc}"
-        line += f"\n  标签：{tags_str} | 优先级：{priority} | 耗时：{duration}"
+        line += f"\n  标签：{tags_str} | 优先级：{priority} | 总周期：{duration}"
+        # Working time info
+        working_secs = item.total_working_seconds or 0
+        if working_secs > 0:
+            line += f" | 实际工作时间：{_format_seconds(working_secs)}"
+        if item.started_at:
+            wait_duration = _format_duration(item.created_at, item.started_at)
+            line += f" | 等待时间：{wait_duration}"
+        stop_count = item.stop_count or 0
+        if stop_count > 0:
+            line += f" | 中途停止次数：{stop_count}"
         if item.deadline:
             line += f" | 截止日：{item.deadline}"
         if item.completed_at:
@@ -1175,15 +1327,15 @@ def _build_analysis_prompt(db):
         task_lines.append(line)
 
     tasks_text = "\n".join(task_lines)
-    prompt = f"""你是一个任务管理效率顾问。以下是用户最近7天完成的任务列表，包括任务标题、详情、标签、优先级、耗时和完成时间。
+    prompt = f"""你是一个任务管理效率顾问。以下是用户最近7天完成的任务列表，包括任务标题、详情、标签、优先级、总周期（创建到完成）、实际工作时间（开始到暂停/完成的累计时长）、等待时间（创建到首次开始）、中途停止次数（任务被放弃后重新回到等待状态的次数）和完成时间。
 
 {tasks_text}
 
 请分析这些已完成的任务，给出以下方面的建议：
 1. **效率概览**：总体完成情况，平均耗时，效率趋势
-2. **时间管理**：哪些任务耗时过长？可能的原因和改进建议
-3. **优先级管理**：高优先级任务的处理是否及时？
-4. **规律与模式**：发现的工作模式（如哪类任务效率高/低）
+2. **时间管理**：哪些任务耗时过长？实际工作时间 vs 总周期的比较，等待时间是否合理？
+3. **优先级管理**：高优先级任务的处理是否及时？等待时间是否过长？
+4. **规律与模式**：发现的工作模式（如哪类任务效率高/低，哪些任务等待时间过长，哪些任务被多次停止）
 5. **具体建议**：3-5条可操作的效率优化建议
 
 请用简洁的中文回答，使用 Markdown 格式，方便阅读。"""

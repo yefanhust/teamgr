@@ -49,8 +49,23 @@ export const useTodosStore = defineStore('todos', () => {
 
   async function completeTodo(id) {
     const res = await api.post(`/api/todos/${id}/complete`)
-    pending.value = pending.value.filter(t => t.id !== id)
-    completed.value.unshift(res.data)
+    // Check if it's a subtask (child of a pending parent)
+    let isSubtask = false
+    for (const p of pending.value) {
+      if (p.children) {
+        const cidx = p.children.findIndex(c => c.id === id)
+        if (cidx !== -1) {
+          p.children[cidx] = res.data
+          p.children_completed_count = p.children.filter(c => c.completed).length
+          isSubtask = true
+          break
+        }
+      }
+    }
+    if (!isSubtask) {
+      pending.value = pending.value.filter(t => t.id !== id)
+      completed.value.unshift(res.data)
+    }
     return res.data
   }
 
@@ -140,6 +155,55 @@ export const useTodosStore = defineStore('todos', () => {
     return res.data
   }
 
+  async function createSubtask(parentId, title, highPriority = false) {
+    const res = await api.post(`/api/todos/${parentId}/subtasks`, { title, high_priority: highPriority })
+    // Response is the updated parent with children
+    const pidx = pending.value.findIndex(t => t.id === parentId)
+    if (pidx !== -1) pending.value[pidx] = res.data
+    return res.data
+  }
+
+  async function startTodo(id) {
+    const res = await api.post(`/api/todos/${id}/start`)
+    _updateItemInLists(id, res.data)
+    _sortPending()
+    return res.data
+  }
+
+  async function pauseTodo(id) {
+    const res = await api.post(`/api/todos/${id}/pause`)
+    _updateItemInLists(id, res.data)
+    return res.data
+  }
+
+  async function stopTodo(id) {
+    const res = await api.post(`/api/todos/${id}/stop`)
+    _updateItemInLists(id, res.data)
+    _sortPending()
+    return res.data
+  }
+
+  function _updateItemInLists(id, data) {
+    // Update in pending list (could be a top-level or update parent's child)
+    const pidx = pending.value.findIndex(t => t.id === id)
+    if (pidx !== -1) {
+      pending.value[pidx] = data
+      return
+    }
+    // Check if it's a child of a pending item
+    for (const p of pending.value) {
+      if (p.children) {
+        const cidx = p.children.findIndex(c => c.id === id)
+        if (cidx !== -1) {
+          p.children[cidx] = data
+          // Update parent's children counts
+          p.children_completed_count = p.children.filter(c => c.completed).length
+          return
+        }
+      }
+    }
+  }
+
   function _sortPending() {
     pending.value.sort((a, b) => {
       if (a.high_priority !== b.high_priority) return b.high_priority ? 1 : -1
@@ -167,5 +231,9 @@ export const useTodosStore = defineStore('todos', () => {
     checkCommit,
     createRequirement,
     submitRequirement,
+    createSubtask,
+    startTodo,
+    pauseTodo,
+    stopTodo,
   }
 })

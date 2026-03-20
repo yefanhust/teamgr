@@ -120,93 +120,241 @@
               </div>
 
               <div v-else class="space-y-2">
-                <van-swipe-cell v-for="item in filteredPending" :key="item.id">
-                  <div
-                    class="bg-white rounded-xl shadow-sm p-3 flex items-center gap-3"
-                    :class="item.high_priority ? 'border-l-4 border-red-400' : ''"
-                  >
-                    <van-checkbox
-                      :model-value="false"
-                      shape="round"
-                      icon-size="20px"
-                      @update:model-value="handleComplete(item.id)"
-                    />
-                    <div class="flex-1 min-w-0" @click="openDetail(item)">
-                      <div class="flex items-center gap-2">
-                        <input
-                          v-if="inlineEditId === item.id"
-                          v-model="inlineEditTitle"
-                          class="edit-title-input"
-                          @blur="finishInlineEdit(item)"
-                          @keypress.enter="finishInlineEdit(item)"
-                          @keydown.escape="cancelInlineEdit"
-                          @click.stop
-                          ref="titleEditInput"
-                        />
-                        <span
-                          v-else
-                          class="text-sm text-gray-800 truncate min-w-0"
-                          @dblclick.stop="startInlineEdit(item)"
-                        >{{ item.title }}</span>
-                        <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
+                <div v-for="item in filteredPending" :key="item.id">
+                  <van-swipe-cell>
+                    <div
+                      class="bg-white rounded-xl shadow-sm p-3 flex items-center gap-3"
+                      :class="item.high_priority ? 'border-l-4 border-red-400' : ''"
+                    >
+                      <van-checkbox
+                        :model-value="false"
+                        shape="round"
+                        icon-size="20px"
+                        @update:model-value="handleComplete(item.id)"
+                      />
+                      <div class="flex-1 min-w-0" @click="openDetail(item)">
+                        <div class="flex items-center gap-2">
+                          <input
+                            v-if="inlineEditId === item.id"
+                            v-model="inlineEditTitle"
+                            class="edit-title-input"
+                            @blur="finishInlineEdit(item)"
+                            @keypress.enter="finishInlineEdit(item)"
+                            @keydown.escape="cancelInlineEdit"
+                            @click.stop
+                            ref="titleEditInput"
+                          />
+                          <span
+                            v-else
+                            class="text-sm text-gray-800 truncate min-w-0"
+                            @dblclick.stop="startInlineEdit(item)"
+                          >{{ item.title }}</span>
+                          <van-tag v-if="item.high_priority" type="danger" size="small" class="flex-shrink-0">高优</van-tag>
+                          <!-- Subtask progress badge -->
+                          <span
+                            v-if="item.children_count > 0"
+                            class="text-xs px-1.5 py-0.5 rounded flex-shrink-0 cursor-pointer"
+                            :class="item.children_completed_count === item.children_count ? 'bg-green-50 text-green-600' : 'bg-blue-50 text-blue-500'"
+                            @click.stop="toggleExpand(item.id)"
+                          >
+                            {{ item.children_completed_count }}/{{ item.children_count }}
+                          </span>
+                        </div>
+                        <div class="flex items-center gap-1 mt-1 flex-wrap">
+                          <van-tag
+                            v-for="tag in (item.tags || [])"
+                            :key="tag.id"
+                            :color="tag.color"
+                            size="small"
+                            plain
+                          >
+                            {{ tag.name }}
+                          </van-tag>
+                          <span v-if="item.description" class="text-xs text-gray-400 truncate max-w-[120px]">{{ item.description }}</span>
+                          <span class="text-xs text-gray-400">{{ formatDateTime(item.created_at) }}</span>
+                          <!-- Working time display -->
+                          <span
+                            v-if="item.work_status === 'in_progress'"
+                            class="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-600 font-medium"
+                          >
+                            {{ formatWorkingTime(item) }}
+                          </span>
+                          <span
+                            v-else-if="(item.total_working_seconds || 0) > 0"
+                            class="text-xs px-1.5 py-0.5 rounded bg-gray-50 text-gray-500"
+                          >
+                            {{ formatSeconds(item.total_working_seconds) }}
+                          </span>
+                          <span
+                            v-if="(item.stop_count || 0) > 0"
+                            class="text-xs px-1.5 py-0.5 rounded bg-red-50 text-red-400"
+                            :title="`已停止 ${item.stop_count} 次`"
+                          >
+                            停{{ item.stop_count }}次
+                          </span>
+                          <span
+                            v-if="item.deadline"
+                            class="text-xs px-1.5 py-0.5 rounded"
+                            :class="item.deadline_urgent ? 'bg-red-50 text-red-500 font-medium' : 'bg-gray-50 text-gray-500'"
+                            @click.stop="openDeadlinePicker(item)"
+                          >
+                            截止 {{ item.deadline }}{{ item.deadline_time ? ' ' + item.deadline_time : '' }}
+                          </span>
+                          <span
+                            v-else
+                            class="text-xs text-blue-400 cursor-pointer"
+                            @click.stop="openDeadlinePicker(item)"
+                          >
+                            + 截止日期
+                          </span>
+                          <span v-if="item.repeat_rule" class="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-500">
+                            {{ repeatLabel(item) }}
+                          </span>
+                        </div>
                       </div>
-                      <div class="flex items-center gap-1 mt-1 flex-wrap">
-                        <van-tag
-                          v-for="tag in (item.tags || [])"
-                          :key="tag.id"
-                          :color="tag.color"
-                          size="small"
-                          plain
-                        >
-                          {{ tag.name }}
-                        </van-tag>
-                        <span v-if="item.description" class="text-xs text-gray-400 truncate max-w-[120px]">{{ item.description }}</span>
-                        <span class="text-xs text-gray-400">{{ formatDateTime(item.created_at) }}</span>
-                        <span
-                          v-if="item.deadline"
-                          class="text-xs px-1.5 py-0.5 rounded"
-                          :class="item.deadline_urgent ? 'bg-red-50 text-red-500 font-medium' : 'bg-gray-50 text-gray-500'"
-                          @click.stop="openDeadlinePicker(item)"
-                        >
-                          截止 {{ item.deadline }}{{ item.deadline_time ? ' ' + item.deadline_time : '' }}
-                        </span>
-                        <span
-                          v-else
-                          class="text-xs text-blue-400 cursor-pointer"
-                          @click.stop="openDeadlinePicker(item)"
-                        >
-                          + 截止日期
-                        </span>
-                        <span v-if="item.repeat_rule" class="text-xs px-1.5 py-0.5 rounded bg-purple-50 text-purple-500">
-                          {{ repeatLabel(item) }}
-                        </span>
-                      </div>
+                      <!-- Start / Pause / Stop buttons -->
+                      <van-icon
+                        v-if="item.work_status !== 'in_progress'"
+                        name="play-circle-o"
+                        size="20"
+                        color="#10B981"
+                        class="cursor-pointer flex-shrink-0"
+                        @click="handleStart(item.id)"
+                      />
+                      <van-icon
+                        v-if="item.work_status === 'in_progress'"
+                        name="pause-circle-o"
+                        size="20"
+                        color="#F59E0B"
+                        class="cursor-pointer flex-shrink-0"
+                        @click="handlePause(item.id)"
+                      />
+                      <van-icon
+                        v-if="item.work_status === 'in_progress' || item.work_status === 'paused'"
+                        name="stop-circle-o"
+                        size="20"
+                        color="#EF4444"
+                        class="cursor-pointer flex-shrink-0"
+                        @click="handleStop(item.id)"
+                      />
+                      <!-- Expand/Add subtasks -->
+                      <van-icon
+                        name="plus"
+                        size="16"
+                        :color="expandedIds.has(item.id) ? '#3B82F6' : '#9CA3AF'"
+                        class="cursor-pointer flex-shrink-0"
+                        @click="toggleExpand(item.id)"
+                      />
+                      <van-icon
+                        v-if="!item.high_priority"
+                        name="arrow-up"
+                        size="16"
+                        color="#EF4444"
+                        class="cursor-pointer"
+                        @click="togglePriority(item, true)"
+                      />
+                      <van-icon
+                        v-else
+                        name="arrow-down"
+                        size="16"
+                        color="#9CA3AF"
+                        class="cursor-pointer"
+                        @click="togglePriority(item, false)"
+                      />
+                      <van-icon
+                        name="delete-o"
+                        size="16"
+                        color="#9CA3AF"
+                        class="cursor-pointer"
+                        @click="handleDelete(item.id)"
+                      />
                     </div>
-                    <van-icon
-                      v-if="!item.high_priority"
-                      name="arrow-up"
-                      size="16"
-                      color="#EF4444"
-                      class="cursor-pointer"
-                      @click="togglePriority(item, true)"
-                    />
-                    <van-icon
-                      v-else
-                      name="arrow-down"
-                      size="16"
-                      color="#9CA3AF"
-                      class="cursor-pointer"
-                      @click="togglePriority(item, false)"
-                    />
-                    <van-icon
-                      name="delete-o"
-                      size="16"
-                      color="#9CA3AF"
-                      class="cursor-pointer"
-                      @click="handleDelete(item.id)"
-                    />
+                  </van-swipe-cell>
+                  <!-- Expanded subtasks -->
+                  <div v-if="expandedIds.has(item.id)" class="ml-8 mt-1 space-y-1">
+                    <div
+                      v-for="child in (item.children || [])"
+                      :key="child.id"
+                      class="bg-gray-50 rounded-lg p-2 flex items-center gap-2"
+                    >
+                      <van-checkbox
+                        :model-value="child.completed"
+                        shape="round"
+                        icon-size="16px"
+                        @update:model-value="handleComplete(child.id)"
+                      />
+                      <span
+                        class="text-sm flex-1 min-w-0 truncate"
+                        :class="child.completed ? 'text-gray-400 line-through' : 'text-gray-700'"
+                      >{{ child.title }}</span>
+                      <!-- Child start/pause/stop -->
+                      <template v-if="!child.completed">
+                        <span
+                          v-if="child.work_status === 'in_progress'"
+                          class="text-xs text-green-600"
+                        >{{ formatWorkingTime(child) }}</span>
+                        <span
+                          v-else-if="(child.total_working_seconds || 0) > 0"
+                          class="text-xs text-gray-400"
+                        >{{ formatSeconds(child.total_working_seconds) }}</span>
+                        <span
+                          v-if="(child.stop_count || 0) > 0"
+                          class="text-xs text-red-400"
+                        >停{{ child.stop_count }}次</span>
+                        <van-icon
+                          v-if="child.work_status !== 'in_progress'"
+                          name="play-circle-o"
+                          size="16"
+                          color="#10B981"
+                          class="cursor-pointer flex-shrink-0"
+                          @click="handleStart(child.id)"
+                        />
+                        <van-icon
+                          v-if="child.work_status === 'in_progress'"
+                          name="pause-circle-o"
+                          size="16"
+                          color="#F59E0B"
+                          class="cursor-pointer flex-shrink-0"
+                          @click="handlePause(child.id)"
+                        />
+                        <van-icon
+                          v-if="child.work_status === 'in_progress' || child.work_status === 'paused'"
+                          name="stop-circle-o"
+                          size="16"
+                          color="#EF4444"
+                          class="cursor-pointer flex-shrink-0"
+                          @click="handleStop(child.id)"
+                        />
+                      </template>
+                      <van-icon
+                        name="delete-o"
+                        size="14"
+                        color="#D1D5DB"
+                        class="cursor-pointer flex-shrink-0"
+                        @click="handleDelete(child.id)"
+                      />
+                    </div>
+                    <!-- Add subtask input -->
+                    <div class="flex items-center gap-2 mt-1">
+                      <van-field
+                        v-model="subtaskInputs[item.id]"
+                        placeholder="添加子任务..."
+                        class="todo-input flex-1 subtask-input"
+                        size="small"
+                        @keyup.enter="addSubtask(item.id)"
+                      />
+                      <van-button
+                        size="small"
+                        type="primary"
+                        icon="plus"
+                        :disabled="!subtaskInputs[item.id]?.trim()"
+                        @click="addSubtask(item.id)"
+                      >
+                        添加
+                      </van-button>
+                    </div>
                   </div>
-                </van-swipe-cell>
+                </div>
               </div>
             </section>
           </template>
@@ -994,6 +1142,12 @@
                     <span v-if="item.created_at && item.completed_at" class="text-xs text-gray-400">
                       耗时 {{ formatDuration(item.created_at, item.completed_at) }}
                     </span>
+                    <span v-if="(item.total_working_seconds || 0) > 0" class="text-xs text-green-500">
+                      工作 {{ formatSeconds(item.total_working_seconds) }}
+                    </span>
+                    <span v-if="(item.stop_count || 0) > 0" class="text-xs text-red-400">
+                      停{{ item.stop_count }}次
+                    </span>
                     <span v-if="item.deadline" class="text-xs text-gray-400">
                       截止 {{ item.deadline }}{{ item.deadline_time ? ' ' + item.deadline_time : '' }}
                     </span>
@@ -1314,13 +1468,28 @@
         </div>
 
         <!-- Meta -->
-        <div class="flex items-center gap-4 text-xs text-gray-400">
+        <div class="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
           <span>创建于 {{ formatDateTime(detailItem.created_at) }}</span>
+          <span v-if="detailItem.started_at">
+            开始于 {{ formatDateTime(detailItem.started_at) }}
+          </span>
           <span v-if="detailItem.deadline">
             截止 {{ detailItem.deadline }}{{ detailItem.deadline_time ? ' ' + detailItem.deadline_time : '' }}
           </span>
           <span v-if="detailItem.completed_at">
             完成于 {{ formatDateTime(detailItem.completed_at) }}
+          </span>
+          <span v-if="(detailItem.total_working_seconds || 0) > 0" class="text-green-500">
+            工作时间 {{ formatSeconds(detailItem.total_working_seconds) }}
+          </span>
+          <span v-if="(detailItem.stop_count || 0) > 0" class="text-red-400">
+            停止 {{ detailItem.stop_count }} 次
+          </span>
+          <span v-if="detailItem.work_status === 'in_progress'" class="text-green-600 font-medium">
+            进行中
+          </span>
+          <span v-else-if="detailItem.work_status === 'paused'" class="text-yellow-500">
+            已暂停
           </span>
         </div>
       </div>
@@ -1812,6 +1981,11 @@ const newDeadlineTime = ref('')
 const loading = ref(false)
 const adding = ref(false)
 
+// Subtask & Start/Pause state
+const expandedIds = ref(new Set())
+const subtaskInputs = reactive({})
+const workingTimerTick = ref(0)  // incremented every second to trigger reactivity
+
 // Inline title editing
 const inlineEditId = ref(null)
 const inlineEditTitle = ref('')
@@ -2048,10 +2222,29 @@ watch(vibePending, (tasks) => {
   }
 }, { immediate: true })
 
+// Working time live timer (tick every second for in_progress tasks)
+let workingTimer = null
+watch(() => store.pending, (items) => {
+  const hasInProgress = items.some(t =>
+    t.work_status === 'in_progress' ||
+    (t.children || []).some(c => c.work_status === 'in_progress')
+  )
+  if (hasInProgress && !workingTimer) {
+    workingTimer = setInterval(() => { workingTimerTick.value++ }, 1000)
+  } else if (!hasInProgress && workingTimer) {
+    clearInterval(workingTimer)
+    workingTimer = null
+  }
+}, { immediate: true, deep: true })
+
 onUnmounted(() => {
   if (vibePollingTimer) {
     clearInterval(vibePollingTimer)
     vibePollingTimer = null
+  }
+  if (workingTimer) {
+    clearInterval(workingTimer)
+    workingTimer = null
   }
   if (durationChartInstance) {
     durationChartInstance.destroy()
@@ -2606,6 +2799,67 @@ function formatDuration(startIso, endIso) {
     return remM > 0 ? `${hours}小时${remM}分钟` : `${hours}小时`
   }
   return minutes > 0 ? `${minutes}分钟` : '不到1分钟'
+}
+
+function formatSeconds(totalSecs) {
+  if (!totalSecs || totalSecs <= 0) return ''
+  const h = Math.floor(totalSecs / 3600)
+  const m = Math.floor((totalSecs % 3600) / 60)
+  const s = totalSecs % 60
+  if (h > 0) return m > 0 ? `${h}h${m}m` : `${h}h`
+  if (m > 0) return `${m}m`
+  return `${s}s`
+}
+
+function formatWorkingTime(item) {
+  // Trigger reactivity from timer tick
+  void workingTimerTick.value
+  const base = item.total_working_seconds || 0
+  if (item.work_status !== 'in_progress' || !item.paused_at) return formatSeconds(base)
+  const elapsed = Math.max(0, Math.floor((Date.now() - new Date(item.paused_at).getTime()) / 1000))
+  return formatSeconds(base + elapsed)
+}
+
+function toggleExpand(id) {
+  const s = new Set(expandedIds.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  expandedIds.value = s
+}
+
+async function addSubtask(parentId) {
+  const title = subtaskInputs[parentId]?.trim()
+  if (!title) return
+  try {
+    await store.createSubtask(parentId, title)
+    subtaskInputs[parentId] = ''
+  } catch (e) {
+    showToast('添加子任务失败')
+  }
+}
+
+async function handleStart(id) {
+  try {
+    await store.startTodo(id)
+  } catch (e) {
+    showToast('操作失败')
+  }
+}
+
+async function handlePause(id) {
+  try {
+    await store.pauseTodo(id)
+  } catch (e) {
+    showToast('操作失败')
+  }
+}
+
+async function handleStop(id) {
+  try {
+    await store.stopTodo(id)
+  } catch (e) {
+    showToast('操作失败')
+  }
 }
 
 async function loadAnalyses() {
@@ -3503,6 +3757,14 @@ function formatDateTime(isoStr) {
 }
 .vibe-tabs {
   margin-top: 8px;
+}
+.subtask-input {
+  font-size: 13px !important;
+  padding: 4px 10px !important;
+  border-radius: 8px !important;
+}
+.rotate-180 {
+  transform: rotate(180deg);
 }
 .todo-input {
   border: 1px solid #d1d5db !important;

@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy import Column, Integer, Float, String, Text, Boolean, DateTime, Date, ForeignKey
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from app.database import Base
 
 
@@ -38,6 +38,14 @@ class TodoItem(Base):
     repeat_next_at = Column(Date, nullable=True)       # next date to spawn a new todo
     repeat_include_weekends = Column(Boolean, default=False)  # False = skip weekends
     repeat_source_id = Column(Integer, ForeignKey("todo_items.id", ondelete="SET NULL"), nullable=True)
+    # Sub-task support
+    parent_id = Column(Integer, ForeignKey("todo_items.id", ondelete="CASCADE"), nullable=True)
+    # Start/Pause time tracking
+    work_status = Column(String(20), default="waiting")  # "waiting", "in_progress", "paused"
+    started_at = Column(DateTime, nullable=True)           # first time started
+    paused_at = Column(DateTime, nullable=True)             # last pause time
+    total_working_seconds = Column(Integer, default=0)      # accumulated working seconds
+    stop_count = Column(Integer, default=0)                  # number of times task was stopped
     vibe_status = Column(String(20), nullable=True)  # null, "planning", "implementing", "verifying", "committed"
     vibe_plan = Column(Text, nullable=True)  # implementation plan from LLM
     vibe_summary = Column(Text, nullable=True)  # summary of changes when moving to verifying
@@ -50,6 +58,7 @@ class TodoItem(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     tags = relationship("TodoTag", secondary="todo_item_tags", back_populates="todos")
+    children = relationship("TodoItem", foreign_keys=[parent_id], backref=backref("parent_rel", remote_side=[id]), cascade="all, delete-orphan")
 
 
 class TodoAnalysis(Base):
