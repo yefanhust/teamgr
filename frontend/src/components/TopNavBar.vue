@@ -5,12 +5,12 @@
         <div
           v-for="item in navItems"
           :key="item.route"
-          class="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg cursor-pointer transition-all"
+          class="flex-1 flex flex-col items-center justify-center gap-0.5 px-1 py-1.5 rounded-lg cursor-pointer transition-all"
           :class="isActive(item.route) ? item.activeClass : item.inactiveClass"
           @click="navigateTo(item.route)"
         >
-          <van-icon :name="item.icon" :size="isActive(item.route) ? '20' : '16'" :color="isActive(item.route) ? 'white' : item.color" />
-          <span class="text-sm font-medium" :class="{ 'font-bold': isActive(item.route) }">{{ item.label }}</span>
+          <van-icon :name="item.icon" size="18" :color="isActive(item.route) ? 'white' : item.color" />
+          <span class="text-xs font-medium whitespace-nowrap" :class="{ 'font-bold': isActive(item.route) }">{{ item.label }}</span>
         </div>
         <van-icon name="setting-o" size="20" class="text-gray-400 cursor-pointer flex-shrink-0 ml-1" @click="router.push('/settings')" />
         <div class="relative flex-shrink-0 cursor-pointer ml-0.5" @click="router.push('/backup-logs')">
@@ -38,7 +38,7 @@ const navItems = [
     route: '/',
     icon: 'apps-o',
     color: '#8B5CF6',
-    activeClass: 'bg-violet-500 text-white shadow-md scale-105',
+    activeClass: 'bg-violet-500 text-white shadow-md',
     inactiveClass: 'bg-violet-50 text-violet-700',
   },
   {
@@ -46,7 +46,7 @@ const navItems = [
     route: '/ideas',
     icon: 'fire-o',
     color: '#F97316',
-    activeClass: 'bg-orange-500 text-white shadow-md scale-105',
+    activeClass: 'bg-orange-500 text-white shadow-md',
     inactiveClass: 'bg-orange-50 text-orange-700',
   },
   {
@@ -54,7 +54,7 @@ const navItems = [
     route: '/talent-cards',
     icon: 'friends-o',
     color: '#3B82F6',
-    activeClass: 'bg-blue-500 text-white shadow-md scale-105',
+    activeClass: 'bg-blue-500 text-white shadow-md',
     inactiveClass: 'bg-blue-50 text-blue-700',
   },
   {
@@ -62,7 +62,7 @@ const navItems = [
     route: '/scholar',
     icon: 'records-o',
     color: '#8B5CF6',
-    activeClass: 'bg-purple-500 text-white shadow-md scale-105',
+    activeClass: 'bg-purple-500 text-white shadow-md',
     inactiveClass: 'bg-purple-50 text-purple-700',
   },
   {
@@ -70,7 +70,7 @@ const navItems = [
     route: '/stats',
     icon: 'chart-trending-o',
     color: '#10B981',
-    activeClass: 'bg-emerald-500 text-white shadow-md scale-105',
+    activeClass: 'bg-emerald-500 text-white shadow-md',
     inactiveClass: 'bg-emerald-50 text-emerald-700',
   },
 ]
@@ -100,7 +100,4 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.top-nav .scale-105 {
-  transform: scale(1.05);
-}
 </style>
