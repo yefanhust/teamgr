@@ -2,12 +2,13 @@ import asyncio
 import os
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
-from app.config import load_config, get_auth_password, get_gemini_config
+from app.config import load_config, get_auth_password, get_gemini_config, get_cors_origins
+from app.middleware.auth_middleware import require_auth
 from app.database import init_db, SessionLocal
 from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification, scholar, backup, projects
 from app.services.backup_service import setup_backup_scheduler
@@ -258,7 +259,7 @@ app = FastAPI(
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -280,7 +281,7 @@ app.include_router(projects.router)
 
 # Settings API for model switching
 @app.get("/api/settings/model")
-async def get_model_settings():
+async def get_model_settings(_: str = Depends(require_auth)):
     from app.services.llm_service import get_current_model_name, get_available_models
     return {
         "current_model": get_current_model_name(),
@@ -289,7 +290,7 @@ async def get_model_settings():
 
 
 @app.put("/api/settings/model")
-async def update_model_settings(body: dict):
+async def update_model_settings(body: dict, _: str = Depends(require_auth)):
     from app.config import get_config, get_local_models_config
     import yaml
 
@@ -332,7 +333,7 @@ async def update_model_settings(body: dict):
 
 
 @app.get("/api/settings/model-defaults")
-async def get_model_defaults_api():
+async def get_model_defaults_api(_: str = Depends(require_auth)):
     from app.config import LLM_CALL_TYPES, get_model_defaults
     from app.services.llm_service import get_current_model_name, get_available_models
     return {
@@ -344,7 +345,7 @@ async def get_model_defaults_api():
 
 
 @app.put("/api/settings/model-defaults")
-async def update_model_defaults_api(body: dict):
+async def update_model_defaults_api(body: dict, _: str = Depends(require_auth)):
     from app.config import LLM_CALL_TYPES, set_model_defaults
     defaults = body.get("defaults", {})
     # Only keep valid call types
@@ -354,7 +355,7 @@ async def update_model_defaults_api(body: dict):
 
 
 @app.get("/api/settings/schedulers")
-async def get_scheduler_settings():
+async def get_scheduler_settings(_: str = Depends(require_auth)):
     from app.config import SCHEDULER_TYPES, SCHEDULER_DESCRIPTIONS, get_scheduler_config
     return {
         "scheduler_types": SCHEDULER_TYPES,
@@ -364,7 +365,7 @@ async def get_scheduler_settings():
 
 
 @app.put("/api/settings/schedulers")
-async def update_scheduler_settings(body: dict):
+async def update_scheduler_settings(body: dict, _: str = Depends(require_auth)):
     from app.config import SCHEDULER_TYPES, save_scheduler_config, get_scheduler_config
     schedulers = body.get("schedulers", {})
     # Only keep valid scheduler types

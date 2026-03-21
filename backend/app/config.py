@@ -88,6 +88,14 @@ def get_server_config() -> dict:
     return cfg.get("server", {"host": "0.0.0.0", "port": 8000})
 
 
+def get_cors_origins() -> list[str]:
+    cfg = get_config()
+    origins = cfg.get("server", {}).get("cors_origins", [])
+    if not origins:
+        return ["*"]
+    return origins
+
+
 def get_local_models_config() -> list:
     cfg = get_config()
     return cfg.get("local_models", [])

@@ -46,6 +46,8 @@ security:
 server:
   host: "0.0.0.0"
   port: 8000
+  cors_origins:              # 允许的跨域来源，不配置则允许所有
+    - "https://your-domain.com"
 
 # 消息推送配置（龙图阁）
 notification:
