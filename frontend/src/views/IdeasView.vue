@@ -2,22 +2,9 @@
   <div class="min-h-screen bg-gray-100">
     <!-- Top Navigation -->
     <TopNavBar />
-    <div class="max-w-3xl mx-auto px-4 py-1 flex items-center justify-between">
-      <h1 class="text-sm font-bold text-gray-500">灵感空间</h1>
-      <van-button
-        size="mini"
-        icon="fire-o"
-        :loading="generatingInsights"
-        @click="generateInsights"
-      >
-        生成洞见
-      </van-button>
-    </div>
-
-    <van-tabs v-model:active="activeTab" shrink sticky offset-top="52" class="ideas-tabs" @change="onTabChange">
+    <van-tabs v-model:active="activeTab" sticky offset-top="52" class="ideas-tabs" @change="onTabChange">
       <van-tab title="灵感洞见">
     <div class="max-w-3xl mx-auto px-4 py-4 space-y-6">
-
       <!-- ========== TAGS SECTION ========== -->
       <section v-if="allTags.length > 0">
         <!-- Organize progress -->
@@ -86,11 +73,21 @@
       </section>
 
       <!-- ========== DAILY INSIGHTS SECTION ========== -->
-      <section v-if="insights.length > 0">
-        <h2 class="text-sm font-semibold text-gray-500 mb-3 flex items-center gap-2">
-          <span class="w-1 h-4 bg-orange-400 rounded-full inline-block"></span>
-          每日洞见
-        </h2>
+      <section>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 12px;">
+          <h2 class="text-sm font-semibold text-gray-500 flex items-center gap-2" style="margin: 0;">
+            <span class="w-1 h-4 bg-orange-400 rounded-full inline-block"></span>
+            每日洞见
+          </h2>
+          <van-button
+            size="mini"
+            icon="fire-o"
+            :loading="generatingInsights"
+            @click="generateInsights"
+          >
+            生成洞见
+          </van-button>
+        </div>
         <div v-for="(group, date) in groupedInsights" :key="date" class="mb-4">
           <div class="text-xs text-gray-400 mb-2">{{ date }}</div>
           <div class="space-y-3">
@@ -296,6 +293,207 @@
       </template>
     </div>
       </van-tab>
+
+      <van-tab title="流光剪影">
+    <div class="max-w-3xl mx-auto px-4 py-4">
+      <!-- Password gate -->
+      <template v-if="!diaryStore.verified">
+        <div class="bg-white rounded-xl shadow-sm p-8 text-center mt-8">
+          <div class="text-4xl mb-3 opacity-60">&#x1F512;</div>
+          <h3 class="text-lg font-semibold text-gray-700 mb-2">流光剪影</h3>
+          <p class="text-base text-gray-400 mb-5">记录有价值、有意义或有趣的事情</p>
+          <van-field
+            v-model="diaryPwd"
+            type="password"
+            placeholder="请输入密码"
+            class="diary-pwd-input mb-4"
+            @keyup.enter="verifyDiaryPwd"
+          />
+          <van-button type="primary" block :loading="diaryVerifying" @click="verifyDiaryPwd">
+            进入
+          </van-button>
+          <p v-if="diaryPwdError" class="text-xs text-red-500 mt-2">{{ diaryPwdError }}</p>
+        </div>
+      </template>
+
+      <!-- Diary content -->
+      <template v-else>
+        <!-- Tag filter bar (aligned with TalentCardsView style) -->
+        <div class="flex items-center gap-2 mb-2">
+          <van-checkbox
+            :model-value="diaryAllTagsSelected"
+            shape="square"
+            icon-size="16px"
+            class="flex-shrink-0"
+            @update:model-value="selectAllDiaryTags"
+          >
+            全选
+          </van-checkbox>
+          <span class="text-xs text-gray-400">{{ diaryStore.entries.length }} 条手记</span>
+        </div>
+        <div class="flex gap-2 flex-wrap items-center mb-4">
+          <template v-for="t in diaryStore.tags" :key="t.id">
+            <input
+              v-if="diaryEditingTagId === t.id"
+              v-model="diaryEditingTagName"
+              class="diary-edit-tag-input"
+              @blur="finishEditDiaryTag(t)"
+              @keypress.enter="finishEditDiaryTag(t)"
+              @keydown.escape="cancelEditDiaryTag"
+              ref="diaryTagEditInput"
+            />
+            <van-tag
+              v-else
+              :type="diarySelectedTagIds.has(t.id) ? 'primary' : 'default'"
+              :color="diarySelectedTagIds.has(t.id) ? t.color : undefined"
+              size="medium"
+              class="cursor-pointer diary-tag-closeable"
+              closeable
+              @click="toggleDiaryTagFilter(t.id)"
+              @dblclick.stop="startEditDiaryTag(t)"
+              @close.stop="confirmDeleteDiaryTag(t)"
+            >
+              {{ t.name }}
+            </van-tag>
+          </template>
+        </div>
+
+        <!-- Entry list -->
+        <div v-if="diaryStore.loading" class="flex justify-center py-8">
+          <van-loading size="28px">加载中...</van-loading>
+        </div>
+
+        <div v-else-if="diaryStore.entries.length === 0" class="bg-white rounded-xl shadow-sm p-6 text-center text-gray-400 text-base">
+          还没有手记，点击右下角按钮开始记录
+        </div>
+
+        <template v-else>
+          <div v-for="(group, gDate) in diaryGroupedEntries" :key="gDate" class="mb-4">
+            <div class="text-sm text-gray-400 mb-2 font-medium">{{ gDate }}</div>
+            <div class="space-y-2">
+              <van-swipe-cell v-for="entry in group" :key="entry.id">
+                <div
+                  class="bg-white rounded-xl shadow-sm p-3 cursor-pointer"
+                  @click="toggleDiaryExpand(entry.id)"
+                >
+                  <div class="flex items-start justify-between mb-1">
+                    <h4 v-if="entry.title" class="text-base font-medium text-gray-800">{{ entry.title }}</h4>
+                    <span class="text-sm text-gray-400 flex-shrink-0 ml-auto">{{ formatDate(entry.created_at) }}</span>
+                  </div>
+                  <p
+                    class="text-base text-gray-600 whitespace-pre-line leading-relaxed"
+                    :class="{ 'line-clamp-3': !diaryExpandedIds.has(entry.id) }"
+                  >{{ entry.content }}</p>
+                  <div v-if="entry.tags && entry.tags.length" class="flex flex-wrap gap-1 mt-2">
+                    <van-tag
+                      v-for="tag in entry.tags"
+                      :key="tag.id"
+                      plain
+                      size="small"
+                      :color="tag.color"
+                    >
+                      {{ tag.name }}
+                    </van-tag>
+                  </div>
+                  <!-- AI comment -->
+                  <div
+                    v-if="entry.llm_comment && diaryExpandedIds.has(entry.id)"
+                    class="mt-3 bg-amber-50 border-l-2 border-amber-300 rounded-r-lg p-3"
+                  >
+                    <div class="flex items-center gap-1 mb-1">
+                      <span class="text-sm font-medium text-amber-600">AI 评论</span>
+                      <span v-if="entry.commented_at" class="text-sm text-gray-400">{{ formatDate(entry.commented_at) }}</span>
+                    </div>
+                    <p class="text-base text-gray-700 whitespace-pre-line leading-relaxed">{{ entry.llm_comment }}</p>
+                  </div>
+                  <div v-if="entry.llm_comment && !diaryExpandedIds.has(entry.id)" class="mt-1">
+                    <span class="text-sm text-amber-500">有 AI 评论，点击展开</span>
+                  </div>
+                </div>
+                <template #right>
+                  <van-button square text="编辑" class="h-full" @click="openEditDiary(entry)" />
+                  <van-button square type="danger" text="删除" class="h-full" @click="handleDeleteDiary(entry.id)" />
+                </template>
+              </van-swipe-cell>
+            </div>
+          </div>
+
+          <!-- Pagination -->
+          <div v-if="diaryStore.totalPages > 1" class="flex justify-center pt-4 pb-2">
+            <van-pagination
+              v-model="diaryPage"
+              :total-items="diaryStore.total"
+              :items-per-page="diaryStore.pageSize"
+              :show-page-size="3"
+              force-ellipses
+              @change="loadDiaryEntries"
+            />
+          </div>
+        </template>
+
+        <!-- FAB: new entry -->
+        <div class="fixed bottom-20 right-4 z-10">
+          <van-button round type="primary" icon="edit" size="large" @click="openNewDiary" />
+        </div>
+      </template>
+    </div>
+
+    <!-- New/Edit diary popup -->
+    <van-popup v-model:show="showDiaryEditor" position="bottom" round :style="{ maxHeight: '85vh' }">
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="text-base font-semibold text-gray-700">{{ editingDiaryId ? '编辑手记' : '新建手记' }}</h3>
+          <van-button size="small" type="primary" :loading="savingDiary" @click="saveDiary">保存</van-button>
+        </div>
+        <van-field
+          v-model="diaryForm.title"
+          placeholder="标题（可选）"
+          class="mb-2 rounded-lg border border-gray-200"
+        />
+        <van-field
+          v-model="diaryForm.content"
+          type="textarea"
+          :autosize="{ minHeight: 120 }"
+          placeholder="写下你觉得有价值、有意义或有趣的事情..."
+          class="mb-2 rounded-lg border border-gray-200"
+        />
+        <div class="flex items-center gap-2 mb-2">
+          <VoiceInputButton v-model="diaryForm.content" />
+          <span class="text-xs text-gray-400">点击麦克风语音输入</span>
+        </div>
+        <van-field
+          v-model="diaryForm.diary_date"
+          placeholder="日期 YYYY-MM-DD"
+          class="mb-2 rounded-lg border border-gray-200"
+        />
+        <div class="mb-2">
+          <p class="text-xs text-gray-400 mb-1">选择标签（保存后 AI 会自动补充标签）</p>
+          <div class="flex flex-wrap gap-1">
+            <van-tag
+              v-for="t in diaryStore.tags"
+              :key="t.id"
+              :type="diaryForm.tag_ids.includes(t.id) ? 'primary' : 'default'"
+              :color="diaryForm.tag_ids.includes(t.id) ? t.color : undefined"
+              size="medium"
+              class="cursor-pointer"
+              @click="toggleDiaryFormTag(t.id)"
+            >
+              {{ t.name }}
+            </van-tag>
+          </div>
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- Delete Tag Confirm (same pattern as TalentCardsView) -->
+    <van-dialog
+      v-model:show="showDeleteDiaryTagConfirm"
+      title="删除标签"
+      :message="`删除标签「${deletingDiaryTag?.name}」后，所有手记上的该标签也会移除，确定？`"
+      show-cancel-button
+      @confirm="handleDeleteDiaryTag"
+    />
+      </van-tab>
     </van-tabs>
 
   </div>
@@ -304,11 +502,13 @@
 <script setup>
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useIdeasStore } from '../stores/ideas'
+import { useDiaryStore } from '../stores/diary'
 import { showToast, showConfirmDialog } from 'vant'
 import VoiceInputButton from '../components/VoiceInputButton.vue'
 import TopNavBar from '../components/TopNavBar.vue'
 
 const store = useIdeasStore()
+const diaryStore = useDiaryStore()
 
 const activeTab = ref(0)
 const inputText = ref('')
@@ -654,6 +854,9 @@ function onTabChange(index) {
     historyPage.value = 1
     loadHistory()
   }
+  if (index === 2 && diaryStore.verified) {
+    loadDiaryData()
+  }
 }
 
 async function loadHistory() {
@@ -676,6 +879,224 @@ function formatDateTime(isoStr) {
   const d = new Date(isoStr)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
+
+// ========== 流光剪影 (Diary) ==========
+
+const diaryPwd = ref('')
+const diaryVerifying = ref(false)
+const diaryPwdError = ref('')
+const diaryExpandedIds = ref(new Set())
+const diaryPage = ref(1)
+
+// Editor state
+const showDiaryEditor = ref(false)
+const editingDiaryId = ref(null)
+const savingDiary = ref(false)
+const diaryForm = ref({ title: '', content: '', diary_date: '', tag_ids: [] })
+
+// Tag inline-edit state (aligned with TalentCardsView pattern)
+const diarySelectedTagIds = ref(new Set())
+const diaryEditingTagId = ref(null)
+const diaryEditingTagName = ref('')
+const diaryTagEditInput = ref(null)
+const showDeleteDiaryTagConfirm = ref(false)
+const deletingDiaryTag = ref(null)
+
+const diaryGroupedEntries = computed(() => {
+  const groups = {}
+  for (const e of diaryStore.entries) {
+    const d = e.diary_date || '未知日期'
+    if (!groups[d]) groups[d] = []
+    groups[d].push(e)
+  }
+  return groups
+})
+
+async function verifyDiaryPwd() {
+  if (!diaryPwd.value.trim()) return
+  diaryVerifying.value = true
+  diaryPwdError.value = ''
+  try {
+    const ok = await diaryStore.verifyPassword(diaryPwd.value)
+    if (ok) {
+      diaryPwd.value = ''
+      await loadDiaryData()
+    } else {
+      diaryPwdError.value = '密码错误'
+    }
+  } catch {
+    diaryPwdError.value = '验证失败'
+  } finally {
+    diaryVerifying.value = false
+  }
+}
+
+async function loadDiaryData() {
+  await Promise.all([
+    diaryStore.fetchEntries(1, diaryStore.selectedTagId),
+    diaryStore.fetchTags(),
+  ])
+}
+
+async function loadDiaryEntries() {
+  await diaryStore.fetchEntries(diaryPage.value, diaryStore.selectedTagId)
+}
+
+// Tag multi-select filtering (aligned with TalentCardsView)
+const diaryAllTagsSelected = computed(() => {
+  if (diaryStore.tags.length === 0) return true
+  return diaryStore.tags.every(t => diarySelectedTagIds.value.has(t.id))
+})
+
+function selectAllDiaryTags() {
+  if (diaryAllTagsSelected.value) {
+    diarySelectedTagIds.value = new Set()
+  } else {
+    diarySelectedTagIds.value = new Set(diaryStore.tags.map(t => t.id))
+  }
+  diaryStore.selectedTagId = null
+  diaryPage.value = 1
+  diaryStore.fetchEntries(1, null)
+}
+
+function toggleDiaryTagFilter(tagId) {
+  const s = new Set(diarySelectedTagIds.value)
+  if (s.has(tagId)) s.delete(tagId)
+  else s.add(tagId)
+  diarySelectedTagIds.value = s
+  // If only one tag selected, use it as filter; otherwise clear filter
+  if (s.size === 1) {
+    const [id] = s
+    diaryStore.selectedTagId = id
+    diaryStore.fetchEntries(1, id)
+  } else {
+    diaryStore.selectedTagId = null
+    diaryStore.fetchEntries(1, null)
+  }
+  diaryPage.value = 1
+}
+
+// Initialize selected tags when tags load
+watch(() => diaryStore.tags, (tags) => {
+  if (tags.length > 0 && diarySelectedTagIds.value.size === 0) {
+    diarySelectedTagIds.value = new Set(tags.map(t => t.id))
+  }
+})
+
+// Inline tag editing (same as TalentCardsView)
+async function startEditDiaryTag(tag) {
+  diaryEditingTagId.value = tag.id
+  diaryEditingTagName.value = tag.name
+  await nextTick()
+  const inputs = diaryTagEditInput.value
+  if (inputs) {
+    const el = Array.isArray(inputs) ? inputs[0] : inputs
+    el?.focus()
+    el?.select()
+  }
+}
+
+function cancelEditDiaryTag() {
+  diaryEditingTagId.value = null
+  diaryEditingTagName.value = ''
+}
+
+async function finishEditDiaryTag(tag) {
+  const newName = diaryEditingTagName.value.trim()
+  diaryEditingTagId.value = null
+  if (!newName || newName === tag.name) return
+  try {
+    await diaryStore.updateTag(tag.id, { name: newName, color: tag.color })
+    showToast('标签已更新')
+  } catch (e) {
+    showToast(e.response?.data?.detail || '更新失败')
+  }
+}
+
+function confirmDeleteDiaryTag(tag) {
+  deletingDiaryTag.value = tag
+  showDeleteDiaryTagConfirm.value = true
+}
+
+async function handleDeleteDiaryTag() {
+  try {
+    await diaryStore.deleteTag(deletingDiaryTag.value.id)
+    showToast('标签已删除')
+    const s = new Set(diarySelectedTagIds.value)
+    s.delete(deletingDiaryTag.value.id)
+    diarySelectedTagIds.value = s
+  } catch (e) {
+    showToast('删除失败')
+  }
+}
+
+function toggleDiaryExpand(id) {
+  const s = new Set(diaryExpandedIds.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  diaryExpandedIds.value = s
+}
+
+function openNewDiary() {
+  editingDiaryId.value = null
+  const today = new Date()
+  diaryForm.value = {
+    title: '',
+    content: '',
+    diary_date: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
+    tag_ids: [],
+  }
+  showDiaryEditor.value = true
+}
+
+function openEditDiary(entry) {
+  editingDiaryId.value = entry.id
+  diaryForm.value = {
+    title: entry.title || '',
+    content: entry.content,
+    diary_date: entry.diary_date,
+    tag_ids: (entry.tags || []).map(t => t.id),
+  }
+  showDiaryEditor.value = true
+}
+
+function toggleDiaryFormTag(tagId) {
+  const idx = diaryForm.value.tag_ids.indexOf(tagId)
+  if (idx >= 0) diaryForm.value.tag_ids.splice(idx, 1)
+  else diaryForm.value.tag_ids.push(tagId)
+}
+
+async function saveDiary() {
+  if (!diaryForm.value.content.trim()) {
+    showToast('请填写内容')
+    return
+  }
+  savingDiary.value = true
+  try {
+    if (editingDiaryId.value) {
+      await diaryStore.updateEntry(editingDiaryId.value, diaryForm.value)
+    } else {
+      await diaryStore.createEntry(diaryForm.value)
+    }
+    showDiaryEditor.value = false
+    showToast(editingDiaryId.value ? '已更新' : '已保存')
+    // Refresh after auto-tag completes
+    diaryStore.refreshAfterAutoTag()
+  } catch (e) {
+    showToast('保存失败')
+  } finally {
+    savingDiary.value = false
+  }
+}
+
+async function handleDeleteDiary(id) {
+  try {
+    await showConfirmDialog({ title: '确认删除', message: '删除后不可恢复' })
+    await diaryStore.deleteEntry(id)
+    showToast('已删除')
+  } catch { /* cancelled */ }
+}
+
 </script>
 
 <style scoped>
@@ -695,9 +1116,41 @@ function formatDateTime(isoStr) {
   font-size: 15px !important;
   line-height: 1.7 !important;
 }
-.ideas-tabs :deep(.van-tabs__wrap) {
-  max-width: 48rem; /* max-w-3xl */
-  margin: 0 auto;
-  padding: 0 1rem; /* px-4 */
+.ideas-tabs :deep(.van-tabs__nav) {
+  background: #fff;
+}
+.diary-pwd-input {
+  border: 1px solid #d1d5db !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+.diary-pwd-input::after {
+  display: none !important;
+}
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.diary-tag-closeable :deep(.van-tag__close) {
+  opacity: 0;
+  width: 0;
+  margin-left: 0;
+  transition: all 0.2s;
+}
+.diary-tag-closeable:hover :deep(.van-tag__close) {
+  opacity: 1;
+  width: 12px;
+  margin-left: 2px;
+}
+.diary-edit-tag-input {
+  border: 1.5px solid #3b82f6;
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 13px;
+  width: 80px;
+  outline: none;
+  background: #fff;
 }
 </style>

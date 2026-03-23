@@ -46,9 +46,11 @@ def init_db():
         Talent, Tag, TalentTag, EntryLog, LoginAttempt,
         CardDimension, LLMUsageLog, PresetQuestion, ScheduledQueryResult,
         IdeaFragment, IdeaInputLog, IdeaInsight,
+        DiaryEntry, DiaryTag, DiaryEntryTag,
     )
     from app.models.todo import TodoItem, TodoTag, TodoItemTag, TodoAnalysis, TodoDurationStats  # noqa
     from app.models.project import Project, ProjectUpdate, ProjectMember  # noqa
+    from app.models.team import Team, TeamMember  # noqa
     from app.models.scholar import ScholarScheduledQuestion, ScholarScheduledResult  # noqa
     from app.models.backup import BackupLog  # noqa
     Base.metadata.create_all(bind=engine)

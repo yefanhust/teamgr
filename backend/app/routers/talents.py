@@ -248,6 +248,11 @@ async def create_talent(
     db: Session = Depends(get_db),
     _=Depends(require_auth),
 ):
+    # Check name uniqueness
+    existing = db.query(Talent).filter(Talent.name == body.name.strip()).first()
+    if existing:
+        raise HTTPException(status_code=400, detail=f"已存在同名人才「{body.name}」")
+
     pinyin_full, pinyin_initials = get_pinyin_data(body.name)
 
     # Build initial card_data from dimensions
@@ -287,6 +292,12 @@ async def update_talent(
         raise HTTPException(status_code=404, detail="人才不存在")
 
     if body.name is not None:
+        # Check name uniqueness (exclude self)
+        dup = db.query(Talent).filter(
+            Talent.name == body.name.strip(), Talent.id != talent_id
+        ).first()
+        if dup:
+            raise HTTPException(status_code=400, detail=f"已存在同名人才「{body.name}」")
         talent.name = body.name
         pinyin_full, pinyin_initials = get_pinyin_data(body.name)
         talent.name_pinyin = pinyin_full

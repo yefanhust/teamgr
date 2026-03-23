@@ -22,7 +22,7 @@ const routes = [
   {
     path: '/talent-cards',
     name: 'TalentCards',
-    component: () => import('../views/TalentCardsView.vue'),
+    component: () => import('../views/TalentTabsView.vue'),
   },
   {
     path: '/talent/:id',

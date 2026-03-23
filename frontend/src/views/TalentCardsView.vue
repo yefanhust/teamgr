@@ -1,9 +1,6 @@
 <template>
-  <div class="min-h-screen bg-gray-100">
-    <!-- Top Navigation -->
-    <TopNavBar />
-    <div class="max-w-6xl mx-auto px-4 py-1 flex items-center justify-between">
-      <h1 class="text-sm font-bold text-gray-500">👥 人才卡</h1>
+  <div>
+    <div class="max-w-6xl mx-auto px-4 py-1 flex justify-end">
       <div class="flex gap-2">
         <van-button size="small" icon="search" @click="$router.push('/search')">搜索</van-button>
         <van-button size="small" icon="edit" type="primary" @click="$router.push('/entry')">录入</van-button>
@@ -273,7 +270,6 @@ import { useTalentStore } from '../stores/talent'
 import { showToast } from 'vant'
 import ChatQueryPanel from '../components/ChatQueryPanel.vue'
 import VoiceInputButton from '../components/VoiceInputButton.vue'
-import TopNavBar from '../components/TopNavBar.vue'
 import api from '../api'
 
 const store = useTalentStore()

@@ -161,3 +161,39 @@ class IdeaInsight(Base):
     generated_date = Column(String(10), nullable=False)  # "2026-03-06"
     model_name = Column(String(100), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ========== 流光剪影 (Diary / 手记) ==========
+
+class DiaryEntryTag(Base):
+    """M2M relationship between diary entries and tags."""
+    __tablename__ = "diary_entry_tags"
+    entry_id = Column(Integer, ForeignKey("diary_entries.id", ondelete="CASCADE"), primary_key=True)
+    tag_id = Column(Integer, ForeignKey("diary_tags.id", ondelete="CASCADE"), primary_key=True)
+
+
+class DiaryTag(Base):
+    """Tag definitions for diary entries."""
+    __tablename__ = "diary_tags"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(50), unique=True, nullable=False)
+    color = Column(String(20), default="#3B82F6")
+
+    entries = relationship("DiaryEntry", secondary="diary_entry_tags", back_populates="tags")
+
+
+class DiaryEntry(Base):
+    """A diary/journal entry in 流光剪影."""
+    __tablename__ = "diary_entries"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(200), nullable=True)
+    content = Column(Text, nullable=False)
+    diary_date = Column(String(10), nullable=False)  # "2026-03-21"
+    llm_comment = Column(Text, nullable=True)  # AI-generated comment/feedback
+    commented_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    tags = relationship("DiaryTag", secondary="diary_entry_tags", back_populates="entries")

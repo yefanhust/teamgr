@@ -42,6 +42,10 @@ security:
     - fails: 20
       duration_minutes: 1440
 
+# 流光剪影（手记）配置
+diary:
+  password: ""                    # 手记页面独立密码，留空则不启用手记功能
+
 # 服务器配置
 server:
   host: "0.0.0.0"
@@ -90,6 +94,9 @@ schedulers:
   daily_duration_stats:        # 任务耗时统计
     cron_hour: 3
     cron_minute: 35
+  daily_diary_comment:          # 手记每日评论（仅使用本地模型）
+    cron_hour: 23
+    cron_minute: 0
   repeat_todo_check:           # 周期任务自动创建（检查重复规则的已完成任务，自动创建下一周期待办）
     interval_hours: 1
 
