@@ -358,6 +358,34 @@
           </template>
         </div>
 
+        <!-- AI comment prompt template -->
+        <div
+          class="mb-4 bg-gray-50 rounded-xl p-3 cursor-pointer"
+          @click="toggleDiaryPromptPreview"
+          @dblclick.stop="openDiaryPromptEditor"
+        >
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-gray-500 font-medium">AI 评论提示词模板</span>
+            <span class="text-xs text-gray-400">{{ showDiaryPromptPreview ? '收起 · 双击编辑' : '查看 · 双击编辑' }}</span>
+          </div>
+          <template v-if="showDiaryPromptPreview">
+            <pre class="mt-2 text-sm text-gray-600 whitespace-pre-wrap leading-relaxed font-sans">{{ diaryPromptText }}</pre>
+            <div v-if="diaryLikedExamples.length > 0" class="mt-3 border-t border-gray-200 pt-2">
+              <div class="text-xs text-amber-600 font-medium mb-1">&#x1F44D; 被赞的评论范例（会拼接到提示词后面）</div>
+              <div v-for="(ex, i) in diaryLikedExamples" :key="i" class="bg-white rounded-lg p-2 mb-1 text-xs">
+                <div class="text-gray-400">手记：{{ ex.content }}</div>
+                <div class="text-gray-600 mt-1">评论：{{ ex.comment }}</div>
+              </div>
+            </div>
+            <div v-if="diaryDislikedCount > 0" class="mt-2 text-xs text-red-400">
+              &#x1F44E; {{ diaryDislikedCount }} 条被踩的评论，今晚定时任务会重新生成
+            </div>
+            <div v-if="diaryLikedExamples.length === 0 && diaryDislikedCount === 0" class="mt-2 text-xs text-gray-400">
+              暂无赞/踩反馈。赞过的评论会作为范例拼接到提示词后，踩过的会在今晚重新生成。
+            </div>
+          </template>
+        </div>
+
         <!-- Entry list -->
         <div v-if="diaryStore.loading" class="flex justify-center py-8">
           <van-loading size="28px">加载中...</van-loading>
@@ -400,9 +428,26 @@
                     v-if="entry.llm_comment && diaryExpandedIds.has(entry.id)"
                     class="mt-3 bg-amber-50 border-l-2 border-amber-300 rounded-r-lg p-3"
                   >
-                    <div class="flex items-center gap-1 mb-1">
-                      <span class="text-sm font-medium text-amber-600">AI 评论</span>
-                      <span v-if="entry.commented_at" class="text-sm text-gray-400">{{ formatDate(entry.commented_at) }}</span>
+                    <div class="flex items-center justify-between mb-1">
+                      <div class="flex items-center gap-1">
+                        <span class="text-sm font-medium text-amber-600">AI 评论</span>
+                        <span v-if="entry.commented_at" class="text-sm text-gray-400">{{ formatDate(entry.commented_at) }}</span>
+                        <van-tag v-if="entry.comment_feedback === 'disliked'" type="danger" size="small" plain>待重新生成</van-tag>
+                      </div>
+                      <div class="flex items-center gap-1" @click.stop>
+                        <span
+                          class="cursor-pointer text-lg"
+                          :class="entry.comment_feedback === 'liked' ? 'opacity-100' : 'opacity-30 hover:opacity-60'"
+                          @click="setDiaryCommentFeedback(entry, 'liked')"
+                          title="赞 — 作为优秀范例"
+                        >&#x1F44D;</span>
+                        <span
+                          class="cursor-pointer text-lg"
+                          :class="entry.comment_feedback === 'disliked' ? 'opacity-100' : 'opacity-30 hover:opacity-60'"
+                          @click="setDiaryCommentFeedback(entry, 'disliked')"
+                          title="踩 — 今晚重新生成"
+                        >&#x1F44E;</span>
+                      </div>
                     </div>
                     <p class="text-base text-gray-700 whitespace-pre-line leading-relaxed">{{ entry.llm_comment }}</p>
                   </div>
@@ -493,6 +538,24 @@
       show-cancel-button
       @confirm="handleDeleteDiaryTag"
     />
+
+    <!-- Diary comment prompt editor (same pattern as TalentCardsView organize prompt) -->
+    <van-popup v-model:show="showDiaryPromptEditor" position="bottom" round :style="{ height: '80vh' }">
+      <div class="flex flex-col h-full">
+        <div class="flex items-center justify-between px-4 py-3 border-b">
+          <van-button size="small" @click="showDiaryPromptEditor = false">取消</van-button>
+          <span class="font-medium text-gray-700">编辑 AI 评论提示词</span>
+          <van-button size="small" type="primary" @click="saveDiaryPrompt">保存</van-button>
+        </div>
+        <textarea
+          v-model="diaryPromptEditText"
+          class="flex-1 w-full p-4 text-sm text-gray-700 leading-relaxed focus:outline-none resize-none"
+        />
+        <div class="flex justify-end px-4 py-2 border-t">
+          <span class="text-xs text-gray-400 cursor-pointer hover:text-blue-500" @click="diaryPromptEditText = diaryPromptDefault">恢复默认</span>
+        </div>
+      </div>
+    </van-popup>
       </van-tab>
     </van-tabs>
 
@@ -902,6 +965,15 @@ const diaryTagEditInput = ref(null)
 const showDeleteDiaryTagConfirm = ref(false)
 const deletingDiaryTag = ref(null)
 
+// Prompt editor state
+const showDiaryPromptPreview = ref(false)
+const showDiaryPromptEditor = ref(false)
+const diaryPromptText = ref('')
+const diaryPromptEditText = ref('')
+const diaryPromptDefault = ref('')
+const diaryLikedExamples = ref([])
+const diaryDislikedCount = ref(0)
+
 const diaryGroupedEntries = computed(() => {
   const groups = {}
   for (const e of diaryStore.entries) {
@@ -932,10 +1004,14 @@ async function verifyDiaryPwd() {
 }
 
 async function loadDiaryData() {
-  await Promise.all([
-    diaryStore.fetchEntries(1, diaryStore.selectedTagId),
-    diaryStore.fetchTags(),
-  ])
+  try {
+    await Promise.all([
+      diaryStore.fetchEntries(1, null),
+      diaryStore.fetchTags(),
+    ])
+  } catch (e) {
+    console.error('loadDiaryData error:', e)
+  }
 }
 
 async function loadDiaryEntries() {
@@ -1030,6 +1106,59 @@ async function handleDeleteDiaryTag() {
   }
 }
 
+// Prompt editor functions
+const diaryPromptLoaded = ref(false)
+
+const DIARY_PROMPT_FALLBACK = `你是一位阅历丰富、思维敏锐的朋友。请阅读以下手记，给出你的真实想法。
+
+要求：
+- 说人话，不要鸡汤、不要空洞的鼓励，不要"加油"之类的废话
+- 如果手记提到了具体问题或困惑，直接给出你的分析和可操作的建议
+- 如果手记记录了一个想法，指出你觉得有意思的点，也可以指出潜在的盲区
+- 如果手记是情绪表达，简短回应即可，不要过度共情或说教
+- 有自己的观点，可以提出不同看法，但要言之有理
+- 控制在100-200字以内，言简意赅`
+
+async function loadDiaryPrompt() {
+  if (diaryPromptLoaded.value) return
+  try {
+    const res = await api.get('/api/diary/comment-prompt', { headers: { 'X-Diary-Password': diaryStore.password } })
+    diaryPromptText.value = res.data.instructions
+    diaryPromptDefault.value = res.data.default
+    diaryLikedExamples.value = res.data.liked_examples || []
+    diaryDislikedCount.value = res.data.disliked_count || 0
+    diaryPromptLoaded.value = true
+  } catch {
+    // Fallback to hardcoded default if API unavailable
+    diaryPromptText.value = DIARY_PROMPT_FALLBACK
+    diaryPromptDefault.value = DIARY_PROMPT_FALLBACK
+  }
+}
+
+async function toggleDiaryPromptPreview() {
+  showDiaryPromptPreview.value = !showDiaryPromptPreview.value
+  if (showDiaryPromptPreview.value && !diaryPromptLoaded.value) {
+    await loadDiaryPrompt()
+  }
+}
+
+async function openDiaryPromptEditor() {
+  if (!diaryPromptLoaded.value) await loadDiaryPrompt()
+  diaryPromptEditText.value = diaryPromptText.value
+  showDiaryPromptEditor.value = true
+}
+
+async function saveDiaryPrompt() {
+  try {
+    await api.put('/api/diary/comment-prompt', { instructions: diaryPromptEditText.value }, { headers: { 'X-Diary-Password': diaryStore.password } })
+    diaryPromptText.value = diaryPromptEditText.value
+    showDiaryPromptEditor.value = false
+    showToast('已保存')
+  } catch {
+    showToast('保存失败')
+  }
+}
+
 function toggleDiaryExpand(id) {
   const s = new Set(diaryExpandedIds.value)
   if (s.has(id)) s.delete(id)
@@ -1095,6 +1224,19 @@ async function handleDeleteDiary(id) {
     await diaryStore.deleteEntry(id)
     showToast('已删除')
   } catch { /* cancelled */ }
+}
+
+async function setDiaryCommentFeedback(entry, feedback) {
+  // Toggle: clicking the same feedback again clears it
+  const newFeedback = entry.comment_feedback === feedback ? null : feedback
+  try {
+    await diaryStore.setCommentFeedback(entry.id, newFeedback)
+    if (newFeedback === 'liked') showToast('已标记为优秀范例')
+    else if (newFeedback === 'disliked') showToast('今晚会重新生成')
+    else showToast('已取消')
+  } catch {
+    showToast('操作失败')
+  }
 }
 
 </script>

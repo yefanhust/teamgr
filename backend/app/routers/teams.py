@@ -19,6 +19,7 @@ class TeamCreate(BaseModel):
 
 class TeamUpdate(BaseModel):
     name: Optional[str] = None
+    parent_id: Optional[int] = None
     position_x: Optional[float] = None
     position_y: Optional[float] = None
 
@@ -39,6 +40,8 @@ def _team_to_response(team: Team) -> dict:
     return {
         "id": team.id,
         "name": team.name,
+        "parent_id": team.parent_id,
+        "parent_name": team.parent.name if team.parent else "",
         "position_x": team.position_x,
         "position_y": team.position_y,
         "created_at": team.created_at.isoformat() if team.created_at else "",
@@ -142,6 +145,11 @@ async def update_team(
         raise HTTPException(status_code=404, detail="团队不存在")
     if body.name is not None:
         team.name = body.name
+    if body.parent_id is not None:
+        if body.parent_id == 0:
+            team.parent_id = None
+        elif body.parent_id != team_id:
+            team.parent_id = body.parent_id
     if body.position_x is not None:
         team.position_x = body.position_x
     if body.position_y is not None:

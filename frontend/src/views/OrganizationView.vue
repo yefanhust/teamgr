@@ -22,11 +22,31 @@
           transformOrigin: '0 0',
         }"
       >
+        <!-- Parent-Child Arrow Lines -->
+        <svg class="org-arrows">
+          <defs>
+            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#94a3b8" />
+            </marker>
+          </defs>
+          <path
+            v-for="line in parentLines"
+            :key="line.key"
+            :d="line.d"
+            fill="none"
+            stroke="#94a3b8"
+            stroke-width="1.5"
+            stroke-dasharray="6 3"
+            marker-end="url(#arrowhead)"
+          />
+        </svg>
+
         <!-- Team Cards -->
         <div
           v-for="team in store.teams"
           :key="team.id"
           class="team-card"
+          :ref="el => setTeamCardRef(team.id, el)"
           :style="{ left: team.position_x + 'px', top: team.position_y + 'px' }"
           @pointerdown.stop="onTeamPointerDown($event, team)"
         >
@@ -36,6 +56,55 @@
               <van-icon name="edit" size="14" class="action-icon" @click="startEditTeam(team)" />
               <van-icon name="delete-o" size="14" class="action-icon danger" @click="confirmDeleteTeam(team)" />
             </div>
+          </div>
+
+          <!-- Team Info -->
+          <div class="team-info" @pointerdown.stop>
+            <span class="info-item">{{ team.members.length }} 人</span>
+            <span class="info-sep">·</span>
+            <span class="info-item parent-org-wrap">
+              <template v-if="editingParentTeamId === team.id">
+                <input
+                  ref="parentInput"
+                  v-model="editParentQuery"
+                  class="parent-edit-input"
+                  placeholder="输入上级组织..."
+                  @blur="finishEditParent"
+                  @keydown.enter="selectParentFromInput(team)"
+                  @keydown.escape="cancelEditParent"
+                />
+                <div v-if="showParentDropdown(team)" class="parent-suggestions">
+                  <div
+                    v-for="s in parentSuggestions"
+                    :key="s.id"
+                    class="parent-suggestion-item"
+                    @mousedown.prevent="selectParent(team, s)"
+                  >
+                    {{ s.name }}
+                  </div>
+                  <div
+                    v-if="editParentQuery.trim() && !parentSuggestions.some(s => s.name === editParentQuery.trim())"
+                    class="parent-suggestion-item create-new"
+                    @mousedown.prevent="createAndSelectParent(team)"
+                  >
+                    + 新建「{{ editParentQuery.trim() }}」
+                  </div>
+                  <div
+                    v-if="team.parent_id"
+                    class="parent-suggestion-item clear-parent"
+                    @mousedown.prevent="clearParent(team)"
+                  >
+                    × 清除上级
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <span class="parent-org-text" @click="startEditParent(team)">
+                  {{ team.parent_name || '无上级' }}
+                  <van-icon name="edit" size="10" class="parent-edit-icon" />
+                </span>
+              </template>
+            </span>
           </div>
 
           <!-- Members -->
@@ -104,8 +173,54 @@
     >
       <div class="px-4 py-2">
         <van-field v-model="editTeamName" label="团队名称" placeholder="请输入团队名称" />
+        <van-field
+          v-model="editTeamParentName"
+          label="上级组织"
+          placeholder="点击选择或输入新建"
+          readonly
+          is-link
+          @click="showParentPicker = true"
+        />
       </div>
     </van-dialog>
+
+    <!-- Parent Org Picker -->
+    <van-popup v-model:show="showParentPicker" position="bottom" round :style="{ height: '50vh' }">
+      <div class="flex flex-col h-full">
+        <div class="flex items-center justify-between px-4 py-3 border-b">
+          <span class="font-medium text-gray-700">选择上级组织</span>
+          <van-icon name="cross" size="18" class="text-gray-400" @click="showParentPicker = false" />
+        </div>
+        <van-search v-model="parentPickerQuery" placeholder="搜索或输入新组织名..." shape="round" class="flex-shrink-0" @search="onParentPickerEnter" />
+        <div class="flex-1 overflow-y-auto px-4">
+          <div
+            class="flex items-center justify-between py-3 border-b border-gray-100 cursor-pointer"
+            @click="pickParent(null)"
+          >
+            <span class="text-sm text-gray-400">无上级（清除）</span>
+          </div>
+          <div
+            v-for="t in parentPickerOptions"
+            :key="t.id"
+            class="flex items-center justify-between py-3 border-b border-gray-100 cursor-pointer"
+            @click="pickParent(t)"
+          >
+            <span class="text-sm font-medium text-gray-800">{{ t.name }}</span>
+            <van-icon v-if="editTeamParentId === t.id" name="success" size="16" color="#3b82f6" />
+          </div>
+          <div
+            v-if="parentPickerQuery.trim() && !parentPickerOptions.some(t => t.name === parentPickerQuery.trim())"
+            class="flex items-center py-3 border-b border-gray-100 cursor-pointer text-blue-500"
+            @click="pickNewParent"
+          >
+            <span class="text-sm">+ 新建「{{ parentPickerQuery.trim() }}」</span>
+          </div>
+          <div v-if="parentPickerOptions.length === 0 && !parentPickerQuery.trim()" class="text-center py-8 text-gray-400 text-sm">
+            暂无其他团队
+          </div>
+        </div>
+      </div>
+    </van-popup>
 
     <!-- Delete Team Confirm -->
     <van-dialog
@@ -123,7 +238,7 @@
           <span class="font-medium text-gray-700">添加成员到「{{ addingToTeam?.name }}」</span>
           <van-icon name="cross" size="18" class="text-gray-400" @click="showAddMember = false" />
         </div>
-        <van-search v-model="memberSearchQuery" placeholder="搜索姓名..." shape="round" class="flex-shrink-0" />
+        <van-search v-model="memberSearchQuery" placeholder="搜索姓名..." shape="round" class="flex-shrink-0" @search="onMemberSearchEnter" />
         <div class="flex-1 overflow-y-auto px-4">
           <div
             v-for="talent in filteredTalents"
@@ -166,7 +281,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { showToast } from 'vant'
 import { useOrganizationStore } from '../stores/organization'
@@ -196,11 +311,51 @@ const dragStartTeamX = ref(0)
 const dragStartTeamY = ref(0)
 const hasDragged = ref(false)
 
+// Team card refs for arrow positioning
+const teamCardRefs = ref({})
+function setTeamCardRef(teamId, el) {
+  if (el) teamCardRefs.value[teamId] = el
+}
+
+// Arrow lines from child to parent
+const parentLines = computed(() => {
+  const lines = []
+  const CARD_W = 260 // approximate card width
+  for (const team of store.teams) {
+    if (!team.parent_id) continue
+    const parent = store.teams.find(t => t.id === team.parent_id)
+    if (!parent) continue
+
+    // Child top center → Parent bottom center (approx)
+    const childEl = teamCardRefs.value[team.id]
+    const parentEl = teamCardRefs.value[parent.id]
+    const cw = childEl?.offsetWidth || CARD_W
+    const pw = parentEl?.offsetWidth || CARD_W
+    const ch = childEl?.offsetHeight || 80
+    const ph = parentEl?.offsetHeight || 80
+
+    const x1 = team.position_x + cw / 2
+    const y1 = team.position_y
+    const x2 = parent.position_x + pw / 2
+    const y2 = parent.position_y + ph
+
+    // Curved path
+    const midY = (y1 + y2) / 2
+    const d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`
+    lines.push({ key: `${team.id}-${parent.id}`, d })
+  }
+  return lines
+})
+
 // Dialogs
 const showCreateTeam = ref(false)
 const newTeamName = ref('')
 const showEditTeam = ref(false)
 const editTeamName = ref('')
+const editTeamParentId = ref(null)
+const editTeamParentName = ref('')
+const showParentPicker = ref(false)
+const parentPickerQuery = ref('')
 const editingTeam = ref(null)
 const showDeleteTeam = ref(false)
 const deletingTeam = ref(null)
@@ -212,6 +367,98 @@ const editTitleValue = ref('')
 const editingTitleTeam = ref(null)
 const editingTitleMember = ref(null)
 
+// Parent org editing
+const editingParentTeamId = ref(null)
+const editParentQuery = ref('')
+const parentInput = ref(null)
+const parentSuggestions = computed(() => {
+  if (editingParentTeamId.value === null) return []
+  const q = editParentQuery.value.trim().toLowerCase()
+  return store.teams.filter(t =>
+    t.id !== editingParentTeamId.value &&
+    (q === '' || t.name.toLowerCase().includes(q))
+  )
+})
+
+async function startEditParent(team) {
+  editingParentTeamId.value = team.id
+  editParentQuery.value = team.parent_name || ''
+  await nextTick()
+  const el = parentInput.value
+  const input = Array.isArray(el) ? el[0] : el
+  input?.focus()
+  input?.select()
+}
+
+function cancelEditParent() {
+  editingParentTeamId.value = null
+  editParentQuery.value = ''
+}
+
+function finishEditParent() {
+  // Delay to allow mousedown on suggestion to fire
+  setTimeout(() => {
+    editingParentTeamId.value = null
+    editParentQuery.value = ''
+  }, 150)
+}
+
+function showParentDropdown(team) {
+  return parentSuggestions.value.length > 0 ||
+    (editParentQuery.value.trim() && !parentSuggestions.value.some(s => s.name === editParentQuery.value.trim())) ||
+    team.parent_id
+}
+
+async function clearParent(team) {
+  editingParentTeamId.value = null
+  try {
+    await store.updateTeam(team.id, { parent_id: 0 })
+  } catch (e) {
+    showToast('清除上级失败')
+  }
+}
+
+async function selectParent(team, parentTeam) {
+  editingParentTeamId.value = null
+  try {
+    await store.updateTeam(team.id, { parent_id: parentTeam.id })
+  } catch (e) {
+    showToast('设置上级失败')
+  }
+}
+
+async function selectParentFromInput(team) {
+  const q = editParentQuery.value.trim()
+  if (!q) {
+    // Clear parent
+    editingParentTeamId.value = null
+    try {
+      await store.updateTeam(team.id, { parent_id: 0 })
+    } catch (e) {
+      showToast('清除上级失败')
+    }
+    return
+  }
+  const match = store.teams.find(t => t.name === q && t.id !== team.id)
+  if (match) {
+    await selectParent(team, match)
+  } else {
+    await createAndSelectParent(team)
+  }
+}
+
+async function createAndSelectParent(team) {
+  const name = editParentQuery.value.trim()
+  editingParentTeamId.value = null
+  if (!name) return
+  try {
+    const newTeam = await store.createTeam(name)
+    await store.updateTeam(team.id, { parent_id: newTeam.id })
+  } catch (e) {
+    showToast('创建上级失败')
+  }
+}
+
 const filteredTalents = computed(() => {
   const q = memberSearchQuery.value.trim().toLowerCase()
   if (!q) return talentStore.talents
@@ -221,9 +468,19 @@ const filteredTalents = computed(() => {
   )
 })
 
+const addableTalents = computed(() => {
+  return filteredTalents.value.filter(t => !isInTeam(t.id))
+})
+
 function isInTeam(talentId) {
   if (!addingToTeam.value) return false
   return addingToTeam.value.members.some(m => m.talent_id === talentId)
+}
+
+function onMemberSearchEnter() {
+  if (addableTalents.value.length === 1) {
+    handleAddMember(addableTalents.value[0].id)
+  }
 }
 
 function hasLeader(team) {
@@ -321,14 +578,69 @@ async function handleCreateTeam() {
 function startEditTeam(team) {
   editingTeam.value = team
   editTeamName.value = team.name
+  editTeamParentId.value = team.parent_id || null
+  editTeamParentName.value = team.parent_name || '无上级'
+  parentPickerQuery.value = ''
   showEditTeam.value = true
+}
+
+const parentPickerOptions = computed(() => {
+  if (!editingTeam.value) return []
+  const q = parentPickerQuery.value.trim().toLowerCase()
+  return store.teams.filter(t =>
+    t.id !== editingTeam.value.id &&
+    (q === '' || t.name.toLowerCase().includes(q))
+  )
+})
+
+function pickParent(team) {
+  if (team) {
+    editTeamParentId.value = team.id
+    editTeamParentName.value = team.name
+  } else {
+    editTeamParentId.value = null
+    editTeamParentName.value = '无上级'
+  }
+  showParentPicker.value = false
+}
+
+async function pickNewParent() {
+  const name = parentPickerQuery.value.trim()
+  if (!name) return
+  try {
+    const newTeam = await store.createTeam(name)
+    editTeamParentId.value = newTeam.id
+    editTeamParentName.value = newTeam.name
+    showParentPicker.value = false
+  } catch (e) {
+    showToast('创建失败')
+  }
+}
+
+function onParentPickerEnter() {
+  const q = parentPickerQuery.value.trim()
+  if (!q) {
+    pickParent(null)
+    return
+  }
+  const match = parentPickerOptions.value.find(t => t.name === q)
+  if (match) {
+    pickParent(match)
+  } else if (parentPickerOptions.value.length === 1) {
+    pickParent(parentPickerOptions.value[0])
+  }
 }
 
 async function handleEditTeam() {
   const name = editTeamName.value.trim()
   if (!name) { showToast('请输入团队名称'); return }
   try {
-    await store.updateTeam(editingTeam.value.id, { name })
+    const data = { name }
+    const origParentId = editingTeam.value.parent_id || null
+    if (editTeamParentId.value !== origParentId) {
+      data.parent_id = editTeamParentId.value || 0
+    }
+    await store.updateTeam(editingTeam.value.id, data)
     showToast('已更新')
   } catch (e) {
     showToast('更新失败')
@@ -444,6 +756,17 @@ async function handleEditTitle() {
   height: 100%;
 }
 
+.org-arrows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 0;
+}
+
 .team-card {
   position: absolute;
   min-width: 200px;
@@ -453,6 +776,7 @@ async function handleEditTitle() {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
   cursor: move;
   user-select: none;
+  z-index: 1;
   touch-action: none;
 }
 
@@ -495,10 +819,99 @@ async function handleEditTitle() {
   color: #ef4444;
 }
 
+.team-info {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px 6px;
+  font-size: 11px;
+  color: #9ca3af;
+  border-bottom: 1px solid #f3f4f6;
+  position: relative;
+}
+
+.info-item {
+  white-space: nowrap;
+}
+
+.info-sep {
+  color: #d1d5db;
+}
+
+.parent-org-wrap {
+  position: relative;
+}
+
+.parent-org-text {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border-bottom: 1px dashed #d1d5db;
+  padding-bottom: 1px;
+}
+
+.parent-org-text:hover {
+  color: #3b82f6;
+  border-color: #3b82f6;
+}
+
+.parent-edit-icon {
+  opacity: 0.4;
+}
+
+.parent-org-text:hover .parent-edit-icon {
+  opacity: 1;
+}
+
+.parent-edit-input {
+  border: 1px solid #3b82f6;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  width: 100px;
+  outline: none;
+  background: #fff;
+  color: #374151;
+}
+
+.parent-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  max-height: 150px;
+  overflow-y: auto;
+  min-width: 140px;
+}
+
+.parent-suggestion-item {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #374151;
+  cursor: pointer;
+}
+
+.parent-suggestion-item:hover {
+  background: #eff6ff;
+}
+
+.parent-suggestion-item.create-new {
+  color: #3b82f6;
+  border-top: 1px solid #f3f4f6;
+}
+
+.parent-suggestion-item.clear-parent {
+  color: #ef4444;
+  border-top: 1px solid #f3f4f6;
+}
+
 .team-members {
   padding: 4px 0;
-  max-height: 280px;
-  overflow-y: auto;
 }
 
 .member-row {

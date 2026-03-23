@@ -16,13 +16,24 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import TopNavBar from '../components/TopNavBar.vue'
 import TalentCardsView from './TalentCardsView.vue'
 import OrganizationView from './OrganizationView.vue'
 import ProjectTeamView from './ProjectTeamView.vue'
 
-const activeTab = ref('cards')
+const route = useRoute()
+const router = useRouter()
+
+const validTabs = ['cards', 'org', 'projects']
+const initial = validTabs.includes(route.query.tab) ? route.query.tab : 'cards'
+const activeTab = ref(initial)
+
+watch(activeTab, (tab) => {
+  const q = tab === 'cards' ? undefined : tab
+  router.replace({ query: { ...route.query, tab: q } })
+})
 </script>
 
 <style scoped>

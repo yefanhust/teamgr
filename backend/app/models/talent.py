@@ -192,6 +192,7 @@ class DiaryEntry(Base):
     content = Column(Text, nullable=False)
     diary_date = Column(String(10), nullable=False)  # "2026-03-21"
     llm_comment = Column(Text, nullable=True)  # AI-generated comment/feedback
+    comment_feedback = Column(String(10), nullable=True)  # "liked" / "disliked" / null
     commented_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

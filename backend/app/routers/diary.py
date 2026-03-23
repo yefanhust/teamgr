@@ -63,6 +63,7 @@ def _serialize_entry(entry: DiaryEntry) -> dict:
         "content": entry.content,
         "diary_date": entry.diary_date,
         "llm_comment": entry.llm_comment,
+        "comment_feedback": entry.comment_feedback,
         "commented_at": entry.commented_at.isoformat() if entry.commented_at else None,
         "created_at": entry.created_at.isoformat() if entry.created_at else None,
         "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
@@ -193,6 +194,27 @@ def delete_entry(
     db.delete(entry)
     db.commit()
     return {"message": "已删除"}
+
+
+# ---- Comment feedback (like / dislike) ----
+
+@router.post("/entries/{entry_id}/comment-feedback")
+def set_comment_feedback(
+    entry_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    _: bool = Depends(_verify_diary_password),
+):
+    """Set feedback on an AI comment: 'liked', 'disliked', or null to clear."""
+    entry = db.query(DiaryEntry).filter(DiaryEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="手记不存在")
+    feedback = body.get("feedback")  # "liked" / "disliked" / null
+    if feedback not in ("liked", "disliked", None):
+        raise HTTPException(status_code=400, detail="feedback must be 'liked', 'disliked', or null")
+    entry.comment_feedback = feedback
+    db.commit()
+    return {"ok": True, "comment_feedback": feedback}
 
 
 # ---- Tag CRUD ----
@@ -365,24 +387,39 @@ async def _diary_auto_tag(content: str) -> list[str]:
 # ---- Daily comment job ----
 
 async def run_daily_diary_comment():
-    """Run by scheduler. Generates AI comments for today's uncommented entries."""
+    """Run by scheduler. Generates AI comments for uncommented entries and re-generates disliked ones."""
     db = SessionLocal()
     try:
         today = date.today().isoformat()
-        entries = db.query(DiaryEntry).filter(
+
+        # 1. Entries without any comment yet (today)
+        new_entries = db.query(DiaryEntry).filter(
             DiaryEntry.diary_date == today,
             DiaryEntry.llm_comment.is_(None),
         ).all()
 
-        if not entries:
-            logger.info("Diary comment: no uncommented entries for today")
+        # 2. Entries whose comment was disliked (any date) — regenerate
+        disliked_entries = db.query(DiaryEntry).filter(
+            DiaryEntry.comment_feedback == "disliked",
+        ).all()
+
+        all_entries = {e.id: e for e in new_entries}
+        for e in disliked_entries:
+            all_entries[e.id] = e
+
+        if not all_entries:
+            logger.info("Diary comment: nothing to process")
             return
 
-        logger.info(f"Diary comment: processing {len(entries)} entries")
-        for entry in entries:
-            comment = await _generate_diary_comment(entry.content)
+        # Collect liked examples as few-shot samples
+        liked_examples = _get_liked_examples(db)
+
+        logger.info(f"Diary comment: processing {len(all_entries)} entries ({len(new_entries)} new, {len(disliked_entries)} disliked)")
+        for entry in all_entries.values():
+            comment = await _generate_diary_comment(entry.content, liked_examples)
             if comment:
                 entry.llm_comment = comment
+                entry.comment_feedback = None  # reset feedback after regeneration
                 entry.commented_at = datetime.utcnow()
                 db.commit()
                 logger.info(f"Diary comment: generated for entry {entry.id}")
@@ -392,21 +429,74 @@ async def run_daily_diary_comment():
         db.close()
 
 
-async def _generate_diary_comment(content: str) -> str | None:
-    """Generate a warm, supportive AI comment for a diary entry."""
-    prompt = f"""你是一位温暖、有洞察力的朋友。请阅读以下手记，然后针对其中提到的问题、困惑、想法或情绪，给出简短的评论和建议。
+def _get_liked_examples(db, limit: int = 3) -> list[dict]:
+    """Fetch recent liked comment examples to use as few-shot prompt."""
+    liked = (
+        db.query(DiaryEntry)
+        .filter(DiaryEntry.comment_feedback == "liked", DiaryEntry.llm_comment.isnot(None))
+        .order_by(DiaryEntry.commented_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [{"content": e.content[:300], "comment": e.llm_comment} for e in liked]
+
+
+DEFAULT_DIARY_COMMENT_PROMPT = """你是一位阅历丰富、思维敏锐的朋友。请阅读以下手记，给出你的真实想法。
 
 要求：
-- 如果手记中有问题或困惑，提供有建设性的建议
-- 如果手记中有想法或计划，给予鼓励和补充思考
-- 如果手记中流露出情绪，提供适当的情绪支持
-- 语气温暖、真诚，像朋友交流一样自然
-- 控制在100-200字以内
+- 说人话，不要鸡汤、不要空洞的鼓励，不要"加油"之类的废话
+- 如果手记提到了具体问题或困惑，直接给出你的分析和可操作的建议
+- 如果手记记录了一个想法，指出你觉得有意思的点，也可以指出潜在的盲区
+- 如果手记是情绪表达，简短回应即可，不要过度共情或说教
+- 有自己的观点，可以提出不同看法，但要言之有理
+- 控制在100-200字以内，言简意赅"""
+
+
+def _get_diary_comment_instructions() -> str:
+    from app.config import get_instruction
+    return get_instruction("diary_comment", DEFAULT_DIARY_COMMENT_PROMPT)
+
+
+@router.get("/comment-prompt")
+def get_comment_prompt(db: Session = Depends(get_db), _: bool = Depends(_verify_diary_password)):
+    """Get the current diary comment prompt template + liked/disliked stats."""
+    liked_examples = _get_liked_examples(db)
+    disliked_count = db.query(DiaryEntry).filter(DiaryEntry.comment_feedback == "disliked").count()
+    return {
+        "instructions": _get_diary_comment_instructions(),
+        "default": DEFAULT_DIARY_COMMENT_PROMPT,
+        "liked_examples": liked_examples,
+        "disliked_count": disliked_count,
+    }
+
+
+@router.put("/comment-prompt")
+def save_comment_prompt(body: dict, _: bool = Depends(_verify_diary_password)):
+    """Save custom diary comment prompt template."""
+    from app.config import save_instruction
+    instructions = body.get("instructions", "").strip()
+    save_instruction("diary_comment", instructions)
+    return {"ok": True}
+
+
+async def _generate_diary_comment(content: str, liked_examples: list[dict] | None = None) -> str | None:
+    """Generate a thoughtful, substantive AI comment for a diary entry."""
+
+    base_prompt = _get_diary_comment_instructions()
+
+    # Build few-shot section from liked examples
+    examples_section = ""
+    if liked_examples:
+        examples_section = "\n\n以下是几个被认可的优秀评论范例，请参考这种风格和深度：\n"
+        for i, ex in enumerate(liked_examples, 1):
+            examples_section += f"\n范例{i}：\n手记：{ex['content']}\n评论：{ex['comment']}\n"
+
+    prompt = f"""{base_prompt}{examples_section}
 
 手记内容：
 {content[:1000]}
 
-请直接给出你的评论，不要使用任何格式标记："""
+请直接给出你的评论："""
 
     return await _call_local_only(prompt, "diary-comment")
 

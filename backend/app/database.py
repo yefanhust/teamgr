@@ -91,6 +91,8 @@ def _migrate_schema():
         ("todo_analyses", "model_name", "TEXT"),
         ("idea_insights", "model_name", "TEXT DEFAULT ''"),
         ("entry_logs", "model_name", "TEXT DEFAULT ''"),
+        ("diary_entries", "comment_feedback", "TEXT"),
+        ("teams", "parent_id", "INTEGER REFERENCES teams(id) ON DELETE SET NULL"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in migrations:

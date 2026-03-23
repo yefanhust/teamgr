@@ -23,9 +23,11 @@ class Team(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(200), nullable=False)
+    parent_id = Column(Integer, ForeignKey("teams.id", ondelete="SET NULL"), nullable=True)
     position_x = Column(Float, default=100.0)
     position_y = Column(Float, default=100.0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    parent = relationship("Team", remote_side="Team.id", foreign_keys=[parent_id])
     members = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")

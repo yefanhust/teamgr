@@ -42,6 +42,8 @@ export const useDiaryStore = defineStore('diary', () => {
       currentPage.value = res.data.page
       totalPages.value = res.data.total_pages
       total.value = res.data.total
+    } catch (e) {
+      console.error('fetchEntries error:', e)
     } finally {
       loading.value = false
     }
@@ -88,6 +90,13 @@ export const useDiaryStore = defineStore('diary', () => {
     await fetchTags()
   }
 
+  async function setCommentFeedback(entryId, feedback) {
+    await api.post(`/api/diary/entries/${entryId}/comment-feedback`, { feedback }, { headers: _headers() })
+    // Update local entry
+    const entry = entries.value.find(e => e.id === entryId)
+    if (entry) entry.comment_feedback = feedback
+  }
+
   function logout() {
     verified.value = false
     password.value = ''
@@ -109,6 +118,6 @@ export const useDiaryStore = defineStore('diary', () => {
     selectedTagId, loading,
     verifyPassword, fetchEntries, createEntry, updateEntry, deleteEntry,
     fetchTags, createTag, updateTag, deleteTag,
-    logout, refreshAfterAutoTag,
+    setCommentFeedback, logout, refreshAfterAutoTag,
   }
 })
