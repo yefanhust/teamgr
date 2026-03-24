@@ -823,3 +823,70 @@ async def answer_talent_query(
     except Exception as e:
         logger.error(f"LLM chat-answer failed: {e}")
         return {"answer": "回答生成失败，请重试"}
+
+
+DEFAULT_INTERVIEW_EVALUATION_PROMPT = """\
+你是一个面试官，需要根据面试实录撰写一段简短的面试评价。
+
+## 候选人：{talent_name}
+{talent_summary_line}
+
+## 面试结果：{result}（{rating} - {rating_label}）
+
+## 面试实录
+{records_text}
+
+## 写作要求
+1. 像真人面试官写的，不要像AI生成的。语气谨慎、中肯、克制，不夸张不堆砌
+2. 即使是推荐，也不要过度夸赞，客观陈述事实和判断即可
+3. 即使是否决，也不要刻薄，就事论事指出不足
+4. 全文控制在150-300字，一到两段，不要分点列举，不要用标题/加粗等格式
+5. 先简述候选人背景和核心经历，再总结面试中的表现和能力判断，最后一句给出结论
+6. 结论必须与面试结果（{result}）和评级（{rating}）一致
+7. 不要输出候选人姓名
+
+## 风格参考
+
+通过的例子：
+「候选人2019年校招加入百度，持续7年深耕芯片推理业务适配；从第一代昆仑芯开始参与，主导文心一言在昆仑芯2代芯片上的落地，完成算子、显存、精度优化；后续完成3代芯片适配，支持continuous batching、paged attention、MTP、量化等特性。参与百度搜索合作项目，基于BERT模型开发attention标准算子，完成softmax、layernorm等reduce算子开发，支撑早期模型落地；在二代芯片LLM后处理中，深入分析固定随机性问题，发现因分块逻辑导致浮点累加顺序不一致，提出并验证per query/token量化策略以降低量化误差，实现数学类场景下逐token结果对齐。总体来说，候选人完整参与过昆仑芯芯片从无到有及演化的完整迭代，在推理优化方面对并行策略、算子等方面都具备较深入的优化经验，对传统NLP及大模型均有优化经验。编程考察技能熟练。候选人整体风格沉稳，符合团队需求，建议推进。」
+
+否决的例子：
+「候选人毕业后加入创业团队做社交视频特效app。后加入百度从事paddle框架，于23年6月转入昆仑芯从事推理框架和性能优化，现在Shopee做搜广推训练优化。候选人的AI infra经验集中在百度和昆仑芯，主要偏向NPU适配、训练稳定性、精度对齐和性能调优，缺少计算密集算子开发经验，优化工作缺少技术深度，在精度问题分析中，较难给出深度剖析，对硬件体系结构理解有限。综上认为候选人暂不符合团队需求。」
+
+请直接输出面试评价正文："""
+
+
+async def generate_interview_evaluation(
+    interview_records: list[str],
+    result: str,
+    rating: str,
+    rating_label: str,
+    talent_name: str = "",
+    talent_summary: str = "",
+) -> str:
+    """Generate a professional interview evaluation based on interview records.
+
+    Returns: Evaluation text (Markdown)
+    """
+    records_text = "\n\n---\n\n".join(
+        f"【记录 {i+1}】\n{r}" for i, r in enumerate(interview_records)
+    )
+
+    template = get_instruction("interview_evaluation", DEFAULT_INTERVIEW_EVALUATION_PROMPT)
+    prompt = template.format(
+        talent_name=talent_name or "未知",
+        talent_summary_line=f"- 简介：{talent_summary}" if talent_summary else "",
+        result=result,
+        rating=rating,
+        rating_label=rating_label,
+        records_text=records_text,
+    )
+
+    try:
+        text = await _call_model_text(prompt, call_type="interview-evaluation")
+        if text is None:
+            return "模型未配置，无法生成面试评价"
+        return text.strip()
+    except Exception as e:
+        logger.error(f"LLM interview evaluation failed: {e}")
+        raise

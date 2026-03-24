@@ -161,25 +161,57 @@
               <div
                 v-for="callType in group.types"
                 :key="callType"
-                class="bg-white rounded-xl shadow-sm p-3 flex items-center justify-between gap-3"
+                class="bg-white rounded-xl shadow-sm overflow-hidden"
               >
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm font-medium text-gray-800">{{ callTypes[callType] }}</div>
-                  <div class="text-xs text-gray-400">{{ callType }}</div>
+                <div class="p-3 flex items-center justify-between gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                      {{ callTypes[callType] }}
+                      <van-icon
+                        v-if="callTypePrompts[callType]"
+                        name="edit"
+                        size="14"
+                        class="text-gray-400 cursor-pointer hover:text-blue-500"
+                        @click="toggleCallTypePrompt(callType)"
+                      />
+                    </div>
+                    <div class="text-xs text-gray-400">{{ callType }}</div>
+                  </div>
+                  <select
+                    :value="defaults[callType] || ''"
+                    @change="onModelChange(callType, $event.target.value)"
+                    class="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 text-gray-700 min-w-[140px] max-w-[200px]"
+                  >
+                    <option value="">Global Default</option>
+                    <optgroup v-if="networkModels.length" label="Cloud">
+                      <option v-for="m in networkModels" :key="m.name" :value="m.name">{{ m.name }}</option>
+                    </optgroup>
+                    <optgroup v-if="localModels.length" label="Local">
+                      <option v-for="m in localModels" :key="m.name" :value="m.name">{{ m.name }}</option>
+                    </optgroup>
+                  </select>
                 </div>
-                <select
-                  :value="defaults[callType] || ''"
-                  @change="onModelChange(callType, $event.target.value)"
-                  class="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 text-gray-700 min-w-[140px] max-w-[200px]"
-                >
-                  <option value="">Global Default</option>
-                  <optgroup v-if="networkModels.length" label="Cloud">
-                    <option v-for="m in networkModels" :key="m.name" :value="m.name">{{ m.name }}</option>
-                  </optgroup>
-                  <optgroup v-if="localModels.length" label="Local">
-                    <option v-for="m in localModels" :key="m.name" :value="m.name">{{ m.name }}</option>
-                  </optgroup>
-                </select>
+                <!-- Expandable prompt editor for call types that support it -->
+                <div v-if="callTypePrompts[callType] && expandedCallTypePrompts[callType]" class="border-t border-gray-100 px-3 pb-3 pt-2">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs text-gray-500">提示词模板</span>
+                    <span
+                      v-if="callTypePrompts[callType].prompt !== callTypePrompts[callType].default"
+                      class="text-xs text-orange-500 cursor-pointer hover:text-orange-600"
+                      @click="callTypePrompts[callType].prompt = callTypePrompts[callType].default"
+                    >恢复默认</span>
+                  </div>
+                  <textarea
+                    v-model="callTypePrompts[callType].prompt"
+                    class="w-full text-xs text-gray-700 border border-gray-200 rounded-lg p-2 bg-gray-50 resize-y leading-relaxed"
+                    rows="8"
+                    placeholder="输入提示词模板..."
+                  ></textarea>
+                  <p class="text-xs text-gray-400 mt-1">{{ callTypePromptHints[callType] || '' }}</p>
+                  <div class="mt-2 flex justify-end">
+                    <van-button type="primary" size="small" :loading="savingCallTypePrompt === callType" @click="saveCallTypePrompt(callType)">Save</van-button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -189,6 +221,8 @@
           </div>
           </div>
         </div>
+
+
       </template>
     </div>
 
@@ -230,7 +264,7 @@ const PAGE_GROUPS = [
   {
     page: '人才',
     color: '#3B82F6',
-    types: ['text-entry', 'pdf-parse', 'image-parse', 'semantic-search', 'chat-analyze', 'chat-answer', 'organize-tags'],
+    types: ['text-entry', 'pdf-parse', 'image-parse', 'semantic-search', 'chat-analyze', 'chat-answer', 'organize-tags', 'interview-evaluation'],
   },
   {
     page: '龙图阁',
@@ -257,6 +291,17 @@ const showTimePicker = ref(false)
 const timePickerHour = ref(8)
 const timePickerMinute = ref(0)
 const timePickerKey = ref(null)
+
+// Call-type prompt editing (inline in model-defaults)
+const callTypePrompts = ref({})  // { 'interview-evaluation': { prompt, default } }
+const expandedCallTypePrompts = ref({})
+const savingCallTypePrompt = ref(null)  // currently saving call type key
+const CALL_TYPE_PROMPT_ENDPOINTS = {
+  'interview-evaluation': '/api/entry/interview-evaluation/prompt',
+}
+const callTypePromptHints = {
+  'interview-evaluation': '可用占位符：{talent_name} {talent_summary_line} {result} {rating} {rating_label} {records_text}',
+}
 
 const networkModels = computed(() => availableModels.value.filter(m => m.location === 'network'))
 const localModels = computed(() => availableModels.value.filter(m => m.location === 'local'))
@@ -320,11 +365,34 @@ function resetPrompt(key) {
   }
 }
 
+function toggleCallTypePrompt(callType) {
+  expandedCallTypePrompts.value[callType] = !expandedCallTypePrompts.value[callType]
+}
+
+async function saveCallTypePrompt(callType) {
+  const endpoint = CALL_TYPE_PROMPT_ENDPOINTS[callType]
+  if (!endpoint) return
+  savingCallTypePrompt.value = callType
+  try {
+    await api.put(endpoint, { instructions: callTypePrompts.value[callType].prompt })
+    showToast('Saved')
+  } catch (e) {
+    showToast('Save failed')
+  } finally {
+    savingCallTypePrompt.value = null
+  }
+}
+
 onMounted(async () => {
   try {
-    const [modelRes, schedulerRes] = await Promise.all([
+    // Load call-type prompt data in parallel
+    const promptRequests = Object.entries(CALL_TYPE_PROMPT_ENDPOINTS).map(
+      ([key, url]) => api.get(url).then(res => [key, res.data]).catch(() => [key, null])
+    )
+    const [modelRes, schedulerRes, ...promptResults] = await Promise.all([
       api.get('/api/settings/model-defaults'),
       api.get('/api/settings/schedulers'),
+      ...promptRequests,
     ])
     callTypes.value = modelRes.data.call_types
     defaults.value = { ...modelRes.data.defaults }
@@ -334,6 +402,15 @@ onMounted(async () => {
     schedulerDescriptions.value = schedulerRes.data.scheduler_descriptions || {}
     schedulers.value = JSON.parse(JSON.stringify(schedulerRes.data.schedulers || {}))
     schedulerInstructions.value = JSON.parse(JSON.stringify(schedulerRes.data.instructions || {}))
+    // Populate call-type prompts
+    for (const [key, data] of promptResults) {
+      if (data) {
+        callTypePrompts.value[key] = {
+          prompt: data.instructions || '',
+          default: data.default || '',
+        }
+      }
+    }
   } catch (e) {
     showToast('Failed to load settings')
   } finally {

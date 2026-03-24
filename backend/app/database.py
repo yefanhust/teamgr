@@ -58,6 +58,7 @@ def init_db():
     _seed_default_dimensions()
     _migrate_personal_info_birthday()
     _migrate_add_career_history_dimension()
+    _migrate_add_interview_feedback_dimension()
     _seed_default_preset_questions()
 
 
@@ -307,6 +308,73 @@ def _migrate_add_career_history_dimension():
 
         db.commit()
         logger.info("Migration: added career_history dimension")
+    finally:
+        db.close()
+
+
+def _migrate_add_interview_feedback_dimension():
+    """Add interview_feedback dimension for storing interview evaluations."""
+    import json as _json
+    from app.models.talent import CardDimension, Talent
+    db = SessionLocal()
+    try:
+        existing = db.query(CardDimension).filter(CardDimension.key == "interview_feedback").first()
+        if existing:
+            # Fix schema if it was set to the template object instead of empty array
+            if existing.schema != '[]':
+                existing.schema = '[]'
+            # Clean up empty placeholder entries in existing talent card_data
+            from sqlalchemy import text
+            talents = db.query(Talent).all()
+            changed = False
+            for t in talents:
+                cd = t.card_data or {}
+                fb = cd.get("interview_feedback")
+                if isinstance(fb, list) and fb:
+                    cleaned = [e for e in fb if isinstance(e, dict) and e.get("evaluation")]
+                    if len(cleaned) != len(fb):
+                        cd["interview_feedback"] = cleaned
+                        db.execute(
+                            text("UPDATE talents SET card_data = :data WHERE id = :id"),
+                            {"data": _json.dumps(cd, ensure_ascii=False), "id": t.id},
+                        )
+                        changed = True
+            if changed:
+                db.commit()
+                logger.info("Migration: cleaned up empty interview_feedback entries")
+            return
+
+        # Place before notes and one_liner (sort_order 8, push others down)
+        others = db.query(CardDimension).filter(
+            CardDimension.sort_order >= 8,
+        ).order_by(CardDimension.sort_order).all()
+        for d in others:
+            d.sort_order = d.sort_order + 1
+
+        dim = CardDimension(
+            key="interview_feedback",
+            label="面试评价",
+            schema='[]',
+            is_default=True,
+            sort_order=8,
+        )
+        db.add(dim)
+        db.flush()
+
+        # Add empty interview_feedback to all existing talent cards
+        from sqlalchemy import text
+        talents = db.query(Talent).all()
+        for t in talents:
+            cd = t.card_data or {}
+            if "interview_feedback" not in cd:
+                cd["interview_feedback"] = []
+                db.execute(
+                    text("UPDATE talents SET card_data = :data WHERE id = :id"),
+                    {"data": _json.dumps(cd, ensure_ascii=False), "id": t.id},
+                )
+
+        db.commit()
+        logger.info("Migration: added interview_feedback dimension")
     finally:
         db.close()
 

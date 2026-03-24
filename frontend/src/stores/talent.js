@@ -117,6 +117,20 @@ export const useTalentStore = defineStore('talent', () => {
     tags.value = tags.value.filter(t => t.id !== tagId)
   }
 
+  async function deleteInterviewFeedback(talentId, index) {
+    await api.delete(`/api/entry/interview-evaluation/${talentId}/${index}`)
+  }
+
+  async function generateInterviewEvaluation(talentId, entryLogIds, result, rating) {
+    const res = await api.post('/api/entry/interview-evaluation', {
+      talent_id: talentId,
+      entry_log_ids: entryLogIds,
+      result,
+      rating,
+    }, { timeout: 120000 })
+    return res.data
+  }
+
   return {
     talents,
     tags,
@@ -140,5 +154,7 @@ export const useTalentStore = defineStore('talent', () => {
     createTag,
     updateTag,
     deleteTag,
+    deleteInterviewFeedback,
+    generateInterviewEvaluation,
   }
 })

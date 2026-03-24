@@ -107,8 +107,34 @@
           {{ dim.label }}
         </h3>
 
-        <div v-if="getCardValue(dim.key)" class="text-sm text-gray-600">
-          <!-- Array of objects (e.g. career_history, interview_feedback, children) -->
+        <!-- Custom rendering for interview_feedback -->
+        <div v-if="dim.key === 'interview_feedback'" class="text-sm text-gray-600">
+          <div v-if="interviewFeedbacks.length === 0" class="text-gray-400">暂无面试评价</div>
+          <div v-else class="space-y-4">
+            <div
+              v-for="(fb, idx) in interviewFeedbacks"
+              :key="idx"
+              class="rounded-lg border p-4"
+              :class="fb.result === '通过' ? 'border-green-200 bg-green-50/50' : 'border-red-200 bg-red-50/50'"
+            >
+              <div class="flex items-center gap-2 mb-2 flex-wrap">
+                <van-tag :type="fb.result === '通过' ? 'success' : 'danger'" size="medium">{{ fb.result }}</van-tag>
+                <van-tag
+                  size="medium"
+                  :color="['S','A+','A'].includes(fb.rating) ? '#059669' : '#dc2626'"
+                  plain
+                >{{ fb.rating }} - {{ fb.rating_label }}</van-tag>
+                <span class="text-xs text-gray-400 ml-auto">{{ fb.created_at }}</span>
+                <van-icon name="description" size="14" class="text-gray-400 cursor-pointer hover:text-blue-500" @click="copyEvaluation(fb.evaluation)" />
+                <van-icon name="delete-o" size="14" class="text-gray-400 cursor-pointer hover:text-red-500" @click="confirmDeleteFeedback(fb._rawIndex)" />
+              </div>
+              <div class="whitespace-pre-line text-gray-700 text-sm leading-relaxed">{{ fb.evaluation }}</div>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="getCardValue(dim.key)" class="text-sm text-gray-600">
+          <!-- Array of objects (e.g. career_history, children) -->
           <template v-if="Array.isArray(getCardValue(dim.key))">
             <div v-if="getCardValue(dim.key).length === 0" class="text-gray-400">暂无数据</div>
             <template v-else-if="typeof getCardValue(dim.key)[0] === 'object'">
@@ -194,18 +220,53 @@
 
       <!-- Entry History -->
       <div class="bg-white rounded-xl shadow-sm p-5">
-        <h3 class="text-base font-semibold text-gray-700 mb-3 flex items-center">
-          <span class="w-1 h-4 bg-green-500 rounded-full mr-2 inline-block"></span>
-          信息录入历史
+        <h3 class="text-base font-semibold text-gray-700 mb-3 flex items-center justify-between">
+          <span class="flex items-center">
+            <span class="w-1 h-4 bg-green-500 rounded-full mr-2 inline-block"></span>
+            信息录入历史
+          </span>
+          <van-button
+            v-if="!selectMode && entryLogs.length > 0"
+            size="small"
+            plain
+            type="primary"
+            icon="list-switch"
+            @click="enterSelectMode"
+          >选择面试实录</van-button>
+          <van-button
+            v-if="selectMode"
+            size="small"
+            plain
+            @click="exitSelectMode"
+          >取消选择</van-button>
         </h3>
 
         <div v-if="entryLogs.length === 0" class="text-sm text-gray-400">
           暂无录入记录
         </div>
-        <div v-else class="space-y-3">
-          <div v-for="log in entryLogs" :key="log.id" class="border-l-2 border-gray-200 pl-3 py-1">
+        <div v-else class="space-y-3" ref="entryLogsContainer" :class="selectMode ? 'select-none' : ''">
+          <div
+            v-for="log in entryLogs"
+            :key="log.id"
+            :data-log-id="log.id"
+            class="pl-3 py-1 rounded-lg transition-all duration-150"
+            :class="[
+              selectedLogIds.has(log.id) ? 'border-l-4 border-blue-500 bg-blue-50/50' : 'border-l-2 border-gray-200',
+              selectMode ? 'cursor-pointer' : '',
+            ]"
+            @pointerdown="onLogPointerDown($event, log.id)"
+            @pointerenter="onLogPointerEnter(log.id)"
+          >
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center gap-2 text-xs text-gray-400 flex-wrap">
+                <van-checkbox
+                  v-if="selectMode"
+                  :model-value="selectedLogIds.has(log.id)"
+                  @update:model-value="toggleLogSelection(log.id)"
+                  shape="square"
+                  icon-size="16px"
+                  @click.stop
+                />
                 <van-tag size="small" :type="log.source === 'pdf' || log.source === 'docx' ? 'warning' : log.source === 'image' ? 'success' : 'primary'">
                   {{ log.source === 'pdf' ? 'PDF' : log.source === 'docx' ? 'Word' : log.source === 'image' ? '图片' : '手动' }}
                 </van-tag>
@@ -216,6 +277,7 @@
                 {{ formatDate(log.created_at) }}
               </div>
               <van-icon
+                v-if="!selectMode"
                 name="delete-o"
                 size="16"
                 color="#ee0a24"
@@ -226,10 +288,10 @@
             <p class="text-sm text-gray-600 whitespace-pre-line">{{ expandedLogs.has(log.id) ? log.content : log.content.slice(0, 200) }}<span
               v-if="log.content.length > 200"
               class="text-blue-500 cursor-pointer ml-1"
-              @click="toggleLogExpand(log.id)"
+              @click.stop="toggleLogExpand(log.id)"
             >{{ expandedLogs.has(log.id) ? '收起' : '...展开' }}</span></p>
             <!-- Parsed content summary for PDF/Word/image entries -->
-            <template v-if="log.llm_response && log.status === 'done' && (log.source === 'pdf' || log.source === 'docx' || log.source === 'image')">
+            <template v-if="!selectMode && log.llm_response && log.status === 'done' && (log.source === 'pdf' || log.source === 'docx' || log.source === 'image')">
               <div class="mt-2">
                 <span
                   class="text-xs text-blue-600 cursor-pointer hover:underline"
@@ -270,7 +332,7 @@
               </div>
             </template>
             <!-- Failed entry: show error -->
-            <template v-if="log.llm_response && log.status === 'failed'">
+            <template v-if="!selectMode && log.llm_response && log.status === 'failed'">
               <div class="mt-2 bg-red-50 border border-red-200 rounded-lg p-3">
                 <pre class="text-xs text-red-700 whitespace-pre-wrap break-words">{{ formatLlmResponse(log.llm_response) }}</pre>
               </div>
@@ -279,8 +341,22 @@
         </div>
       </div>
 
+      <!-- Floating Selection Toolbar -->
+      <div
+        v-if="selectMode && selectedLogIds.size > 0"
+        class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-30 px-4 py-3"
+      >
+        <div class="max-w-3xl mx-auto flex items-center justify-between">
+          <span class="text-sm text-gray-600">已选 <strong class="text-blue-600">{{ selectedLogIds.size }}</strong> 条</span>
+          <div class="flex gap-2">
+            <van-button size="small" plain @click="exitSelectMode">取消</van-button>
+            <van-button size="small" type="primary" @click="showEvalDialog = true">生成面试评价</van-button>
+          </div>
+        </div>
+      </div>
+
       <!-- Quick Entry Button -->
-      <div class="pb-8">
+      <div class="pb-8" :class="selectMode && selectedLogIds.size > 0 ? 'mb-16' : ''">
         <van-button
           type="primary"
           block
@@ -322,6 +398,82 @@
       show-cancel-button
       @confirm="handleRemoveTag"
     />
+
+    <!-- Delete Feedback Confirm -->
+    <van-dialog
+      v-model:show="showDeleteFeedbackConfirm"
+      title="删除评价"
+      message="确定删除这条面试评价？"
+      show-cancel-button
+      @confirm="handleDeleteFeedback"
+    />
+
+    <!-- Interview Evaluation Dialog -->
+    <van-popup
+      v-model:show="showEvalDialog"
+      position="bottom"
+      round
+      closeable
+      @close="onEvalDialogClose"
+    >
+      <div class="p-5">
+        <h3 class="text-base font-bold text-gray-800 mb-4">生成面试评价</h3>
+
+        <div class="mb-4">
+          <p class="text-sm text-gray-500 mb-2">已选择 <strong>{{ selectedLogIds.size }}</strong> 条面试实录</p>
+        </div>
+
+        <!-- Interview Result -->
+        <div class="mb-4">
+          <label class="text-sm font-medium text-gray-600 mb-2 block">面试结果</label>
+          <div class="flex gap-3">
+            <div
+              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
+              :class="evalForm.result === '通过' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
+              @click="evalForm.result = '通过'"
+            >通过</div>
+            <div
+              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
+              :class="evalForm.result === '否决' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
+              @click="evalForm.result = '否决'"
+            >否决</div>
+          </div>
+        </div>
+
+        <!-- Rating -->
+        <div class="mb-5">
+          <label class="text-sm font-medium text-gray-600 mb-2 block">评级</label>
+          <div class="space-y-2">
+            <div
+              v-for="opt in ratingOptions"
+              :key="opt.value"
+              class="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-all"
+              :class="evalForm.rating === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'"
+              @click="evalForm.rating = opt.value"
+            >
+              <div
+                class="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                :class="evalForm.rating === opt.value ? 'border-blue-500' : 'border-gray-300'"
+              >
+                <div v-if="evalForm.rating === opt.value" class="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
+              </div>
+              <span class="font-medium text-sm" :class="opt.negative ? 'text-red-600' : 'text-gray-800'">{{ opt.value }}</span>
+              <span class="text-xs text-gray-500">{{ opt.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <van-button
+          type="primary"
+          block
+          round
+          :loading="evalGenerating"
+          loading-text="提交中..."
+          :disabled="!evalForm.result || !evalForm.rating"
+          @click="doGenerateEvaluation"
+        >开始生成</van-button>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -345,6 +497,8 @@ const showActions = ref(false)
 const showDeleteConfirm = ref(false)
 const showDeleteLogConfirm = ref(false)
 const deleteLogId = ref(null)
+const showDeleteFeedbackConfirm = ref(false)
+const deleteFeedbackIdx = ref(null)
 const updateAvailable = ref(false)
 const editing = ref(null) // { dimKey, path: [], isArray: false }
 const editValue = ref('')
@@ -353,6 +507,24 @@ const editingTagId = ref(null)
 const editingTagName = ref('')
 const tagEditInput = ref(null)
 const showRemoveTagConfirm = ref(false)
+
+// Interview evaluation state
+const selectMode = ref(false)
+const selectedLogIds = ref(new Set())
+const isDraggingSelect = ref(false)
+const showEvalDialog = ref(false)
+const evalGenerating = ref(false)
+const evalResultText = ref('')
+const evalForm = ref({ result: '', rating: '' })
+const entryLogsContainer = ref(null)
+
+const ratingOptions = [
+  { value: 'S', label: '强烈推荐', negative: false },
+  { value: 'A+', label: '非常推荐', negative: false },
+  { value: 'A', label: '推荐', negative: false },
+  { value: 'A-', label: '不推荐，放弃', negative: true },
+  { value: 'B', label: '强烈不推荐，放弃', negative: true },
+]
 const removingTag = ref(null)
 let pollTimer = null
 
@@ -361,6 +533,15 @@ const actions = [
   { text: '导出PDF', icon: 'down' },
   { text: '删除', icon: 'delete', color: '#ee0a24' },
 ]
+
+// Filter out empty placeholder entries from interview_feedback
+const interviewFeedbacks = computed(() => {
+  const raw = talent.value?.card_data?.interview_feedback
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((fb, i) => ({ ...fb, _rawIndex: i }))
+    .filter(fb => fb && fb.evaluation)
+})
 
 const hasUploaded = computed(() => {
   return entryLogs.value.some(l => l.status === 'uploaded')
@@ -709,6 +890,166 @@ async function handleRemoveTag() {
   }
 }
 
+// --- Interview evaluation: selection mode ---
+let dragStartIdx = -1
+let dragPreSelected = new Set()
+
+function enterSelectMode() {
+  selectMode.value = true
+  selectedLogIds.value = new Set()
+}
+
+function exitSelectMode() {
+  selectMode.value = false
+  selectedLogIds.value = new Set()
+  isDraggingSelect.value = false
+  dragStartIdx = -1
+}
+
+function toggleLogSelection(logId) {
+  const s = new Set(selectedLogIds.value)
+  if (s.has(logId)) s.delete(logId)
+  else s.add(logId)
+  selectedLogIds.value = s
+}
+
+function getLogIndexById(logId) {
+  return entryLogs.value.findIndex(l => l.id === logId)
+}
+
+function selectRange(fromIdx, toIdx) {
+  const lo = Math.min(fromIdx, toIdx)
+  const hi = Math.max(fromIdx, toIdx)
+  const s = new Set(dragPreSelected)
+  for (let i = lo; i <= hi; i++) {
+    s.add(entryLogs.value[i].id)
+  }
+  selectedLogIds.value = s
+}
+
+function onLogPointerDown(event, logId) {
+  if (!selectMode.value) return
+  if (event.target.closest('.van-checkbox')) return
+  event.preventDefault()
+  isDraggingSelect.value = true
+  dragStartIdx = getLogIndexById(logId)
+  // Remember what was already selected before this drag
+  dragPreSelected = new Set(selectedLogIds.value)
+  // Toggle the clicked item
+  if (dragPreSelected.has(logId)) dragPreSelected.delete(logId)
+  selectRange(dragStartIdx, dragStartIdx)
+
+  const onMove = (e) => {
+    if (!isDraggingSelect.value) return
+    // Find which log element the pointer is over
+    const el = document.elementFromPoint(e.clientX, e.clientY)
+    if (!el) return
+    const logEl = el.closest('[data-log-id]')
+    if (!logEl) return
+    const hoveredId = Number(logEl.dataset.logId)
+    const hoveredIdx = getLogIndexById(hoveredId)
+    if (hoveredIdx >= 0) {
+      selectRange(dragStartIdx, hoveredIdx)
+    }
+  }
+  const onUp = () => {
+    isDraggingSelect.value = false
+    dragStartIdx = -1
+    document.removeEventListener('pointermove', onMove)
+    document.removeEventListener('pointerup', onUp)
+  }
+  document.addEventListener('pointermove', onMove)
+  document.addEventListener('pointerup', onUp)
+}
+
+function onLogPointerEnter(logId) {
+  // No-op — drag handled via document pointermove
+}
+
+// --- Interview evaluation: generation (background) ---
+let evalPollTimer = null
+
+async function doGenerateEvaluation() {
+  if (!evalForm.value.result || !evalForm.value.rating) {
+    showToast('请选择面试结果和评级')
+    return
+  }
+  evalGenerating.value = true
+  try {
+    const res = await store.generateInterviewEvaluation(
+      talent.value.id,
+      Array.from(selectedLogIds.value),
+      evalForm.value.result,
+      evalForm.value.rating,
+    )
+    // Background task started — close dialog and poll
+    showEvalDialog.value = false
+    exitSelectMode()
+    showToast('面试评价生成中，可安全离开页面')
+    evalForm.value = { result: '', rating: '' }
+    // Start polling for completion
+    startEvalPolling(res.entry_id)
+  } catch (e) {
+    showToast('提交失败: ' + (e.response?.data?.detail || '未知错误'))
+  } finally {
+    evalGenerating.value = false
+  }
+}
+
+function startEvalPolling(entryId) {
+  if (evalPollTimer) clearInterval(evalPollTimer)
+  evalPollTimer = setInterval(async () => {
+    try {
+      const res = await api.get(`/api/entry/status/${entryId}`)
+      if (res.data.status === 'done') {
+        clearInterval(evalPollTimer)
+        evalPollTimer = null
+        showToast('面试评价已生成')
+        refreshData()
+      } else if (res.data.status === 'failed') {
+        clearInterval(evalPollTimer)
+        evalPollTimer = null
+        showToast('面试评价生成失败')
+      }
+    } catch {
+      // ignore poll errors
+    }
+  }, 3000)
+}
+
+function copyEvaluation(text) {
+  if (!text) return
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('已复制到剪贴板')
+  }).catch(() => {
+    showToast('复制失败')
+  })
+}
+
+function confirmDeleteFeedback(idx) {
+  deleteFeedbackIdx.value = idx
+  showDeleteFeedbackConfirm.value = true
+}
+
+async function handleDeleteFeedback() {
+  try {
+    await store.deleteInterviewFeedback(talent.value.id, deleteFeedbackIdx.value)
+    // Remove from local card_data
+    const feedbacks = talent.value.card_data?.interview_feedback
+    if (Array.isArray(feedbacks)) {
+      feedbacks.splice(deleteFeedbackIdx.value, 1)
+    }
+    showToast('已删除')
+  } catch (e) {
+    showToast('删除失败')
+  }
+}
+
+function onEvalDialogClose() {
+  evalResultText.value = ''
+  evalForm.value = { result: '', rating: '' }
+}
+
 function startPolling() {
   if (pollTimer) return
   pollTimer = setInterval(pollProcessingEntries, 3000)
@@ -744,6 +1085,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopPolling()
+  if (evalPollTimer) clearInterval(evalPollTimer)
 })
 </script>
 
@@ -830,5 +1172,9 @@ onUnmounted(() => {
   width: 80px;
   outline: none;
   background: #fff;
+}
+.select-none {
+  user-select: none;
+  -webkit-user-select: none;
 }
 </style>

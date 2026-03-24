@@ -7,10 +7,11 @@ import traceback
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from app.database import get_db, SessionLocal
 from app.models.talent import Talent, Tag, TalentTag, EntryLog, CardDimension
 from app.middleware.auth_middleware import require_auth
-from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content, get_current_model_name, DEFAULT_PDF_PARSE_INSTRUCTIONS, DEFAULT_IMAGE_PARSE_INSTRUCTIONS
+from app.services.llm_service import update_talent_card, parse_pdf_content, parse_image_content, get_current_model_name, generate_interview_evaluation, DEFAULT_PDF_PARSE_INSTRUCTIONS, DEFAULT_IMAGE_PARSE_INSTRUCTIONS, DEFAULT_INTERVIEW_EVALUATION_PROMPT
 from app.services.pdf_service import extract_text_from_pdf, extract_markdown_from_pdf, pdf_to_images, extract_text_from_docx, extract_markdown_from_docx
 from app.services.pinyin_service import get_pinyin_data
 
@@ -817,3 +818,180 @@ async def get_entry_logs(
         }
         for log in logs
     ]
+
+
+VALID_INTERVIEW_RESULTS = {"通过", "否决"}
+VALID_INTERVIEW_RATINGS = {"S", "A+", "A", "A-", "B"}
+RATING_LABELS = {
+    "S": "强烈推荐",
+    "A+": "非常推荐",
+    "A": "推荐",
+    "A-": "不推荐，放弃",
+    "B": "强烈不推荐，放弃",
+}
+
+
+class InterviewEvaluationRequest(BaseModel):
+    talent_id: int
+    entry_log_ids: list[int]
+    result: str
+    rating: str
+
+
+async def _process_interview_evaluation_bg(entry_log_id: int, talent_id: int,
+                                            interview_records: list[str],
+                                            result_str: str, rating: str,
+                                            rating_label: str, talent_name: str,
+                                            talent_summary: str):
+    """Background task: call LLM to generate interview evaluation and save to talent card."""
+    db = SessionLocal()
+    try:
+        evaluation = await generate_interview_evaluation(
+            interview_records=interview_records,
+            result=result_str,
+            rating=rating,
+            rating_label=rating_label,
+            talent_name=talent_name,
+            talent_summary=talent_summary,
+        )
+
+        talent = db.query(Talent).filter(Talent.id == talent_id).first()
+        if not talent:
+            return
+
+        # Save evaluation to talent card_data
+        from datetime import datetime
+        card_data = dict(talent.card_data or {})
+        feedback_list = list(card_data.get("interview_feedback", []))
+        feedback_list.append({
+            "result": result_str,
+            "rating": rating,
+            "rating_label": rating_label,
+            "evaluation": evaluation,
+            "created_at": datetime.now().strftime("%Y-%m-%d"),
+        })
+        card_data["interview_feedback"] = feedback_list
+        talent.card_data = card_data
+
+        # Update entry log
+        entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+        if entry_log:
+            entry_log.llm_response = json.dumps({"evaluation": evaluation}, ensure_ascii=False)
+            entry_log.status = "done"
+            entry_log.model_name = get_current_model_name()
+
+        db.commit()
+        logger.info(f"Interview evaluation done for talent {talent_id}, entry {entry_log_id}")
+
+    except Exception as e:
+        logger.error(f"Background interview evaluation failed for entry {entry_log_id}: {e}\n{traceback.format_exc()}")
+        try:
+            entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+            if entry_log:
+                entry_log.status = "failed"
+                entry_log.llm_response = json.dumps({"error": str(e)}, ensure_ascii=False)
+            db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+@router.post("/interview-evaluation")
+async def generate_interview_evaluation_api(
+    body: InterviewEvaluationRequest,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Generate interview evaluation in background. Returns immediately with entry_id for polling."""
+    if body.result not in VALID_INTERVIEW_RESULTS:
+        raise HTTPException(status_code=400, detail=f"面试结果必须是: {', '.join(VALID_INTERVIEW_RESULTS)}")
+    if body.rating not in VALID_INTERVIEW_RATINGS:
+        raise HTTPException(status_code=400, detail=f"评级必须是: {', '.join(VALID_INTERVIEW_RATINGS)}")
+    if not body.entry_log_ids:
+        raise HTTPException(status_code=400, detail="请至少选择一条面试实录")
+
+    talent = db.query(Talent).filter(Talent.id == body.talent_id).first()
+    if not talent:
+        raise HTTPException(status_code=404, detail="人才不存在")
+
+    logs = db.query(EntryLog).filter(
+        EntryLog.id.in_(body.entry_log_ids),
+        EntryLog.talent_id == body.talent_id,
+    ).order_by(EntryLog.created_at.asc()).all()
+
+    if len(logs) != len(body.entry_log_ids):
+        raise HTTPException(status_code=400, detail="部分记录不存在或不属于该人才")
+
+    interview_records = [log.content for log in logs]
+    rating_label = RATING_LABELS.get(body.rating, body.rating)
+
+    # Create a tracking entry log
+    entry_log = EntryLog(
+        talent_id=talent.id,
+        content=f"[面试评价生成] {body.result} / {body.rating}({rating_label})",
+        source="interview-eval",
+        status="processing",
+    )
+    db.add(entry_log)
+    db.commit()
+    db.refresh(entry_log)
+
+    # Fire background task
+    asyncio.create_task(_process_interview_evaluation_bg(
+        entry_log_id=entry_log.id,
+        talent_id=talent.id,
+        interview_records=interview_records,
+        result_str=body.result,
+        rating=body.rating,
+        rating_label=rating_label,
+        talent_name=talent.name,
+        talent_summary=talent.summary or "",
+    ))
+
+    return {
+        "entry_id": entry_log.id,
+        "status": "processing",
+    }
+
+
+@router.delete("/interview-evaluation/{talent_id}/{index}")
+async def delete_interview_feedback(
+    talent_id: int,
+    index: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Delete a single interview feedback entry by index."""
+    talent = db.query(Talent).filter(Talent.id == talent_id).first()
+    if not talent:
+        raise HTTPException(status_code=404, detail="人才不存在")
+    card_data = talent.card_data or {}
+    feedback_list = list(card_data.get("interview_feedback", []))
+    if index < 0 or index >= len(feedback_list):
+        raise HTTPException(status_code=404, detail="该面试评价不存在")
+    feedback_list.pop(index)
+    card_data["interview_feedback"] = feedback_list
+    talent.card_data = card_data
+    flag_modified(talent, "card_data")
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/interview-evaluation/prompt")
+async def get_interview_evaluation_prompt(_=Depends(require_auth)):
+    """Get the interview evaluation prompt template."""
+    from app.config import get_instruction
+    return {
+        "instructions": get_instruction("interview_evaluation", DEFAULT_INTERVIEW_EVALUATION_PROMPT),
+        "default": DEFAULT_INTERVIEW_EVALUATION_PROMPT,
+    }
+
+
+@router.put("/interview-evaluation/prompt")
+async def save_interview_evaluation_prompt(body: dict, _=Depends(require_auth)):
+    """Save custom interview evaluation prompt template."""
+    from app.config import save_instruction
+    instructions = body.get("instructions", "").strip()
+    save_instruction("interview_evaluation", instructions)
+    return {"ok": True}
