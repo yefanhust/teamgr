@@ -1,16 +1,16 @@
 {
   "trusted": [
     {
-      "device_id": "6bcaaf2b-f73c-46b4-a458-d12089845660",
+      "device_id": "e65c273b-b683-4412-a58a-f40b57edba39",
       "device_name": "iPhone",
       "trusted_at": "2026-03-19T08:38:19.188757+00:00",
-      "last_used_at": "2026-03-24T01:00:01.250472+00:00"
+      "last_used_at": "2026-03-24T09:52:14.413148+00:00"
     },
     {
       "device_id": "62228e55-6848-404e-baab-a28d537df7b5",
       "device_name": "Mac",
       "trusted_at": "2026-03-19T10:42:34.344345+00:00",
-      "last_used_at": "2026-03-23T09:13:33.678703+00:00"
+      "last_used_at": "2026-03-24T09:31:00.643581+00:00"
     }
   ],
   "blacklisted": []

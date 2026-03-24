@@ -1932,6 +1932,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useTodosStore } from '../stores/todos'
 import { useProjectsStore } from '../stores/projects'
 import { showToast, showConfirmDialog } from 'vant'
@@ -1944,6 +1945,8 @@ import TopNavBar from '../components/TopNavBar.vue'
 
 const store = useTodosStore()
 const pmStore = useProjectsStore()
+const _route = useRoute()
+const _router = useRouter()
 
 // Tab state — restore from localStorage so refresh keeps the user on the same tab
 const activeTab = ref(parseInt(localStorage.getItem('todoActiveTab')) || 0)
@@ -2250,8 +2253,27 @@ onMounted(async () => {
     reqSelectedTagIds.value = new Set(reqLeafs.map(t => t.id))
     // Auto-check git commits for committed tasks without commit_id
     checkCommitsForAll()
+    // Open specific project info if navigated from project view
+    handlePmFocusQuery()
   } finally {
     loading.value = false
+  }
+})
+
+function handlePmFocusQuery() {
+  const pid = _route.query.pmFocus
+  if (pid) {
+    _router.replace({ query: { ..._route.query, pmFocus: undefined } })
+    openProjectInfo(parseInt(pid))
+  }
+}
+
+// Also watch for route query changes (handles case when TodoView is already mounted)
+watch(() => _route.query.pmFocus, (pid) => {
+  if (pid && !loading.value) {
+    _router.replace({ query: { ..._route.query, pmFocus: undefined } })
+    activeTab.value = 1
+    openProjectInfo(parseInt(pid))
   }
 })
 

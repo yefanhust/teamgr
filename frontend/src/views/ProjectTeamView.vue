@@ -13,99 +13,81 @@
         :key="team.id"
         class="team-section"
       >
-        <h3 class="team-section-title">
+        <h3
+          class="team-section-title"
+          @click="toggleCollapse(team.id)"
+        >
+          <van-icon
+            :name="isCollapsed(team.id) ? 'arrow' : 'arrow-down'"
+            size="14"
+            class="collapse-icon"
+          />
           <van-icon name="friends-o" size="16" />
           {{ team.name }}
+          <span class="member-count">{{ team.members.length }}人</span>
           <span v-if="team.projects.length === 0" class="no-project-hint">（无项目）</span>
+          <span v-else class="project-count">{{ team.projects.length }}个项目</span>
         </h3>
 
-        <div
-          class="team-section-body"
-          :ref="el => setSectionRef(team.id, el)"
-          @pointerdown.self="onMarqueeStart($event, team.id)"
-          @pointermove="onPointerMove"
-          @pointerup="onPointerUp"
-        >
-          <!-- Marquee Selection Rectangle -->
-          <div
-            v-if="marquee && marquee.teamId === team.id"
-            class="marquee-rect"
-            :style="marqueeStyle"
-          ></div>
-          <!-- SVG Connection Lines -->
-          <svg class="connections-svg">
-            <line
-              v-for="line in connectionLines[team.id] || []"
-              :key="line.key"
-              :x1="line.x1" :y1="line.y1"
-              :x2="line.x2" :y2="line.y2"
-              stroke="#94a3b8"
-              stroke-width="1.5"
-              stroke-dasharray="4 3"
-            />
-          </svg>
-
-          <!-- Projects Row -->
-          <div v-if="team.projects.length > 0" class="projects-row">
+        <div v-show="!isCollapsed(team.id)" class="team-canvas">
+          <!-- Hierarchical project trees -->
+          <div class="project-trees">
             <div
               v-for="project in team.projects"
               :key="project.id"
-              class="project-box"
-              :ref="el => setProjectRef(team.id, project.id, el)"
+              class="project-tree"
               :style="getOffsetStyle('p', team.id, project.id)"
-              @pointerdown.prevent="onItemPointerDown($event, team.id, 'p', project.id)"
-              @click.prevent
+              @pointerdown.prevent="onTreePointerDown($event, team.id, project.id)"
             >
-              <van-icon name="orders-o" size="14" color="#3b82f6" />
-              <span class="project-name">{{ project.name }}</span>
-              <van-tag :type="project.status === 'active' ? 'primary' : 'default'" size="mini">
-                {{ project.status === 'active' ? '进行中' : project.status === 'completed' ? '已完成' : '归档' }}
-              </van-tag>
+              <!-- Project node -->
+              <div class="project-node">
+                <van-icon name="orders-o" size="14" color="#3b82f6" />
+                <span class="project-node-name">{{ project.name }}</span>
+                <van-tag :type="project.status === 'active' ? 'primary' : 'default'" size="mini">
+                  {{ project.status === 'active' ? '进行中' : project.status === 'completed' ? '已完成' : '归档' }}
+                </van-tag>
+              </div>
+              <!-- Tree connector -->
+              <div v-if="projectMembers(team, project.id).length > 0" class="tree-connector">
+                <div class="tree-trunk"></div>
+                <div class="tree-branches">
+                  <div
+                    v-for="(member, mi) in projectMembers(team, project.id)"
+                    :key="member.talent_id"
+                    class="tree-branch"
+                  >
+                    <div class="branch-line"></div>
+                    <div class="member-leaf" :data-talent-id="member.talent_id">
+                      <div class="member-circle">
+                        <img v-if="member.avatar_url" :src="member.avatar_url" class="member-avatar" />
+                        <van-icon v-else name="contact" size="20" color="#9ca3af" />
+                        <span v-if="member.project_count > 1" class="project-badge">{{ member.project_count }}</span>
+                      </div>
+                      <span class="member-name">{{ member.name }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- Members Row -->
-          <div class="members-row">
-            <div
-              v-for="member in membersWithProjects(team)"
-              :key="member.talent_id"
-              class="member-circle-wrap"
-              :class="{ selected: isSelected(team.id, member.talent_id) }"
-              :ref="el => setMemberRef(team.id, member.talent_id, el)"
-              :style="getOffsetStyle('m', team.id, member.talent_id)"
-              @pointerdown.prevent="onItemPointerDown($event, team.id, 'm', member.talent_id)"
-              @click.prevent
-            >
-              <div class="member-circle">
-                <img v-if="member.avatar_url" :src="member.avatar_url" class="member-avatar" />
-                <van-icon v-else name="contact" size="24" color="#9ca3af" />
-                <span v-if="member.project_count > 1" class="project-badge">{{ member.project_count }}</span>
+          <!-- Unassigned members (no projects) -->
+          <div v-if="membersWithoutProjects(team).length > 0" class="idle-members">
+            <span class="idle-label-header">未分配项目</span>
+            <div class="idle-row">
+              <div
+                v-for="member in membersWithoutProjects(team)"
+                :key="'idle-' + member.talent_id"
+                class="member-leaf idle"
+                @click="goToTalent(member.talent_id)"
+              >
+                <div class="member-circle idle-circle">
+                  <img v-if="member.avatar_url" :src="member.avatar_url" class="member-avatar" />
+                  <van-icon v-else name="contact" size="20" color="#d1d5db" />
+                </div>
+                <span class="member-name idle-name">{{ member.name }}</span>
               </div>
-              <span class="member-label">{{ member.name }}</span>
             </div>
-
-            <div
-              v-for="member in membersWithoutProjects(team)"
-              :key="'idle-' + member.talent_id"
-              class="member-circle-wrap idle"
-              :class="{ selected: isSelected(team.id, member.talent_id) }"
-              :ref="el => setMemberRef(team.id, member.talent_id, el)"
-              :style="getOffsetStyle('m', team.id, member.talent_id)"
-              @pointerdown.prevent="onItemPointerDown($event, team.id, 'm', member.talent_id)"
-              @click.prevent
-            >
-              <div class="member-circle idle-circle">
-                <img v-if="member.avatar_url" :src="member.avatar_url" class="member-avatar" />
-                <van-icon v-else name="contact" size="24" color="#d1d5db" />
-              </div>
-              <span class="member-label idle-label">{{ member.name }}</span>
-            </div>
-          </div>
-
-          <!-- Selection hint -->
-          <div v-if="selectedInTeam(team.id) > 0" class="selection-hint">
-            已选 {{ selectedInTeam(team.id) }} 人，拖动任意选中成员可批量移动
-            <span class="clear-selection" @click="clearSelection(team.id)">清除</span>
           </div>
         </div>
       </div>
@@ -122,13 +104,23 @@ const router = useRouter()
 const store = useOrganizationStore()
 const loading = ref(true)
 
-// Element refs for SVG line computation
-const sectionRefs = ref({})
-const projectRefs = ref({})
-const memberRefs = ref({})
-const connectionLines = ref({})
+// Collapse state — persisted
+const COLLAPSE_KEY = 'teamgr_project_view_collapsed'
+const collapsedTeams = ref(new Set(JSON.parse(localStorage.getItem(COLLAPSE_KEY) || '[]')))
 
-// Drag offsets — persisted to localStorage
+function isCollapsed(teamId) {
+  return collapsedTeams.value.has(teamId)
+}
+
+function toggleCollapse(teamId) {
+  const s = new Set(collapsedTeams.value)
+  if (s.has(teamId)) s.delete(teamId)
+  else s.add(teamId)
+  collapsedTeams.value = s
+  localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...s]))
+}
+
+// Drag offsets — persisted
 const OFFSETS_KEY = 'teamgr_project_view_offsets'
 function loadOffsets() {
   try {
@@ -141,83 +133,25 @@ function saveOffsets() {
 }
 const dragOffsets = reactive(loadOffsets())
 
-// Multi-select: Set of "teamId-talentId"
-const selectedMembers = reactive(new Set())
-
 // Drag state
 const dragging = ref(null)
 const hasDragged = ref(false)
 
-// Marquee selection state
-const marquee = ref(null) // { teamId, startX, startY, curX, curY, sectionRect }
-
-const marqueeStyle = computed(() => {
-  if (!marquee.value) return {}
-  const m = marquee.value
-  const x = Math.min(m.startX, m.curX)
-  const y = Math.min(m.startY, m.curY)
-  const w = Math.abs(m.curX - m.startX)
-  const h = Math.abs(m.curY - m.startY)
-  return {
-    left: x + 'px', top: y + 'px',
-    width: w + 'px', height: h + 'px',
-  }
-})
-
 function offsetKey(type, teamId, itemId) {
   return `${type}-${teamId}-${itemId}`
-}
-
-function selKey(teamId, talentId) {
-  return `${teamId}-${talentId}`
-}
-
-function isSelected(teamId, talentId) {
-  return selectedMembers.has(selKey(teamId, talentId))
-}
-
-function selectedInTeam(teamId) {
-  let count = 0
-  for (const k of selectedMembers) {
-    if (k.startsWith(teamId + '-')) count++
-  }
-  return count
-}
-
-function clearSelection(teamId) {
-  for (const k of [...selectedMembers]) {
-    if (k.startsWith(teamId + '-')) selectedMembers.delete(k)
-  }
 }
 
 function getOffsetStyle(type, teamId, itemId) {
   const k = offsetKey(type, teamId, itemId)
   const o = dragOffsets[k]
   if (!o || (o.x === 0 && o.y === 0)) return {}
-  return { transform: `translate(${o.x}px, ${o.y}px)`, zIndex: 5 }
-}
-
-function setSectionRef(teamId, el) {
-  if (el) sectionRefs.value[teamId] = el
-}
-function setProjectRef(teamId, projectId, el) {
-  if (el) {
-    if (!projectRefs.value[teamId]) projectRefs.value[teamId] = {}
-    projectRefs.value[teamId][projectId] = el
-  }
-}
-function setMemberRef(teamId, talentId, el) {
-  if (el) {
-    if (!memberRefs.value[teamId]) memberRefs.value[teamId] = {}
-    memberRefs.value[teamId][talentId] = el
-  }
+  return { transform: `translate(${o.x}px, ${o.y}px)` }
 }
 
 const teamsWithMembers = computed(() => {
   return store.projectView.filter(t => t.members.length > 0)
 })
 
-// Sort: teams with projects first, teams without projects last
 const sortedTeams = computed(() => {
   return [...teamsWithMembers.value].sort((a, b) => {
     const ap = a.projects.length > 0 ? 0 : 1
@@ -226,162 +160,64 @@ const sortedTeams = computed(() => {
   })
 })
 
-function membersWithProjects(team) {
-  return team.members.filter(m => m.project_count > 0)
+function projectMembers(team, projectId) {
+  return team.members.filter(m => m.project_ids.includes(projectId))
 }
 
 function membersWithoutProjects(team) {
   return team.members.filter(m => m.project_count === 0)
 }
 
-// Marquee selection handlers
-function onMarqueeStart(e, teamId) {
-  const sectionEl = sectionRefs.value[teamId]
-  if (!sectionEl) return
-  const rect = sectionEl.getBoundingClientRect()
-  const x = e.clientX - rect.left
-  const y = e.clientY - rect.top
-  marquee.value = { teamId, startX: x, startY: y, curX: x, curY: y, sectionRect: rect }
-  sectionEl.setPointerCapture(e.pointerId)
-}
-
-function updateMarqueeSelection() {
-  const m = marquee.value
-  if (!m) return
-  const mx1 = Math.min(m.startX, m.curX)
-  const my1 = Math.min(m.startY, m.curY)
-  const mx2 = Math.max(m.startX, m.curX)
-  const my2 = Math.max(m.startY, m.curY)
-
-  // Clear previous selection in this team
-  clearSelection(m.teamId)
-
-  // Check each member in this team
-  const teamMembers = memberRefs.value[m.teamId]
-  if (!teamMembers) return
-  for (const [talentId, el] of Object.entries(teamMembers)) {
-    const elRect = el.getBoundingClientRect()
-    const ex = elRect.left - m.sectionRect.left + elRect.width / 2
-    const ey = elRect.top - m.sectionRect.top + elRect.height / 2
-    if (ex >= mx1 && ex <= mx2 && ey >= my1 && ey <= my2) {
-      selectedMembers.add(selKey(m.teamId, parseInt(talentId)))
-    }
-  }
-}
-
-// Drag handlers
-function onItemPointerDown(e, teamId, type, itemId) {
-  const k = offsetKey(type, teamId, itemId)
+// Drag: entire project tree moves together
+function onTreePointerDown(e, teamId, projectId) {
+  const k = offsetKey('p', teamId, projectId)
   const o = dragOffsets[k] || { x: 0, y: 0 }
-
-  // Record start offsets for all selected members in this team (for batch drag)
-  const batchStartOffsets = {}
-  if (type === 'm' && isSelected(teamId, itemId) && selectedInTeam(teamId) > 1) {
-    for (const sk of selectedMembers) {
-      if (!sk.startsWith(teamId + '-')) continue
-      const tid = parseInt(sk.split('-')[1])
-      const mk = offsetKey('m', teamId, tid)
-      batchStartOffsets[mk] = { ...(dragOffsets[mk] || { x: 0, y: 0 }) }
-    }
-  }
-
   dragging.value = {
-    teamId, type, itemId,
+    teamId, projectId,
     startX: e.clientX, startY: e.clientY,
     startOx: o.x, startOy: o.y,
-    batchStartOffsets,
-    isBatch: Object.keys(batchStartOffsets).length > 1,
+    target: e.target,
   }
   hasDragged.value = false
-  e.target.closest('.team-section-body')?.setPointerCapture(e.pointerId)
+  e.currentTarget.setPointerCapture(e.pointerId)
+  e.currentTarget.addEventListener('pointermove', onTreePointerMove)
+  e.currentTarget.addEventListener('pointerup', onTreePointerUp, { once: true })
 }
 
-function onPointerMove(e) {
-  // Marquee mode
-  if (marquee.value) {
-    const m = marquee.value
-    m.curX = e.clientX - m.sectionRect.left
-    m.curY = e.clientY - m.sectionRect.top
-    updateMarqueeSelection()
-    return
-  }
+function onTreePointerMove(e) {
   if (!dragging.value) return
   const d = dragging.value
   const dx = e.clientX - d.startX
   const dy = e.clientY - d.startY
   if (Math.abs(dx) > 3 || Math.abs(dy) > 3) hasDragged.value = true
-
-  if (d.isBatch) {
-    for (const [mk, startO] of Object.entries(d.batchStartOffsets)) {
-      dragOffsets[mk] = { x: startO.x + dx, y: startO.y + dy }
-    }
-  } else {
-    const k = offsetKey(d.type, d.teamId, d.itemId)
-    dragOffsets[k] = { x: d.startOx + dx, y: d.startOy + dy }
-  }
-  computeLines()
+  const k = offsetKey('p', d.teamId, d.projectId)
+  dragOffsets[k] = { x: d.startOx + dx, y: d.startOy + dy }
 }
 
-function onPointerUp(e) {
-  // Marquee mode
-  if (marquee.value) {
-    marquee.value = null
-    e.target.closest('.team-section-body')?.releasePointerCapture(e.pointerId)
-    return
-  }
+function onTreePointerUp(e) {
   if (!dragging.value) return
   const d = dragging.value
   dragging.value = null
-  e.target.closest('.team-section-body')?.releasePointerCapture(e.pointerId)
-
-  if (!hasDragged.value) {
-    if (d.type === 'p') {
-      goToProject(d.itemId)
-    } else {
-      const sk = selKey(d.teamId, d.itemId)
-      if (selectedMembers.has(sk)) {
-        selectedMembers.delete(sk)
-      } else {
-        selectedMembers.add(sk)
-      }
-    }
+  e.currentTarget.removeEventListener('pointermove', onTreePointerMove)
+  e.currentTarget.releasePointerCapture(e.pointerId)
+  if (hasDragged.value) {
+    saveOffsets()
+    return
   }
-  if (hasDragged.value) saveOffsets()
-  computeLines()
-}
-
-function computeLines() {
-  const lines = {}
-  for (const team of teamsWithMembers.value) {
-    lines[team.id] = []
-    const sectionEl = sectionRefs.value[team.id]
-    if (!sectionEl) continue
-    const sectionRect = sectionEl.getBoundingClientRect()
-
-    for (const member of team.members) {
-      if (member.project_count === 0) continue
-      const memberEl = memberRefs.value[team.id]?.[member.talent_id]
-      if (!memberEl) continue
-      const memberRect = memberEl.getBoundingClientRect()
-      const mx = memberRect.left + memberRect.width / 2 - sectionRect.left
-      const my = memberRect.top + 4 - sectionRect.top
-
-      for (const pid of member.project_ids) {
-        const projectEl = projectRefs.value[team.id]?.[pid]
-        if (!projectEl) continue
-        const projectRect = projectEl.getBoundingClientRect()
-        const px = projectRect.left + projectRect.width / 2 - sectionRect.left
-        const py = projectRect.top + projectRect.height - sectionRect.top
-
-        lines[team.id].push({
-          key: `${member.talent_id}-${pid}`,
-          x1: px, y1: py,
-          x2: mx, y2: my,
-        })
-      }
-    }
+  // Not dragged — handle as click
+  const clickedEl = d.target
+  // Check if clicked on a member leaf
+  const memberLeaf = clickedEl.closest('.member-leaf')
+  if (memberLeaf) {
+    const talentId = memberLeaf.dataset.talentId
+    if (talentId) goToTalent(parseInt(talentId))
+    return
   }
-  connectionLines.value = lines
+  // Check if clicked on the project node
+  const projectNode = clickedEl.closest('.project-node')
+  if (projectNode) {
+    goToProject(d.projectId)
+  }
 }
 
 function goToTalent(talentId) {
@@ -389,20 +225,15 @@ function goToTalent(talentId) {
 }
 
 function goToProject(projectId) {
-  router.push(`/search?project=${projectId}`)
+  // Navigate to Studio with project focus query param
+  localStorage.setItem('todoActiveTab', '1')
+  router.push(`/?pmFocus=${projectId}`)
 }
 
 onMounted(async () => {
   await store.fetchProjectView()
   loading.value = false
-  await nextTick()
-  setTimeout(computeLines, 100)
 })
-
-watch(() => store.projectView, async () => {
-  await nextTick()
-  setTimeout(computeLines, 100)
-}, { deep: true })
 </script>
 
 <style scoped>
@@ -420,7 +251,7 @@ watch(() => store.projectView, async () => {
 .team-sections {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .team-section {
@@ -440,6 +271,31 @@ watch(() => store.projectView, async () => {
   color: #1f2937;
   background: #f8fafc;
   border-bottom: 1px solid #e5e7eb;
+  cursor: pointer;
+  user-select: none;
+}
+
+.team-section-title:hover {
+  background: #f1f5f9;
+}
+
+.collapse-icon {
+  color: #9ca3af;
+  transition: transform 0.2s;
+}
+
+.member-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: #6b7280;
+  margin-left: 4px;
+}
+
+.project-count {
+  font-size: 12px;
+  font-weight: 400;
+  color: #3b82f6;
+  margin-left: 2px;
 }
 
 .no-project-hint {
@@ -448,113 +304,141 @@ watch(() => store.projectView, async () => {
   color: #9ca3af;
 }
 
-.team-section-body {
-  position: relative;
-  padding: 20px 16px;
-  min-height: 120px;
-  touch-action: none;
+.team-canvas {
+  padding: 24px 20px;
+  min-height: 200px;
+  overflow-x: auto;
 }
 
-.connections-svg {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 0;
-}
-
-.projects-row {
+/* Project trees layout */
+.project-trees {
   display: flex;
-  gap: 12px;
+  gap: 32px;
   flex-wrap: wrap;
-  margin-bottom: 32px;
-  position: relative;
-  z-index: 1;
+  align-items: flex-start;
 }
 
-.project-box {
+.project-tree {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  background: #eff6ff;
-  border: 1.5px solid #bfdbfe;
-  border-radius: 8px;
   cursor: grab;
-  transition: box-shadow 0.2s;
   user-select: none;
   touch-action: none;
 }
 
-.project-box:active {
+.project-tree:active {
   cursor: grabbing;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.25);
 }
 
-.project-name {
+/* Project node */
+.project-node {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #eff6ff;
+  border: 1.5px solid #bfdbfe;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+  white-space: nowrap;
+}
+
+.project-node:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
+}
+
+.project-node-name {
   font-size: 13px;
   font-weight: 500;
   color: #1e40af;
-  max-width: 120px;
-  white-space: nowrap;
+  max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.members-row {
-  display: flex;
-  gap: 20px;
-  flex-wrap: wrap;
-  position: relative;
-  z-index: 1;
-}
-
-.member-circle-wrap {
+/* Tree connector lines */
+.tree-connector {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
 }
 
-.member-circle-wrap:active {
-  cursor: grabbing;
+.tree-trunk {
+  width: 1.5px;
+  height: 16px;
+  background: #cbd5e1;
 }
 
-.member-circle-wrap:hover .member-label {
+.tree-branches {
+  display: flex;
+  gap: 0;
+  position: relative;
+}
+
+/* Horizontal bar connecting all branches at the top */
+.tree-branches::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  height: 1.5px;
+  background: #cbd5e1;
+}
+
+.tree-branches:has(.tree-branch:nth-child(2))::before {
+  left: 32px;
+  right: 32px;
+}
+
+.tree-branches:not(:has(.tree-branch:nth-child(2)))::before {
+  display: none;
+}
+
+.tree-branch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 64px;
+}
+
+.branch-line {
+  width: 1.5px;
+  height: 14px;
+  background: #cbd5e1;
+}
+
+/* Member leaf node */
+.member-leaf {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.member-leaf:hover .member-name {
   color: #3b82f6;
-}
-
-.member-circle-wrap.selected .member-circle {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
-}
-
-.member-circle-wrap.selected .member-label {
-  color: #3b82f6;
-  font-weight: 600;
 }
 
 .member-circle {
   position: relative;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   background: #f3f4f6;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 2px solid #e5e7eb;
-  transition: border-color 0.2s, box-shadow 0.2s;
+  transition: border-color 0.2s;
 }
 
 .member-circle:hover {
   border-color: #3b82f6;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
 }
 
 .idle-circle {
@@ -571,67 +455,53 @@ watch(() => store.projectView, async () => {
 
 .project-badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  min-width: 18px;
-  height: 18px;
-  border-radius: 9px;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
   background: #ef4444;
   color: white;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0 4px;
-  border: 2px solid white;
+  padding: 0 3px;
+  border: 1.5px solid white;
 }
 
-.member-label {
-  font-size: 12px;
+.member-name {
+  font-size: 11px;
   color: #6b7280;
-  max-width: 60px;
+  max-width: 56px;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.idle-label {
+.idle-name {
   color: #9ca3af;
 }
 
-.selection-hint {
-  margin-top: 12px;
-  padding: 6px 12px;
-  background: #eff6ff;
-  border-radius: 6px;
+/* Idle members section */
+.idle-members {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed #e5e7eb;
+}
+
+.idle-label-header {
   font-size: 12px;
-  color: #3b82f6;
-  text-align: center;
+  color: #9ca3af;
+  margin-bottom: 10px;
+  display: block;
 }
 
-.clear-selection {
-  margin-left: 8px;
-  cursor: pointer;
-  text-decoration: underline;
-  color: #6b7280;
-}
-
-.clear-selection:hover {
-  color: #ef4444;
-}
-
-.marquee-rect {
-  position: absolute;
-  border: 1.5px dashed #3b82f6;
-  background: rgba(59, 130, 246, 0.08);
-  border-radius: 3px;
-  pointer-events: none;
-  z-index: 10;
-}
-
-.hidden {
-  display: none;
+.idle-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
 }
 </style>
