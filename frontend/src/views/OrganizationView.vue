@@ -24,21 +24,19 @@
       >
         <!-- Parent-Child Arrow Lines -->
         <svg class="org-arrows">
-          <defs>
-            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
-              <polygon points="0 0, 8 3, 0 6" fill="#94a3b8" />
-            </marker>
-          </defs>
-          <path
-            v-for="line in parentLines"
-            :key="line.key"
-            :d="line.d"
-            fill="none"
-            stroke="#94a3b8"
-            stroke-width="1.5"
-            stroke-dasharray="6 3"
-            marker-end="url(#arrowhead)"
-          />
+          <template v-for="line in parentLines" :key="line.key">
+            <path
+              :d="line.d"
+              fill="none"
+              stroke="#94a3b8"
+              stroke-width="1.5"
+              stroke-dasharray="6 3"
+            />
+            <polygon
+              :points="line.arrow"
+              fill="#94a3b8"
+            />
+          </template>
         </svg>
 
         <!-- Team Cards -->
@@ -160,7 +158,7 @@
       @confirm="handleCreateTeam"
     >
       <div class="px-4 py-2">
-        <van-field v-model="newTeamName" label="团队名称" placeholder="请输入团队名称" />
+        <van-field v-model="newTeamName" label="团队名称" placeholder="请输入团队名称" @keyup.enter="handleCreateTeam(); showCreateTeam = false" />
       </div>
     </van-dialog>
 
@@ -317,32 +315,75 @@ function setTeamCardRef(teamId, el) {
   if (el) teamCardRefs.value[teamId] = el
 }
 
+// Evaluate cubic bezier at parameter t
+function bezierPoint(t, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) {
+  const u = 1 - t
+  const x = u*u*u*p0x + 3*u*u*t*p1x + 3*u*t*t*p2x + t*t*t*p3x
+  const y = u*u*u*p0y + 3*u*u*t*p1y + 3*u*t*t*p2y + t*t*t*p3y
+  return [x, y]
+}
+// Tangent of cubic bezier at parameter t
+function bezierTangent(t, p0x, p0y, p1x, p1y, p2x, p2y, p3x, p3y) {
+  const u = 1 - t
+  const tx = 3*u*u*(p1x-p0x) + 6*u*t*(p2x-p1x) + 3*t*t*(p3x-p2x)
+  const ty = 3*u*u*(p1y-p0y) + 6*u*t*(p2y-p1y) + 3*t*t*(p3y-p2y)
+  return [tx, ty]
+}
+
 // Arrow lines from child to parent
 const parentLines = computed(() => {
   const lines = []
-  const CARD_W = 260 // approximate card width
+  const CARD_W = 260
+  const GAP = 14
+  const ARROW_LEN = 11
+  const ARROW_HALF_W = 5
+  const ARROW_T = 0.88  // place arrowhead at this t on the curve
+
   for (const team of store.teams) {
     if (!team.parent_id) continue
     const parent = store.teams.find(t => t.id === team.parent_id)
     if (!parent) continue
 
-    // Child top center → Parent bottom center (approx)
     const childEl = teamCardRefs.value[team.id]
     const parentEl = teamCardRefs.value[parent.id]
     const cw = childEl?.offsetWidth || CARD_W
     const pw = parentEl?.offsetWidth || CARD_W
-    const ch = childEl?.offsetHeight || 80
     const ph = parentEl?.offsetHeight || 80
 
     const x1 = team.position_x + cw / 2
-    const y1 = team.position_y
+    const y1 = team.position_y - GAP
     const x2 = parent.position_x + pw / 2
-    const y2 = parent.position_y + ph
+    const y2 = parent.position_y + ph + GAP
 
-    // Curved path
-    const midY = (y1 + y2) / 2
-    const d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`
-    lines.push({ key: `${team.id}-${parent.id}`, d })
+    const vDist = Math.max(Math.abs(y1 - y2) * 0.5, 50)
+
+    // cp1: depart upward from child
+    const cp1x = x1
+    const cp1y = y1 - vDist
+    // cp2: arrive from child's horizontal direction into parent
+    const cp2x = x2 + (x1 - x2) * 0.35
+    const cp2y = y2 + vDist
+
+    const d = `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`
+
+    // Arrowhead placed ON the curve at t=ARROW_T
+    const [tipX, tipY] = bezierPoint(ARROW_T, x1, y1, cp1x, cp1y, cp2x, cp2y, x2, y2)
+    const [tx, ty] = bezierTangent(ARROW_T, x1, y1, cp1x, cp1y, cp2x, cp2y, x2, y2)
+    const tlen = Math.sqrt(tx * tx + ty * ty) || 1
+    const dx = tx / tlen
+    const dy = ty / tlen
+    const px = -dy
+    const py = dx
+
+    const baseX = tipX - dx * ARROW_LEN
+    const baseY = tipY - dy * ARROW_LEN
+    const arrow = [
+      `${tipX},${tipY}`,
+      `${baseX + px * ARROW_HALF_W},${baseY + py * ARROW_HALF_W}`,
+      `${baseX - px * ARROW_HALF_W},${baseY - py * ARROW_HALF_W}`,
+    ].join(' ')
+
+    lines.push({ key: `${team.id}-${parent.id}`, d, arrow })
   }
   return lines
 })
@@ -464,7 +505,8 @@ const filteredTalents = computed(() => {
   if (!q) return talentStore.talents
   return talentStore.talents.filter(t =>
     t.name.toLowerCase().includes(q) ||
-    (t.name_pinyin || '').toLowerCase().includes(q)
+    (t.name_pinyin || '').toLowerCase().includes(q) ||
+    (t.name_pinyin_initials || '').toLowerCase().includes(q)
   )
 })
 

@@ -15,6 +15,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Fix Vant Toast visibility — .van-popup and .van-toast are on the SAME element.
+   Duplicate Vant CSS (full import + VantResolver auto-import) causes .van-popup's
+   white background to win unpredictably. Override the CSS variable at element level
+   so even if .van-popup's rule wins, the variable resolves to dark. */
+.van-toast,
+.van-popup.van-toast {
+  --van-popup-background: rgba(0, 0, 0, 0.7);
+  --van-toast-background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.7) !important;
+  color: #fff !important;
+}
+
 /* Utility for safe area on iPhone */
 .safe-area-bottom {
   padding-bottom: env(safe-area-inset-bottom);

@@ -120,6 +120,7 @@ def _talent_to_response(talent: Talent) -> dict:
         "id": talent.id,
         "name": talent.name,
         "name_pinyin": talent.name_pinyin or "",
+        "name_pinyin_initials": talent.name_pinyin_initials or "",
         "email": talent.email or "",
         "phone": talent.phone or "",
         "current_role": talent.current_role or "",
