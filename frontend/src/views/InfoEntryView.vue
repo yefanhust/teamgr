@@ -133,7 +133,7 @@
               v-model="inputText"
               type="textarea"
               :autosize="{ minHeight: 100 }"
-              placeholder="输入候选人的信息...（Enter发送，⌘/Ctrl+Enter换行）"
+              placeholder="输入候选人的信息...（⌘/Ctrl+Enter发送）"
               class="entry-input"
               @paste="handlePaste"
             />
@@ -494,27 +494,13 @@ function handleTextareaKeydown(event) {
   if (event.key !== 'Enter') return
 
   if (event.ctrlKey || event.metaKey) {
-    // Cmd+Enter (macOS) or Ctrl+Enter: insert newline
+    // Cmd+Enter (macOS) or Ctrl+Enter: submit
     event.preventDefault()
     event.stopPropagation()
-    const ta = event.target
-    const start = ta.selectionStart
-    const end = ta.selectionEnd
-    const val = ta.value
-    const newVal = val.substring(0, start) + '\n' + val.substring(end)
-    // Update native DOM directly
-    ta.value = newVal
-    ta.selectionStart = ta.selectionEnd = start + 1
-    // Sync Vue v-model
-    inputText.value = newVal
+    submitEntry()
     return
   }
-  // Shift+Enter: browser default inserts newline naturally
-  if (event.shiftKey || event.altKey) return
-  // Plain Enter: submit
-  event.preventDefault()
-  event.stopPropagation()
-  submitEntry()
+  // All other Enter combinations (plain, Shift, Alt): default newline behavior
 }
 
 async function submitEntry() {

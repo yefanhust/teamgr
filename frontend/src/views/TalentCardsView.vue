@@ -131,17 +131,25 @@
           </van-button>
         </div>
 
-        <div v-for="(group, gi) in groupedTalents" :key="group.team ? group.team.id : 'ungrouped'">
+        <div v-for="(group, gi) in groupedTalents" :key="group.team ? group.team.id : 'ungrouped'" :data-group-idx="gi">
           <div
             v-if="groupedTalents.length > 1"
             class="team-group-header cursor-pointer select-none"
-            :class="{ 'mt-8': gi > 0, 'mt-1': gi === 0 }"
+            :class="{ 'mt-8': gi > 0, 'mt-1': gi === 0, 'group-drag-over': dropTargetIdx === gi && dragGroupIdx !== null && dragGroupIdx !== gi }"
             @click="toggleGroupCollapse(group.team ? group.team.id : 'ungrouped')"
           >
             <div class="flex items-center gap-3 mb-3">
+              <van-icon
+                v-if="group.team"
+                name="wap-nav"
+                size="16"
+                class="drag-handle text-gray-300 cursor-grab flex-shrink-0"
+                @pointerdown="onDragHandlePointerDown($event, gi)"
+                @click.stop
+              />
               <div class="team-group-indicator" :class="group.team ? 'bg-blue-500' : 'bg-gray-400'"></div>
               <span class="text-lg font-bold" :class="group.team ? 'text-gray-800' : 'text-gray-500'">
-                {{ group.team ? group.team.name : '未分配团队' }}
+                {{ group.team ? (group.team.parent_name ? group.team.parent_name + ' - ' + group.team.name : group.team.name) : '未分配团队' }}
               </span>
               <span class="team-group-count" :class="group.team ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'">{{ group.talents.length }}人</span>
               <van-icon
@@ -315,6 +323,10 @@ const showDeleteTagConfirm = ref(false)
 const deletingTag = ref(null)
 const scheduledResults = ref([])
 const organizing = ref(false)
+const GROUP_ORDER_KEY = 'talent_group_order'
+const customGroupOrder = ref(JSON.parse(localStorage.getItem(GROUP_ORDER_KEY) || '[]'))
+const dragGroupIdx = ref(null)
+const dropTargetIdx = ref(null)
 const showPromptEditor = ref(false)
 const organizePromptText = ref('')
 const organizePromptDefault = ref('')
@@ -397,9 +409,43 @@ const groupedTalents = computed(() => {
     }
   }
 
-  const groups = Object.values(teamGroups).sort((a, b) => a.team.id - b.team.id)
+  // Natural sort: replace Chinese numerals with Arabic for correct ordering
+  const cnNum = { '一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' }
+  const toSortKey = (s) => s.replace(/[一二三四五六七八九十]/g, c => cnNum[c])
+  const naturalCmp = (a, b) => toSortKey(a).localeCompare(toSortKey(b), 'zh-CN', { numeric: true })
+
+  const groups = Object.values(teamGroups)
   if (ungrouped.length > 0) {
     groups.push({ team: null, talents: ungrouped })
+  }
+
+  // Sort: use custom order if saved, otherwise natural sort
+  const order = customGroupOrder.value
+  if (order.length > 0) {
+    const orderMap = new Map(order.map((id, i) => [String(id), i]))
+    groups.sort((a, b) => {
+      const aKey = a.team ? String(a.team.id) : 'ungrouped'
+      const bKey = b.team ? String(b.team.id) : 'ungrouped'
+      const ai = orderMap.has(aKey) ? orderMap.get(aKey) : 9999
+      const bi = orderMap.has(bKey) ? orderMap.get(bKey) : 9999
+      if (ai !== bi) return ai - bi
+      // Fallback for new teams not in saved order
+      if (!a.team) return 1
+      if (!b.team) return -1
+      const pa = a.team.parent_name || ''
+      const pb = b.team.parent_name || ''
+      if (pa !== pb) return naturalCmp(pa, pb)
+      return naturalCmp(a.team.name, b.team.name)
+    })
+  } else {
+    groups.sort((a, b) => {
+      if (!a.team) return 1
+      if (!b.team) return -1
+      const pa = a.team.parent_name || ''
+      const pb = b.team.parent_name || ''
+      if (pa !== pb) return naturalCmp(pa, pb)
+      return naturalCmp(a.team.name, b.team.name)
+    })
   }
   return groups
 })
@@ -413,6 +459,40 @@ function toggleGroupCollapse(groupKey) {
   }
   collapsedGroups.value = s
   localStorage.setItem('talent_collapsed_groups', JSON.stringify([...s]))
+}
+
+// Group drag reorder (pointer events for desktop + mobile)
+function onDragHandlePointerDown(e, gi) {
+  if (e.button !== 0) return
+  e.preventDefault()
+  dragGroupIdx.value = gi
+
+  const onPointerMove = (me) => {
+    const el = document.elementFromPoint(me.clientX, me.clientY)
+    if (el) {
+      const groupEl = el.closest('[data-group-idx]')
+      dropTargetIdx.value = groupEl ? parseInt(groupEl.dataset.groupIdx) : null
+    }
+  }
+
+  const onPointerUp = () => {
+    document.removeEventListener('pointermove', onPointerMove)
+    document.removeEventListener('pointerup', onPointerUp)
+    const from = dragGroupIdx.value
+    const to = dropTargetIdx.value
+    if (from !== null && to !== null && from !== to) {
+      const order = groupedTalents.value.map(g => g.team ? g.team.id : 'ungrouped')
+      const [moved] = order.splice(from, 1)
+      order.splice(to, 0, moved)
+      customGroupOrder.value = order
+      localStorage.setItem(GROUP_ORDER_KEY, JSON.stringify(order))
+    }
+    dragGroupIdx.value = null
+    dropTargetIdx.value = null
+  }
+
+  document.addEventListener('pointermove', onPointerMove)
+  document.addEventListener('pointerup', onPointerUp)
 }
 
 onMounted(async () => {
@@ -730,5 +810,11 @@ async function finishEditTag(tag) {
   font-weight: 600;
   padding: 1px 8px;
   border-radius: 10px;
+}
+.drag-handle {
+  touch-action: none;
+}
+.group-drag-over {
+  border-top: 2px solid #3b82f6;
 }
 </style>

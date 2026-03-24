@@ -604,6 +604,18 @@ async def _generate_project_summary(project: Project, db: Session) -> str:
 
 # ---- Project Efficiency Analysis ----
 
+DEFAULT_PROJECT_ANALYSIS_PROMPT = """你是一个项目管理效率顾问。以下是当前所有活跃项目的详细信息，项目按层级结构组织（父项目→子项目）。父项目是组织容器，实际工作在子项目中推进。
+
+{projects_text}
+
+请简明扼要地分析，只输出以下内容：
+1. **做得好的**：指出1个项目管理上最值得保持的亮点（如某项目推进节奏好、协作高效等），说明具体体现
+2. **最需关注的**：指出1个最需要立即关注的项目风险或问题（如长期停滞、阻碍未解决、资源不足等），结合具体数据说明
+3. **行动建议**：针对上述问题给出1-2条可立即执行的改进建议
+
+要求切中要害，不要面面俱到。总字数控制在300字以内，使用 Markdown 格式。"""
+
+
 def _build_project_analysis_prompt(db: Session):
     """Build analysis prompt from all active projects. Returns (prompt, count) or (None, 0)."""
     from zoneinfo import ZoneInfo
@@ -721,18 +733,9 @@ def _build_project_analysis_prompt(db: Session):
         project_sections.append(section)
 
     projects_text = "\n\n".join(project_sections)
-    prompt = f"""你是一个项目管理效率顾问。以下是当前所有活跃项目的详细信息，项目按层级结构组织（父项目下包含子项目）。父项目是组织容器，实际工作在子项目中推进，因此父项目本身没有成员和进展记录是正常的。
-
-{projects_text}
-
-请对这些项目进行全面分析，给出以下方面的评估和建议：
-1. **项目健康度**：各项目的整体状态评估，是否有停滞或进展缓慢的项目（注意：评估父项目时应综合其子项目的活跃度）
-2. **进展频率与节奏**：更新是否规律，是否有长期无更新的项目需要关注
-3. **资源分配**：成员在各项目间的分布是否合理，是否有项目缺少人手
-4. **阻碍与风险**：从进展记录中提取的关键阻碍和潜在风险汇总
-5. **具体建议**：3-5条可操作的项目管理优化建议
-
-请用简洁的中文回答，使用 Markdown 格式，方便阅读。"""
+    from app.config import get_instruction
+    template = get_instruction("project_analysis", DEFAULT_PROJECT_ANALYSIS_PROMPT)
+    prompt = template.replace("{projects_text}", projects_text)
     return prompt, len(active_projects)
 
 

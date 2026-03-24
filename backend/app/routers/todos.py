@@ -1284,6 +1284,18 @@ def trigger_duration_stats(db: Session = Depends(get_db)):
     return {"ok": True}
 
 
+DEFAULT_TODO_ANALYSIS_PROMPT = """你是一个任务管理效率顾问。以下是用户最近7天完成的任务列表（含标题、标签、优先级、总周期、实际工作时间、等待时间、中途停止次数等）。
+
+{tasks_text}
+
+请简明扼要地分析，只输出以下内容：
+1. **做得好的**：指出本周最值得保持的1个工作习惯或效率亮点，说明具体体现在哪些任务上
+2. **最需改进的**：指出1个最关键的效率瓶颈或问题，结合具体数据说明
+3. **行动建议**：针对上述问题给出1-2条可立即执行的改进建议
+
+要求切中要害，不要面面俱到。总字数控制在300字以内，使用 Markdown 格式。"""
+
+
 def _build_analysis_prompt(db):
     """Build the analysis prompt from recently completed todos. Returns (prompt, count) or (None, 0)."""
     week_ago = datetime.utcnow() - timedelta(days=7)
@@ -1333,18 +1345,9 @@ def _build_analysis_prompt(db):
         task_lines.append(line)
 
     tasks_text = "\n".join(task_lines)
-    prompt = f"""你是一个任务管理效率顾问。以下是用户最近7天完成的任务列表，包括任务标题、详情、标签、优先级、总周期（创建到完成）、实际工作时间（开始到暂停/完成的累计时长）、等待时间（创建到首次开始）、中途停止次数（任务被放弃后重新回到等待状态的次数）和完成时间。
-
-{tasks_text}
-
-请分析这些已完成的任务，给出以下方面的建议：
-1. **效率概览**：总体完成情况，平均耗时，效率趋势
-2. **时间管理**：哪些任务耗时过长？实际工作时间 vs 总周期的比较，等待时间是否合理？
-3. **优先级管理**：高优先级任务的处理是否及时？等待时间是否过长？
-4. **规律与模式**：发现的工作模式（如哪类任务效率高/低，哪些任务等待时间过长，哪些任务被多次停止）
-5. **具体建议**：3-5条可操作的效率优化建议
-
-请用简洁的中文回答，使用 Markdown 格式，方便阅读。"""
+    from app.config import get_instruction
+    template = get_instruction("todo_analysis", DEFAULT_TODO_ANALYSIS_PROMPT)
+    prompt = template.replace("{tasks_text}", tasks_text)
     return prompt, len(completed_items)
 
 

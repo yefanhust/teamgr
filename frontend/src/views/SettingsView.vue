@@ -28,34 +28,63 @@
             <div
               v-for="(label, key) in schedulerTypes"
               :key="key"
-              class="bg-white rounded-xl shadow-sm p-3 flex items-center justify-between gap-3"
+              class="bg-white rounded-xl shadow-sm overflow-hidden"
             >
-              <div class="flex-1 min-w-0">
-                <div class="text-sm font-medium text-gray-800">{{ label }}</div>
-                <div class="text-xs text-gray-400">{{ schedulerDescriptions[key] || key }}</div>
-              </div>
-              <!-- Interval type -->
-              <template v-if="schedulers[key]?.interval_hours !== undefined">
-                <div class="flex items-center gap-1">
-                  <span class="text-xs text-gray-500">每</span>
-                  <input
-                    type="number"
-                    :value="schedulers[key].interval_hours"
-                    @change="schedulers[key].interval_hours = Math.max(1, Number($event.target.value) || 1)"
-                    class="w-14 text-sm text-center border border-gray-200 rounded-lg px-1 py-1.5 bg-gray-50"
-                    min="1"
-                    max="24"
-                  />
-                  <span class="text-xs text-gray-500">小时</span>
+              <div class="p-3 flex items-center justify-between gap-3">
+                <div class="flex-1 min-w-0">
+                  <div class="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                    {{ label }}
+                    <van-icon
+                      v-if="schedulerInstructions[key]"
+                      name="edit"
+                      size="14"
+                      class="text-gray-400 cursor-pointer hover:text-blue-500"
+                      @click="togglePromptExpand(key)"
+                    />
+                  </div>
+                  <div class="text-xs text-gray-400">{{ schedulerDescriptions[key] || key }}</div>
                 </div>
-              </template>
-              <!-- Cron type -->
-              <template v-else>
-                <span
-                  class="text-sm text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-2 py-1 rounded"
-                  @click="openSchedulerTimePicker(key)"
-                >{{ formatTime(schedulers[key]?.cron_hour, schedulers[key]?.cron_minute) }}</span>
-              </template>
+                <!-- Interval type -->
+                <template v-if="schedulers[key]?.interval_hours !== undefined">
+                  <div class="flex items-center gap-1">
+                    <span class="text-xs text-gray-500">每</span>
+                    <input
+                      type="number"
+                      :value="schedulers[key].interval_hours"
+                      @change="schedulers[key].interval_hours = Math.max(1, Number($event.target.value) || 1)"
+                      class="w-14 text-sm text-center border border-gray-200 rounded-lg px-1 py-1.5 bg-gray-50"
+                      min="1"
+                      max="24"
+                    />
+                    <span class="text-xs text-gray-500">小时</span>
+                  </div>
+                </template>
+                <!-- Cron type -->
+                <template v-else>
+                  <span
+                    class="text-sm text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-2 py-1 rounded"
+                    @click="openSchedulerTimePicker(key)"
+                  >{{ formatTime(schedulers[key]?.cron_hour, schedulers[key]?.cron_minute) }}</span>
+                </template>
+              </div>
+              <!-- Expandable prompt editor -->
+              <div v-if="schedulerInstructions[key] && expandedPrompts[key]" class="border-t border-gray-100 px-3 pb-3 pt-2">
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="text-xs text-gray-500">提示词模板</span>
+                  <span
+                    v-if="schedulerInstructions[key]?.prompt !== schedulerInstructions[key]?.default"
+                    class="text-xs text-orange-500 cursor-pointer hover:text-orange-600"
+                    @click="resetPrompt(key)"
+                  >恢复默认</span>
+                </div>
+                <textarea
+                  v-model="schedulerInstructions[key].prompt"
+                  class="w-full text-xs text-gray-700 border border-gray-200 rounded-lg p-2 bg-gray-50 resize-y leading-relaxed"
+                  rows="8"
+                  placeholder="输入提示词模板..."
+                ></textarea>
+                <p class="text-xs text-gray-400 mt-1">可用占位符：{{ key === 'daily_todo_analysis' ? '{tasks_text}' : '{projects_text}' }}（运行时自动替换为实际数据）</p>
+              </div>
             </div>
           </div>
 
@@ -221,6 +250,8 @@ const availableModels = ref([])
 const schedulerTypes = ref({})
 const schedulerDescriptions = ref({})
 const schedulers = ref({})
+const schedulerInstructions = ref({})
+const expandedPrompts = ref({})
 const savingSchedulers = ref(false)
 const showTimePicker = ref(false)
 const timePickerHour = ref(8)
@@ -279,6 +310,16 @@ function onTimeConfirm() {
   schedulers.value[key].cron_minute = timePickerMinute.value
 }
 
+function togglePromptExpand(key) {
+  expandedPrompts.value[key] = !expandedPrompts.value[key]
+}
+
+function resetPrompt(key) {
+  if (schedulerInstructions.value[key]) {
+    schedulerInstructions.value[key].prompt = schedulerInstructions.value[key].default
+  }
+}
+
 onMounted(async () => {
   try {
     const [modelRes, schedulerRes] = await Promise.all([
@@ -292,6 +333,7 @@ onMounted(async () => {
     schedulerTypes.value = schedulerRes.data.scheduler_types || {}
     schedulerDescriptions.value = schedulerRes.data.scheduler_descriptions || {}
     schedulers.value = JSON.parse(JSON.stringify(schedulerRes.data.schedulers || {}))
+    schedulerInstructions.value = JSON.parse(JSON.stringify(schedulerRes.data.instructions || {}))
   } catch (e) {
     showToast('Failed to load settings')
   } finally {
@@ -323,7 +365,10 @@ async function saveDefaults() {
 async function saveSchedulers() {
   savingSchedulers.value = true
   try {
-    const res = await api.put('/api/settings/schedulers', { schedulers: JSON.parse(JSON.stringify(schedulers.value)) })
+    const res = await api.put('/api/settings/schedulers', {
+      schedulers: JSON.parse(JSON.stringify(schedulers.value)),
+      instructions: JSON.parse(JSON.stringify(schedulerInstructions.value)),
+    })
     schedulers.value = JSON.parse(JSON.stringify(res.data.schedulers || {}))
     showToast('Saved')
   } catch (e) {

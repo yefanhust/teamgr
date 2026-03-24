@@ -370,21 +370,46 @@ async def update_model_defaults_api(body: dict, _: str = Depends(require_auth)):
 
 @app.get("/api/settings/schedulers")
 async def get_scheduler_settings(_: str = Depends(require_auth)):
-    from app.config import SCHEDULER_TYPES, SCHEDULER_DESCRIPTIONS, get_scheduler_config
+    from app.config import SCHEDULER_TYPES, SCHEDULER_DESCRIPTIONS, get_scheduler_config, get_instruction
+    from app.routers.todos import DEFAULT_TODO_ANALYSIS_PROMPT
+    from app.routers.projects import DEFAULT_PROJECT_ANALYSIS_PROMPT
+    # Provide current instructions for analysis schedulers
+    instructions = {
+        "daily_todo_analysis": {
+            "prompt": get_instruction("todo_analysis", DEFAULT_TODO_ANALYSIS_PROMPT),
+            "default": DEFAULT_TODO_ANALYSIS_PROMPT,
+        },
+        "daily_project_analysis": {
+            "prompt": get_instruction("project_analysis", DEFAULT_PROJECT_ANALYSIS_PROMPT),
+            "default": DEFAULT_PROJECT_ANALYSIS_PROMPT,
+        },
+    }
     return {
         "scheduler_types": SCHEDULER_TYPES,
         "scheduler_descriptions": SCHEDULER_DESCRIPTIONS,
         "schedulers": get_scheduler_config(),
+        "instructions": instructions,
     }
 
 
 @app.put("/api/settings/schedulers")
 async def update_scheduler_settings(body: dict, _: str = Depends(require_auth)):
-    from app.config import SCHEDULER_TYPES, save_scheduler_config, get_scheduler_config
+    from app.config import SCHEDULER_TYPES, save_scheduler_config, get_scheduler_config, save_instruction
     schedulers = body.get("schedulers", {})
     # Only keep valid scheduler types
     filtered = {k: v for k, v in schedulers.items() if k in SCHEDULER_TYPES}
     save_scheduler_config(filtered)
+
+    # Save analysis instructions if provided
+    instructions = body.get("instructions", {})
+    instruction_key_map = {
+        "daily_todo_analysis": "todo_analysis",
+        "daily_project_analysis": "project_analysis",
+    }
+    for sched_key, instr_key in instruction_key_map.items():
+        if sched_key in instructions:
+            prompt = instructions[sched_key].get("prompt", "").strip()
+            save_instruction(instr_key, prompt)
 
     # Reschedule running jobs
     if _scheduler:
