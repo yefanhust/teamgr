@@ -58,7 +58,7 @@
 
           <!-- Team Info -->
           <div class="team-info" @pointerdown.stop>
-            <span class="info-item">{{ team.members.length }} 人</span>
+            <span class="info-item">{{ team.members.length }} 人<template v-if="totalMemberCount(team) > team.members.length">（共 {{ totalMemberCount(team) }}）</template></span>
             <span class="info-sep">·</span>
             <span class="info-item parent-org-wrap">
               <template v-if="editingParentTeamId === team.id">
@@ -523,6 +523,15 @@ function onMemberSearchEnter() {
   if (addableTalents.value.length === 1) {
     handleAddMember(addableTalents.value[0].id)
   }
+}
+
+function totalMemberCount(team) {
+  let count = team.members.length
+  const children = store.teams.filter(t => t.parent_id === team.id)
+  for (const child of children) {
+    count += totalMemberCount(child)
+  }
+  return count
 }
 
 function hasLeader(team) {

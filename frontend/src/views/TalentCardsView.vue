@@ -131,40 +131,64 @@
           </van-button>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div v-for="(group, gi) in groupedTalents" :key="group.team ? group.team.id : 'ungrouped'">
           <div
-            v-for="talent in displayedTalents"
-            :key="talent.id"
-            class="bg-white rounded-xl shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow active:bg-gray-50"
-            @click="$router.push(`/talent/${talent.id}`)"
+            v-if="groupedTalents.length > 1"
+            class="team-group-header cursor-pointer select-none"
+            :class="{ 'mt-8': gi > 0, 'mt-1': gi === 0 }"
+            @click="toggleGroupCollapse(group.team ? group.team.id : 'ungrouped')"
           >
-            <div class="flex items-start justify-between mb-2">
-              <div class="flex-1 min-w-0">
-                <h3 class="text-base font-semibold text-gray-800">{{ talent.name }}</h3>
-                <p class="text-xs text-gray-500">{{ talent.current_role || talent.department || '' }}</p>
-              </div>
-              <div class="flex items-center gap-1 flex-shrink-0 ml-2">
-                <van-tag
-                  v-for="tag in talent.tags.slice(0, 3)"
-                  :key="tag.id"
-                  :color="tag.color"
-                  size="small"
-                  plain
-                >
-                  {{ tag.name }}
-                </van-tag>
-                <van-icon
-                  name="delete-o"
-                  size="16"
-                  color="#999"
-                  class="ml-1 p-1 rounded-full hover:bg-gray-100"
-                  @click.stop="confirmDelete(talent)"
-                />
-              </div>
+            <div class="flex items-center gap-3 mb-3">
+              <div class="team-group-indicator" :class="group.team ? 'bg-blue-500' : 'bg-gray-400'"></div>
+              <span class="text-lg font-bold" :class="group.team ? 'text-gray-800' : 'text-gray-500'">
+                {{ group.team ? group.team.name : '未分配团队' }}
+              </span>
+              <span class="team-group-count" :class="group.team ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'">{{ group.talents.length }}人</span>
+              <van-icon
+                :name="collapsedGroups.has(group.team ? group.team.id : 'ungrouped') ? 'arrow-down' : 'arrow-up'"
+                size="14"
+                class="text-gray-400 ml-auto"
+              />
             </div>
-            <p class="text-sm text-gray-600 line-clamp-2">
-              {{ talent.summary || '暂无摘要' }}
-            </p>
+          </div>
+          <div
+            v-show="!collapsedGroups.has(group.team ? group.team.id : 'ungrouped')"
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+          >
+            <div
+              v-for="talent in group.talents"
+              :key="talent.id"
+              class="bg-white rounded-xl shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow active:bg-gray-50"
+              @click="$router.push(`/talent/${talent.id}`)"
+            >
+              <div class="flex items-start justify-between mb-2">
+                <div class="flex-1 min-w-0">
+                  <h3 class="text-base font-semibold text-gray-800">{{ talent.name }}</h3>
+                  <p class="text-xs text-gray-500">{{ talent.current_role || talent.department || '' }}</p>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+                  <van-tag
+                    v-for="tag in talent.tags.slice(0, 3)"
+                    :key="tag.id"
+                    :color="tag.color"
+                    size="small"
+                    plain
+                  >
+                    {{ tag.name }}
+                  </van-tag>
+                  <van-icon
+                    name="delete-o"
+                    size="16"
+                    color="#999"
+                    class="ml-1 p-1 rounded-full hover:bg-gray-100"
+                    @click.stop="confirmDelete(talent)"
+                  />
+                </div>
+              </div>
+              <p class="text-sm text-gray-600 line-clamp-2">
+                {{ talent.summary || '暂无摘要' }}
+              </p>
+            </div>
           </div>
         </div>
       </van-pull-refresh>
@@ -267,14 +291,17 @@
 <script setup>
 import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import { useTalentStore } from '../stores/talent'
+import { useOrganizationStore } from '../stores/organization'
 import { showToast } from 'vant'
 import ChatQueryPanel from '../components/ChatQueryPanel.vue'
 import VoiceInputButton from '../components/VoiceInputButton.vue'
 import api from '../api'
 
 const store = useTalentStore()
+const orgStore = useOrganizationStore()
 
 const selectedTagIds = ref(new Set())
+const collapsedGroups = ref(new Set(JSON.parse(localStorage.getItem('talent_collapsed_groups') || '[]')))
 const quickSearchQuery = ref('')
 const quickSearchResults = ref(null)
 const refreshing = ref(false)
@@ -337,10 +364,62 @@ const displayedTalents = computed(() => {
   )
 })
 
+// Build talent-to-team mapping and grouped talents
+const talentTeamMap = computed(() => {
+  const map = {} // talent_id -> [team]
+  for (const team of orgStore.teams) {
+    for (const member of team.members) {
+      if (!map[member.talent_id]) map[member.talent_id] = []
+      map[member.talent_id].push(team)
+    }
+  }
+  return map
+})
+
+const groupedTalents = computed(() => {
+  const talents = displayedTalents.value
+  if (orgStore.teams.length === 0) return [{ team: null, talents }]
+
+  const teamGroups = {} // team_id -> { team, talents }
+  const ungrouped = []
+
+  for (const talent of talents) {
+    const teams = talentTeamMap.value[talent.id]
+    if (teams && teams.length > 0) {
+      // Put talent under its first team (avoid duplication)
+      const team = teams[0]
+      if (!teamGroups[team.id]) {
+        teamGroups[team.id] = { team, talents: [] }
+      }
+      teamGroups[team.id].talents.push(talent)
+    } else {
+      ungrouped.push(talent)
+    }
+  }
+
+  const groups = Object.values(teamGroups).sort((a, b) => a.team.id - b.team.id)
+  if (ungrouped.length > 0) {
+    groups.push({ team: null, talents: ungrouped })
+  }
+  return groups
+})
+
+function toggleGroupCollapse(groupKey) {
+  const s = new Set(collapsedGroups.value)
+  if (s.has(groupKey)) {
+    s.delete(groupKey)
+  } else {
+    s.add(groupKey)
+  }
+  collapsedGroups.value = s
+  localStorage.setItem('talent_collapsed_groups', JSON.stringify([...s]))
+}
+
 onMounted(async () => {
   await Promise.all([
     store.fetchTalents(),
     store.fetchTags(),
+    orgStore.fetchTeams(),
     fetchScheduledResults(),
   ])
   // Select only leaf tags (children + orphans), not parent tags
@@ -402,6 +481,7 @@ async function onRefresh() {
   await Promise.all([
     store.fetchTalents(),
     store.fetchTags(),
+    orgStore.fetchTeams(),
     fetchScheduledResults(),
   ])
   refreshing.value = false
@@ -638,5 +718,17 @@ async function finishEditTag(tag) {
   width: 80px;
   outline: none;
   background: #fff;
+}
+.team-group-indicator {
+  width: 4px;
+  height: 24px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+.team-group-count {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 10px;
 }
 </style>
