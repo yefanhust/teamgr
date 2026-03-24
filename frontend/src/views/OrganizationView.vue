@@ -272,7 +272,7 @@
       @confirm="handleEditTitle"
     >
       <div class="px-4 py-2">
-        <van-field v-model="editTitleValue" label="职位" placeholder="请输入职位" />
+        <van-field v-model="editTitleValue" label="职位" placeholder="请输入职位" @keydown.enter="confirmEditTitle" />
       </div>
     </van-dialog>
   </div>
@@ -337,7 +337,7 @@ const parentLines = computed(() => {
   const GAP = 14
   const ARROW_LEN = 11
   const ARROW_HALF_W = 5
-  const ARROW_T = 0.88  // place arrowhead at this t on the curve
+  const ARROW_T = 1.0  // place arrowhead at curve endpoint
 
   for (const team of store.teams) {
     if (!team.parent_id) continue
@@ -745,6 +745,11 @@ function startEditTitle(team, member) {
   editingTitleMember.value = member
   editTitleValue.value = member.position_title || ''
   showEditTitle.value = true
+}
+
+function confirmEditTitle() {
+  showEditTitle.value = false
+  handleEditTitle()
 }
 
 async function handleEditTitle() {
