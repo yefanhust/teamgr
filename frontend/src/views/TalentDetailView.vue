@@ -123,7 +123,8 @@
                     <textarea v-if="isEditing(dim.key, idx, k)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
                       @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
                     <span v-else-if="Array.isArray(v)" class="editable-value" @dblclick.stop="startEdit(dim.key, [idx, k], v, true)">{{ v.join('、') }}</span>
-                    <span v-else class="editable-value" @dblclick.stop="startEdit(dim.key, [idx, k], v)">{{ v }}</span>
+                    <div v-else-if="formatStructuredText(String(v))" class="formatted-text editable-value" v-html="formatStructuredText(String(v))" @dblclick.stop="startEdit(dim.key, [idx, k], v)"></div>
+                    <span v-else class="editable-value whitespace-pre-line" @dblclick.stop="startEdit(dim.key, [idx, k], v)">{{ v }}</span>
                   </template>
                 </div>
               </div>
@@ -166,7 +167,8 @@
                       @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
                     <span v-else-if="Array.isArray(val)" class="editable-value" @dblclick.stop="startEdit(dim.key, [key], val, true)">{{ val.join('、') }}</span>
                     <span v-else-if="typeof val === 'object' && val !== null" class="editable-value" @dblclick.stop="startEdit(dim.key, [key], Object.entries(val).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(', '))">{{ Object.entries(val).filter(([,v]) => v).map(([k,v]) => `${k}: ${v}`).join(', ') || '' }}</span>
-                    <span v-else class="editable-value" @dblclick.stop="startEdit(dim.key, [key], val)">{{ val }}</span>
+                    <div v-else-if="formatStructuredText(String(val))" class="formatted-text editable-value" v-html="formatStructuredText(String(val))" @dblclick.stop="startEdit(dim.key, [key], val)"></div>
+                    <span v-else class="editable-value whitespace-pre-line" @dblclick.stop="startEdit(dim.key, [key], val)">{{ val }}</span>
                   </template>
                 </template>
                 <template v-else>
@@ -182,7 +184,8 @@
           <template v-else>
             <textarea v-if="isEditing(dim.key)" v-model="editValue" class="edit-value-input edit-value-input-wide" ref="editInput"
               @blur="finishEdit" @keydown.enter.prevent="finishEdit" @keydown.escape="cancelEdit" rows="1" @input="autoResize" />
-            <p v-else-if="getCardValue(dim.key)" class="editable-value" @dblclick.stop="startEdit(dim.key, [], getCardValue(dim.key))">{{ getCardValue(dim.key) }}</p>
+            <div v-else-if="getCardValue(dim.key) && formatStructuredText(getCardValue(dim.key))" class="formatted-text editable-value" v-html="formatStructuredText(getCardValue(dim.key))" @dblclick.stop="startEdit(dim.key, [], getCardValue(dim.key))"></div>
+            <p v-else-if="getCardValue(dim.key)" class="editable-value whitespace-pre-line" @dblclick.stop="startEdit(dim.key, [], getCardValue(dim.key))">{{ getCardValue(dim.key) }}</p>
             <p v-else class="text-gray-400">暂无数据</p>
           </template>
         </div>
@@ -370,6 +373,41 @@ const hasActiveProcessing = computed(() => {
 const hasProcessing = computed(() => {
   return hasUploaded.value || hasActiveProcessing.value
 })
+
+function formatStructuredText(text) {
+  if (!text || typeof text !== 'string') return ''
+  const hasHeaders = text.includes('【')
+  const hasBullets = text.includes('•')
+  const hasNumbered = /\d{1,2}[\.\、]\s*[A-Za-z\u4e00-\u9fff]/.test(text)
+  if (!hasHeaders && !hasBullets && !hasNumbered) return ''
+
+  let s = text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+  if (hasHeaders) s = s.replace(/【/g, '\n【')
+  if (hasNumbered) s = s.replace(/(\s)(\d{1,2}[\.\、]\s*[A-Za-z\u4e00-\u9fff])/g, '\n$2')
+  if (hasBullets) s = s.replace(/(\s)(•)/g, '\n$2')
+
+  const lines = s.split('\n').map(l => l.trim()).filter(Boolean)
+  if (lines.length <= 1) return ''
+
+  const parts = []
+  for (const line of lines) {
+    if (/^【.*?】/.test(line)) {
+      const m = line.match(/^(【.*?】)\s*(.*)/)
+      parts.push(`<div class="fmt-section"><span class="fmt-section-title">${m[1]}</span></div>`)
+      if (m[2]) parts.push(`<div class="fmt-text">${m[2]}</div>`)
+    } else if (/^\d{1,2}[\.\、]\s/.test(line)) {
+      parts.push(`<div class="fmt-numbered">${line}</div>`)
+    } else if (/^•/.test(line)) {
+      parts.push(`<div class="fmt-bullet">${line}</div>`)
+    } else {
+      parts.push(`<div class="fmt-text">${line}</div>`)
+    }
+  }
+  return parts.join('')
+}
 
 function isEmptyValue(v) {
   if (v === null || v === undefined || v === '') return true
@@ -734,6 +772,38 @@ onUnmounted(() => {
 }
 .edit-value-input-wide {
   width: 100%;
+}
+.formatted-text .fmt-section {
+  margin-top: 12px;
+}
+.formatted-text .fmt-section:first-child {
+  margin-top: 0;
+}
+.formatted-text .fmt-section-title {
+  font-weight: 600;
+  color: #1e40af;
+  font-size: 13px;
+}
+.formatted-text .fmt-text {
+  line-height: 1.7;
+  margin: 2px 0;
+}
+.formatted-text .fmt-numbered {
+  margin-top: 8px;
+  margin-bottom: 2px;
+  padding-left: 8px;
+  border-left: 2px solid #93c5fd;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.formatted-text .fmt-bullet {
+  padding-left: 20px;
+  line-height: 1.7;
+  margin: 1px 0;
+  color: #4b5563;
+}
+.whitespace-pre-line {
+  white-space: pre-line;
 }
 .model-tag {
   color: #8b5cf6 !important;

@@ -467,17 +467,54 @@ function onDragHandlePointerDown(e, gi) {
   e.preventDefault()
   dragGroupIdx.value = gi
 
+  // Create ghost element from the header
+  const header = e.target.closest('.team-group-header')
+  let ghost = null
+  if (header) {
+    ghost = header.cloneNode(true)
+    Object.assign(ghost.style, {
+      position: 'fixed',
+      left: e.clientX + 'px',
+      top: e.clientY - 20 + 'px',
+      opacity: '0.7',
+      pointerEvents: 'none',
+      zIndex: '9999',
+      background: '#fff',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.15)',
+      borderRadius: '8px',
+      padding: '4px 12px',
+      width: 'fit-content',
+      whiteSpace: 'nowrap',
+    })
+    document.body.appendChild(ghost)
+  }
+
   const onPointerMove = (me) => {
-    const el = document.elementFromPoint(me.clientX, me.clientY)
-    if (el) {
-      const groupEl = el.closest('[data-group-idx]')
-      dropTargetIdx.value = groupEl ? parseInt(groupEl.dataset.groupIdx) : null
+    if (ghost) {
+      ghost.style.left = me.clientX + 'px'
+      ghost.style.top = (me.clientY - 20) + 'px'
     }
+    // Find nearest group by Y distance (works even in gaps between groups)
+    const groupEls = document.querySelectorAll('[data-group-idx]')
+    let targetIdx = null
+    let minDist = Infinity
+    for (const el of groupEls) {
+      const rect = el.getBoundingClientRect()
+      const dist = me.clientY < rect.top ? rect.top - me.clientY
+                 : me.clientY > rect.bottom ? me.clientY - rect.bottom
+                 : 0
+      if (dist < minDist) {
+        minDist = dist
+        targetIdx = parseInt(el.dataset.groupIdx)
+      }
+    }
+    dropTargetIdx.value = targetIdx
   }
 
   const onPointerUp = () => {
     document.removeEventListener('pointermove', onPointerMove)
     document.removeEventListener('pointerup', onPointerUp)
+    if (ghost) ghost.remove()
     const from = dragGroupIdx.value
     const to = dropTargetIdx.value
     if (from !== null && to !== null && from !== to) {
