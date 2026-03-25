@@ -196,9 +196,83 @@
               <p class="text-sm text-gray-600 line-clamp-2">
                 {{ talent.summary || '暂无摘要' }}
               </p>
+              <van-tag
+                v-if="talent.status && !talentTeamMap[talent.id]"
+                :color="statusColor(talent.status)"
+                size="small"
+                class="mt-1"
+              >{{ talent.status }}</van-tag>
             </div>
           </div>
         </div>
+
+        <!-- Status-based sub-groups for ungrouped talents -->
+        <template v-if="statusGroups.length > 0">
+          <div v-for="(sg, si) in statusGroups" :key="'status-' + sg.status">
+            <div
+              class="team-group-header cursor-pointer select-none"
+              :class="{ 'mt-8': si > 0 || groupedTalents.length > 0, 'mt-1': si === 0 && groupedTalents.length === 0 }"
+              @click="toggleGroupCollapse('status-' + sg.status)"
+            >
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-1 h-5 rounded-full" :style="{ background: sg.color }"></div>
+                <span class="text-lg font-bold" :style="{ color: sg.color }">
+                  {{ sg.label }}
+                </span>
+                <span class="team-group-count" :style="{ background: sg.color + '15', color: sg.color }">{{ sg.talents.length }}人</span>
+                <van-icon
+                  :name="collapsedGroups.has('status-' + sg.status) ? 'arrow-down' : 'arrow-up'"
+                  size="14"
+                  class="text-gray-400 ml-auto"
+                />
+              </div>
+            </div>
+            <div
+              v-show="!collapsedGroups.has('status-' + sg.status)"
+              class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+            >
+              <div
+                v-for="talent in sg.talents"
+                :key="talent.id"
+                class="bg-white rounded-xl shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow active:bg-gray-50"
+                @click="$router.push(`/talent/${talent.id}`)"
+              >
+                <div class="flex items-start justify-between mb-2">
+                  <div class="flex-1 min-w-0">
+                    <h3 class="text-base font-semibold text-gray-800">{{ talent.name }}</h3>
+                    <p class="text-xs text-gray-500">{{ talent.current_role || talent.department || '' }}</p>
+                  </div>
+                  <div class="flex items-center gap-1 flex-shrink-0 ml-2">
+                    <van-tag
+                      v-for="tag in talent.tags.slice(0, 3)"
+                      :key="tag.id"
+                      :color="tag.color"
+                      size="small"
+                      plain
+                    >
+                      {{ tag.name }}
+                    </van-tag>
+                    <van-icon
+                      name="delete-o"
+                      size="16"
+                      color="#999"
+                      class="ml-1 p-1 rounded-full hover:bg-gray-100"
+                      @click.stop="confirmDelete(talent)"
+                    />
+                  </div>
+                </div>
+                <p class="text-sm text-gray-600 line-clamp-2">
+                  {{ talent.summary || '暂无摘要' }}
+                </p>
+                <van-tag
+                  :color="sg.color"
+                  size="small"
+                  class="mt-1"
+                >{{ talent.status }}</van-tag>
+              </div>
+            </div>
+          </div>
+        </template>
       </van-pull-refresh>
 
       <!-- Scheduled Query Results -->
@@ -388,9 +462,27 @@ const talentTeamMap = computed(() => {
   return map
 })
 
+// Status config for grouping
+const STATUS_ORDER = ['面试通过', '面试否决', '简历未通过', '拒绝岗位', '已离职']
+const STATUS_COLORS = {
+  '面试通过': '#10B981',
+  '面试否决': '#EF4444',
+  '简历未通过': '#EF4444',
+  '拒绝岗位': '#6B7280',
+  '已离职': '#6B7280',
+}
+
+function statusColor(status) {
+  return STATUS_COLORS[status] || '#9CA3AF'
+}
+
 const groupedTalents = computed(() => {
   const talents = displayedTalents.value
-  if (orgStore.teams.length === 0) return [{ team: null, talents }]
+  if (orgStore.teams.length === 0) {
+    // No teams: put talents without status in one flat group
+    const noStatus = talents.filter(t => !t.status)
+    return noStatus.length > 0 ? [{ team: null, talents: noStatus }] : []
+  }
 
   const teamGroups = {} // team_id -> { team, talents }
   const ungrouped = []
@@ -415,8 +507,10 @@ const groupedTalents = computed(() => {
   const naturalCmp = (a, b) => toSortKey(a).localeCompare(toSortKey(b), 'zh-CN', { numeric: true })
 
   const groups = Object.values(teamGroups)
-  if (ungrouped.length > 0) {
-    groups.push({ team: null, talents: ungrouped })
+  // Only put talents without status in "未分配团队"; those with status go to statusGroups
+  const ungroupedNoStatus = ungrouped.filter(t => !t.status)
+  if (ungroupedNoStatus.length > 0) {
+    groups.push({ team: null, talents: ungroupedNoStatus })
   }
 
   // Sort: use custom order if saved, otherwise natural sort
@@ -446,6 +540,36 @@ const groupedTalents = computed(() => {
       if (pa !== pb) return naturalCmp(pa, pb)
       return naturalCmp(a.team.name, b.team.name)
     })
+  }
+  return groups
+})
+
+// Status-based groups for ungrouped talents that have a status
+const statusGroups = computed(() => {
+  const talents = displayedTalents.value
+  // Find ungrouped talents with status
+  const ungroupedWithStatus = talents.filter(t => {
+    const inTeam = talentTeamMap.value[t.id]
+    return (!inTeam || inTeam.length === 0) && t.status
+  })
+  if (ungroupedWithStatus.length === 0) return []
+
+  const byStatus = {}
+  for (const t of ungroupedWithStatus) {
+    if (!byStatus[t.status]) byStatus[t.status] = []
+    byStatus[t.status].push(t)
+  }
+
+  const groups = []
+  for (const s of STATUS_ORDER) {
+    if (byStatus[s]) {
+      groups.push({ status: s, label: s, color: STATUS_COLORS[s] || '#9CA3AF', talents: byStatus[s] })
+      delete byStatus[s]
+    }
+  }
+  // Any remaining unknown statuses
+  for (const [s, talents] of Object.entries(byStatus)) {
+    groups.push({ status: s, label: s, color: '#9CA3AF', talents })
   }
   return groups
 })

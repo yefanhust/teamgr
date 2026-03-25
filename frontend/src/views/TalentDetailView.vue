@@ -94,7 +94,33 @@
             <span class="text-gray-500">电话：</span>{{ talent.phone }}
           </div>
         </div>
+        <!-- Talent Status -->
+        <div class="flex items-center gap-2 mt-3">
+          <span class="text-sm text-gray-500">状态：</span>
+          <van-tag
+            v-if="talent.status"
+            :color="statusColor(talent.status)"
+            size="medium"
+            class="cursor-pointer"
+            @click="showStatusSheet = true"
+          >{{ talent.status }}</van-tag>
+          <van-tag
+            v-else
+            type="default"
+            size="medium"
+            class="cursor-pointer"
+            @click="showStatusSheet = true"
+          >未设置</van-tag>
+        </div>
       </div>
+
+      <!-- Status ActionSheet -->
+      <van-action-sheet
+        v-model:show="showStatusSheet"
+        :actions="statusActions"
+        cancel-text="取消"
+        @select="onStatusSelect"
+      />
 
       <!-- Dimension Cards -->
       <div
@@ -435,23 +461,6 @@
           <p class="text-sm text-gray-500 mb-2">已选择 <strong>{{ selectedLogIds.size }}</strong> 条面试实录</p>
         </div>
 
-        <!-- Interview Result -->
-        <div class="mb-4">
-          <label class="text-sm font-medium text-gray-600 mb-2 block">面试结果</label>
-          <div class="flex gap-3">
-            <div
-              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
-              :class="evalForm.result === '通过' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
-              @click="evalForm.result = '通过'"
-            >通过</div>
-            <div
-              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
-              :class="evalForm.result === '否决' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
-              @click="evalForm.result = '否决'"
-            >否决</div>
-          </div>
-        </div>
-
         <!-- Rating -->
         <div class="mb-5">
           <label class="text-sm font-medium text-gray-600 mb-2 block">评级</label>
@@ -481,7 +490,7 @@
           round
           :loading="evalGenerating"
           loading-text="提交中..."
-          :disabled="!evalForm.result || !evalForm.rating"
+          :disabled="!evalForm.rating"
           @click="doGenerateEvaluation"
         >开始生成</van-button>
       </div>
@@ -497,23 +506,6 @@
     >
       <div class="p-5">
         <h3 class="text-base font-bold text-gray-800 mb-4">直接录入面试结果</h3>
-
-        <!-- Interview Result -->
-        <div class="mb-4">
-          <label class="text-sm font-medium text-gray-600 mb-2 block">面试结果</label>
-          <div class="flex gap-3">
-            <div
-              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
-              :class="directFeedbackForm.result === '通过' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
-              @click="directFeedbackForm.result = '通过'"
-            >通过</div>
-            <div
-              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
-              :class="directFeedbackForm.result === '否决' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
-              @click="directFeedbackForm.result = '否决'"
-            >否决</div>
-          </div>
-        </div>
 
         <!-- Rating -->
         <div class="mb-4">
@@ -555,7 +547,7 @@
           round
           :loading="directFeedbackSaving"
           loading-text="保存中..."
-          :disabled="!directFeedbackForm.result || !directFeedbackForm.rating || !directFeedbackForm.evaluation.trim()"
+          :disabled="!directFeedbackForm.rating || !directFeedbackForm.evaluation.trim()"
           @click="doSaveDirectFeedback"
         >保存</van-button>
       </div>
@@ -601,10 +593,10 @@ const isDraggingSelect = ref(false)
 const showEvalDialog = ref(false)
 const evalGenerating = ref(false)
 const evalResultText = ref('')
-const evalForm = ref({ result: '', rating: '' })
+const evalForm = ref({ rating: '' })
 const showDirectFeedbackDialog = ref(false)
 const directFeedbackSaving = ref(false)
-const directFeedbackForm = ref({ result: '', rating: '', evaluation: '' })
+const directFeedbackForm = ref({ rating: '', evaluation: '' })
 const entryLogsContainer = ref(null)
 
 const ratingOptions = [
@@ -615,6 +607,35 @@ const ratingOptions = [
   { value: 'B', label: '强烈不推荐，放弃', negative: true },
 ]
 const removingTag = ref(null)
+const showStatusSheet = ref(false)
+const statusActions = [
+  { name: '面试通过', color: '#10B981' },
+  { name: '面试否决', color: '#EF4444' },
+  { name: '简历未通过', color: '#EF4444' },
+  { name: '拒绝岗位', color: '#6B7280' },
+  { name: '已离职', color: '#6B7280' },
+  { name: '清除状态', color: '#9CA3AF' },
+]
+
+function statusColor(status) {
+  if (status === '面试通过') return '#10B981'
+  if (status === '面试否决' || status === '简历未通过') return '#EF4444'
+  if (status === '拒绝岗位' || status === '已离职') return '#6B7280'
+  return '#9CA3AF'
+}
+
+async function onStatusSelect(action) {
+  showStatusSheet.value = false
+  const newStatus = action.name === '清除状态' ? '' : action.name
+  try {
+    const updated = await store.updateTalent(talent.value.id, { status: newStatus })
+    talent.value = updated
+    showToast(newStatus ? `状态已设为「${newStatus}」` : '状态已清除')
+  } catch (e) {
+    showToast('更新失败')
+  }
+}
+
 let pollTimer = null
 
 const actions = [
@@ -1059,8 +1080,8 @@ function onLogPointerEnter(logId) {
 let evalPollTimer = null
 
 async function doGenerateEvaluation() {
-  if (!evalForm.value.result || !evalForm.value.rating) {
-    showToast('请选择面试结果和评级')
+  if (!evalForm.value.rating) {
+    showToast('请选择评级')
     return
   }
   evalGenerating.value = true
@@ -1068,14 +1089,13 @@ async function doGenerateEvaluation() {
     const res = await store.generateInterviewEvaluation(
       talent.value.id,
       Array.from(selectedLogIds.value),
-      evalForm.value.result,
       evalForm.value.rating,
     )
     // Background task started — close dialog and poll
     showEvalDialog.value = false
     exitSelectMode()
     showToast('面试评价生成中，可安全离开页面')
-    evalForm.value = { result: '', rating: '' }
+    evalForm.value = { rating: '' }
     // Start polling for completion
     startEvalPolling(res.entry_id)
   } catch (e) {
@@ -1136,24 +1156,24 @@ async function handleDeleteFeedback() {
 
 function onEvalDialogClose() {
   evalResultText.value = ''
-  evalForm.value = { result: '', rating: '' }
+  evalForm.value = { rating: '' }
 }
 
 function onDirectFeedbackDialogClose() {
-  directFeedbackForm.value = { result: '', rating: '', evaluation: '' }
+  directFeedbackForm.value = { rating: '', evaluation: '' }
 }
 
 async function doSaveDirectFeedback() {
-  const { result, rating, evaluation } = directFeedbackForm.value
-  if (!result || !rating || !evaluation.trim()) {
+  const { rating, evaluation } = directFeedbackForm.value
+  if (!rating || !evaluation.trim()) {
     showToast('请填写完整信息')
     return
   }
   directFeedbackSaving.value = true
   try {
-    await store.saveDirectInterviewFeedback(talent.value.id, result, rating, evaluation)
+    await store.saveDirectInterviewFeedback(talent.value.id, rating, evaluation)
     showDirectFeedbackDialog.value = false
-    directFeedbackForm.value = { result: '', rating: '', evaluation: '' }
+    directFeedbackForm.value = { rating: '', evaluation: '' }
     showToast('面试结果已保存')
     refreshData()
   } catch (e) {

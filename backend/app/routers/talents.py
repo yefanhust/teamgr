@@ -32,6 +32,7 @@ class TalentUpdate(BaseModel):
     phone: Optional[str] = None
     current_role: Optional[str] = None
     department: Optional[str] = None
+    status: Optional[str] = None
     tag_ids: Optional[list[int]] = None
     card_data: Optional[dict] = None
 
@@ -106,6 +107,25 @@ def _build_summary(name: str, age: str, raw_summary: str) -> str:
     return f"{name}，{s}" if s else name
 
 
+def _compute_status(talent: Talent) -> str:
+    """Compute talent status: manual status takes priority, otherwise derive from interview feedback."""
+    manual_status = getattr(talent, "status", "") or ""
+    if manual_status:
+        return manual_status
+    # Auto-derive from interview_feedback
+    card_data = talent.card_data or {}
+    feedbacks = card_data.get("interview_feedback")
+    if isinstance(feedbacks, list) and feedbacks:
+        latest = feedbacks[-1]
+        if isinstance(latest, dict):
+            result = latest.get("result", "")
+            if result == "通过":
+                return "面试通过"
+            elif result == "否决":
+                return "面试否决"
+    return ""
+
+
 def _talent_to_response(talent: Talent) -> dict:
     card_data = talent.card_data or {}
     pi = card_data.get("personal_info")
@@ -125,6 +145,7 @@ def _talent_to_response(talent: Talent) -> dict:
         "phone": talent.phone or "",
         "current_role": talent.current_role or "",
         "department": talent.department or "",
+        "status": _compute_status(talent),
         "card_data": card_data,
         "summary": summary,
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in talent.tags],
@@ -311,6 +332,8 @@ async def update_talent(
         talent.current_role = body.current_role
     if body.department is not None:
         talent.department = body.department
+    if body.status is not None:
+        talent.status = body.status
 
     if body.card_data is not None:
         # Merge provided card_data into existing

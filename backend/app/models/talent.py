@@ -25,6 +25,7 @@ class Talent(Base):
     department = Column(String(200), default="")
     card_data = Column(JSON, default=dict)
     summary = Column(Text, default="")
+    status = Column(String(50), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

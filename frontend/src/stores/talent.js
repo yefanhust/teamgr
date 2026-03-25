@@ -121,20 +121,18 @@ export const useTalentStore = defineStore('talent', () => {
     await api.delete(`/api/entry/interview-evaluation/${talentId}/${index}`)
   }
 
-  async function generateInterviewEvaluation(talentId, entryLogIds, result, rating) {
+  async function generateInterviewEvaluation(talentId, entryLogIds, rating) {
     const res = await api.post('/api/entry/interview-evaluation', {
       talent_id: talentId,
       entry_log_ids: entryLogIds,
-      result,
       rating,
     }, { timeout: 120000 })
     return res.data
   }
 
-  async function saveDirectInterviewFeedback(talentId, result, rating, evaluation) {
+  async function saveDirectInterviewFeedback(talentId, rating, evaluation) {
     const res = await api.post('/api/entry/interview-feedback-direct', {
       talent_id: talentId,
-      result,
       rating,
       evaluation,
     })

@@ -820,8 +820,8 @@ async def get_entry_logs(
     ]
 
 
-VALID_INTERVIEW_RESULTS = {"通过", "否决"}
 VALID_INTERVIEW_RATINGS = {"S", "A+", "A", "A-", "B"}
+PASS_RATINGS = {"S", "A+", "A"}
 RATING_LABELS = {
     "S": "强烈推荐",
     "A+": "非常推荐",
@@ -831,16 +831,18 @@ RATING_LABELS = {
 }
 
 
+def result_from_rating(rating: str) -> str:
+    return "通过" if rating in PASS_RATINGS else "否决"
+
+
 class InterviewEvaluationRequest(BaseModel):
     talent_id: int
     entry_log_ids: list[int]
-    result: str
     rating: str
 
 
 class DirectInterviewFeedbackRequest(BaseModel):
     talent_id: int
-    result: str
     rating: str
     evaluation: str
 
@@ -911,12 +913,12 @@ async def generate_interview_evaluation_api(
     _=Depends(require_auth),
 ):
     """Generate interview evaluation in background. Returns immediately with entry_id for polling."""
-    if body.result not in VALID_INTERVIEW_RESULTS:
-        raise HTTPException(status_code=400, detail=f"面试结果必须是: {', '.join(VALID_INTERVIEW_RESULTS)}")
     if body.rating not in VALID_INTERVIEW_RATINGS:
         raise HTTPException(status_code=400, detail=f"评级必须是: {', '.join(VALID_INTERVIEW_RATINGS)}")
     if not body.entry_log_ids:
         raise HTTPException(status_code=400, detail="请至少选择一条面试实录")
+
+    result_str = result_from_rating(body.rating)
 
     talent = db.query(Talent).filter(Talent.id == body.talent_id).first()
     if not talent:
@@ -936,7 +938,7 @@ async def generate_interview_evaluation_api(
     # Create a tracking entry log
     entry_log = EntryLog(
         talent_id=talent.id,
-        content=f"[面试评价生成] {body.result} / {body.rating}({rating_label})",
+        content=f"[面试评价生成] {result_str} / {body.rating}({rating_label})",
         source="interview-eval",
         status="processing",
     )
@@ -949,7 +951,7 @@ async def generate_interview_evaluation_api(
         entry_log_id=entry_log.id,
         talent_id=talent.id,
         interview_records=interview_records,
-        result_str=body.result,
+        result_str=result_str,
         rating=body.rating,
         rating_label=rating_label,
         talent_name=talent.name,
@@ -992,12 +994,12 @@ async def save_direct_interview_feedback(
     _=Depends(require_auth),
 ):
     """Save interview feedback directly without LLM generation."""
-    if body.result not in VALID_INTERVIEW_RESULTS:
-        raise HTTPException(status_code=400, detail=f"面试结果必须是: {', '.join(VALID_INTERVIEW_RESULTS)}")
     if body.rating not in VALID_INTERVIEW_RATINGS:
         raise HTTPException(status_code=400, detail=f"评级必须是: {', '.join(VALID_INTERVIEW_RATINGS)}")
     if not body.evaluation or not body.evaluation.strip():
         raise HTTPException(status_code=400, detail="面试评价不能为空")
+
+    result_str = result_from_rating(body.rating)
 
     talent = db.query(Talent).filter(Talent.id == body.talent_id).first()
     if not talent:
@@ -1008,7 +1010,7 @@ async def save_direct_interview_feedback(
     card_data = dict(talent.card_data or {})
     feedback_list = list(card_data.get("interview_feedback", []))
     feedback_list.append({
-        "result": body.result,
+        "result": result_str,
         "rating": body.rating,
         "rating_label": rating_label,
         "evaluation": body.evaluation.strip(),
