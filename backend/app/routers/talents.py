@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.talent import Talent, Tag, TalentTag, CardDimension
+from app.models.team import TeamMember
 from app.middleware.auth_middleware import require_auth
 from app.services.pinyin_service import get_pinyin_data, match_pinyin
 from app.services.pdf_service import generate_talent_card_pdf
@@ -107,11 +108,14 @@ def _build_summary(name: str, age: str, raw_summary: str) -> str:
     return f"{name}，{s}" if s else name
 
 
-def _compute_status(talent: Talent) -> str:
-    """Compute talent status: manual status takes priority, otherwise derive from interview feedback."""
+def _compute_status(talent: Talent, has_team: bool = False) -> str:
+    """Compute talent status: manual status takes priority, then team affiliation, then interview feedback."""
     manual_status = getattr(talent, "status", "") or ""
     if manual_status:
         return manual_status
+    # Team-affiliated talents default to "雇佣"
+    if has_team:
+        return "雇佣"
     # Auto-derive from interview_feedback
     card_data = talent.card_data or {}
     feedbacks = card_data.get("interview_feedback")
@@ -126,7 +130,7 @@ def _compute_status(talent: Talent) -> str:
     return ""
 
 
-def _talent_to_response(talent: Talent) -> dict:
+def _talent_to_response(talent: Talent, team_talent_ids: set = None) -> dict:
     card_data = talent.card_data or {}
     pi = card_data.get("personal_info")
     computed_age = ""
@@ -136,6 +140,7 @@ def _talent_to_response(talent: Talent) -> dict:
             pi = {**pi, "age": computed_age}
             card_data = {**card_data, "personal_info": pi}
     summary = _build_summary(talent.name, computed_age, talent.summary or "")
+    has_team = team_talent_ids is not None and talent.id in team_talent_ids
     return {
         "id": talent.id,
         "name": talent.name,
@@ -145,13 +150,19 @@ def _talent_to_response(talent: Talent) -> dict:
         "phone": talent.phone or "",
         "current_role": talent.current_role or "",
         "department": talent.department or "",
-        "status": _compute_status(talent),
+        "status": _compute_status(talent, has_team=has_team),
         "card_data": card_data,
         "summary": summary,
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in talent.tags],
         "created_at": talent.created_at.isoformat() if talent.created_at else "",
         "updated_at": talent.updated_at.isoformat() if talent.updated_at else "",
     }
+
+
+def _get_team_talent_ids(db: Session) -> set:
+    """Get set of talent IDs that have team affiliation."""
+    rows = db.query(TeamMember.talent_id).distinct().all()
+    return {r[0] for r in rows}
 
 
 @router.get("")
@@ -171,11 +182,12 @@ async def list_talents(
         (page - 1) * page_size
     ).limit(page_size).all()
 
+    team_ids = _get_team_talent_ids(db)
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "items": [_talent_to_response(t) for t in talents],
+        "items": [_talent_to_response(t, team_ids) for t in talents],
     }
 
 
@@ -186,9 +198,10 @@ async def search_talents(
     _=Depends(require_auth),
 ):
     """Search talents by name (supports pinyin fuzzy matching)."""
+    team_ids = _get_team_talent_ids(db)
     if not q.strip():
         talents = db.query(Talent).order_by(Talent.name).limit(50).all()
-        return [_talent_to_response(t) for t in talents]
+        return [_talent_to_response(t, team_ids) for t in talents]
 
     all_talents = db.query(Talent).all()
     matched = [
@@ -196,7 +209,7 @@ async def search_talents(
         if match_pinyin(q, t.name, t.name_pinyin or "", t.name_pinyin_initials or "")
     ]
 
-    return [_talent_to_response(t) for t in matched]
+    return [_talent_to_response(t, team_ids) for t in matched]
 
 
 @router.post("/semantic-search")
@@ -223,11 +236,12 @@ async def semantic_search_talents(
 
     matched_ids = await semantic_search(query, summaries)
 
+    team_ids = _get_team_talent_ids(db)
     id_to_talent = {t.id: t for t in all_talents}
     results = []
     for tid in matched_ids:
         if tid in id_to_talent:
-            results.append(_talent_to_response(id_to_talent[tid]))
+            results.append(_talent_to_response(id_to_talent[tid], team_ids))
 
     return results
 
@@ -261,7 +275,8 @@ async def get_talent(
     talent = db.query(Talent).filter(Talent.id == talent_id).first()
     if not talent:
         raise HTTPException(status_code=404, detail="人才不存在")
-    return _talent_to_response(talent)
+    team_ids = _get_team_talent_ids(db)
+    return _talent_to_response(talent, team_ids)
 
 
 @router.post("")
@@ -299,7 +314,8 @@ async def create_talent(
     db.add(talent)
     db.commit()
     db.refresh(talent)
-    return _talent_to_response(talent)
+    team_ids = _get_team_talent_ids(db)
+    return _talent_to_response(talent, team_ids)
 
 
 @router.put("/{talent_id}")
@@ -349,7 +365,8 @@ async def update_talent(
 
     db.commit()
     db.refresh(talent)
-    return _talent_to_response(talent)
+    team_ids = _get_team_talent_ids(db)
+    return _talent_to_response(talent, team_ids)
 
 
 @router.delete("/{talent_id}")

@@ -7,16 +7,26 @@
       <p>暂无团队数据，请先在"组织"中创建团队并添加成员</p>
     </div>
 
-    <div v-else class="team-sections">
+    <div v-else class="team-sections" ref="teamSectionsRef">
       <div
-        v-for="team in sortedTeams"
+        v-for="(team, index) in sortedTeams"
         :key="team.id"
         class="team-section"
+        :class="{
+          'team-dragging': teamDrag.active && teamDrag.teamId === team.id,
+          'team-drop-before': teamDrag.active && teamDrag.dropIndex === index && teamDrag.teamId !== team.id,
+        }"
       >
         <h3
           class="team-section-title"
           @click="toggleCollapse(team.id)"
         >
+          <span
+            class="team-drag-handle"
+            @pointerdown.stop.prevent="onTeamDragStart($event, team.id, index)"
+          >
+            <van-icon name="wap-nav" size="14" />
+          </span>
           <van-icon
             :name="isCollapsed(team.id) ? 'arrow' : 'arrow-down'"
             size="14"
@@ -91,18 +101,24 @@
           </div>
         </div>
       </div>
+      <!-- Drop indicator at end of list -->
+      <div
+        v-if="teamDrag.active && teamDrag.dropIndex === sortedTeams.length"
+        class="team-drop-indicator-end"
+      ></div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useOrganizationStore } from '../stores/organization'
 
 const router = useRouter()
 const store = useOrganizationStore()
 const loading = ref(true)
+const teamSectionsRef = ref(null)
 
 // Collapse state — persisted
 const COLLAPSE_KEY = 'teamgr_project_view_collapsed'
@@ -148,17 +164,90 @@ function getOffsetStyle(type, teamId, itemId) {
   return { transform: `translate(${o.x}px, ${o.y}px)` }
 }
 
+// Team order — persisted
+const TEAM_ORDER_KEY = 'teamgr_project_view_team_order'
+const teamOrder = ref(JSON.parse(localStorage.getItem(TEAM_ORDER_KEY) || '[]'))
+
 const teamsWithMembers = computed(() => {
   return store.projectView.filter(t => t.members.length > 0)
 })
 
 const sortedTeams = computed(() => {
-  return [...teamsWithMembers.value].sort((a, b) => {
-    const ap = a.projects.length > 0 ? 0 : 1
-    const bp = b.projects.length > 0 ? 0 : 1
-    return ap - bp
+  const teams = [...teamsWithMembers.value]
+  const order = teamOrder.value
+  if (order.length === 0) {
+    // Default sort: teams with projects first
+    return teams.sort((a, b) => {
+      const ap = a.projects.length > 0 ? 0 : 1
+      const bp = b.projects.length > 0 ? 0 : 1
+      return ap - bp
+    })
+  }
+  return teams.sort((a, b) => {
+    const ai = order.indexOf(a.id)
+    const bi = order.indexOf(b.id)
+    return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi)
   })
 })
+
+// Team drag reorder
+const teamDrag = reactive({
+  active: false,
+  teamId: null,
+  startIndex: -1,
+  startY: 0,
+  dropIndex: -1,
+})
+
+function onTeamDragStart(e, teamId, index) {
+  teamDrag.teamId = teamId
+  teamDrag.startIndex = index
+  teamDrag.startY = e.clientY
+  teamDrag.active = false
+  teamDrag.dropIndex = -1
+  window.addEventListener('pointermove', onTeamDragMove)
+  window.addEventListener('pointerup', onTeamDragEnd, { once: true })
+}
+
+function onTeamDragMove(e) {
+  if (!teamDrag.teamId) return
+  if (!teamDrag.active && Math.abs(e.clientY - teamDrag.startY) < 5) return
+  teamDrag.active = true
+
+  // Calculate drop position based on team section midpoints
+  const container = teamSectionsRef.value
+  if (!container) return
+  const sections = container.querySelectorAll('.team-section')
+  let dropIdx = sections.length
+  for (let i = 0; i < sections.length; i++) {
+    const rect = sections[i].getBoundingClientRect()
+    if (e.clientY < rect.top + rect.height / 2) {
+      dropIdx = i
+      break
+    }
+  }
+  teamDrag.dropIndex = dropIdx
+}
+
+function onTeamDragEnd() {
+  window.removeEventListener('pointermove', onTeamDragMove)
+  if (teamDrag.active && teamDrag.dropIndex !== -1) {
+    const teams = [...sortedTeams.value]
+    const fromIdx = teamDrag.startIndex
+    let toIdx = teamDrag.dropIndex
+    if (toIdx > fromIdx) toIdx--
+    if (fromIdx !== toIdx) {
+      const [moved] = teams.splice(fromIdx, 1)
+      teams.splice(toIdx, 0, moved)
+      teamOrder.value = teams.map(t => t.id)
+      localStorage.setItem(TEAM_ORDER_KEY, JSON.stringify(teamOrder.value))
+    }
+  }
+  teamDrag.active = false
+  teamDrag.teamId = null
+  teamDrag.startIndex = -1
+  teamDrag.dropIndex = -1
+}
 
 function projectMembers(team, projectId) {
   return team.members.filter(m => m.project_ids.includes(projectId))
@@ -234,6 +323,10 @@ onMounted(async () => {
   await store.fetchProjectView()
   loading.value = false
 })
+
+onUnmounted(() => {
+  window.removeEventListener('pointermove', onTeamDragMove)
+})
 </script>
 
 <style scoped>
@@ -277,6 +370,43 @@ onMounted(async () => {
 
 .team-section-title:hover {
   background: #f1f5f9;
+}
+
+/* Team drag handle */
+.team-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  color: #d1d5db;
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.team-drag-handle:hover {
+  color: #6b7280;
+}
+
+.team-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Team drag states */
+.team-section.team-dragging {
+  opacity: 0.4;
+  transition: opacity 0.15s;
+}
+
+.team-section.team-drop-before {
+  box-shadow: 0 -3px 0 0 #3b82f6;
+}
+
+.team-drop-indicator-end {
+  height: 3px;
+  background: #3b82f6;
+  border-radius: 2px;
 }
 
 .collapse-icon {

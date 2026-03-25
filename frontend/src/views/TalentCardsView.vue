@@ -219,12 +219,15 @@
               <p class="text-sm text-gray-600 line-clamp-2">
                 {{ talent.summary || '暂无摘要' }}
               </p>
-              <van-tag
-                v-if="talent.status && group.type !== 'team'"
-                :color="statusColor(talent.status)"
-                size="small"
-                class="mt-1"
-              >{{ talent.status }}</van-tag>
+              <div class="flex items-center justify-between mt-1">
+                <van-tag
+                  v-if="talent.status && group.type !== 'team'"
+                  :color="statusColor(talent.status)"
+                  size="small"
+                >{{ talent.status }}</van-tag>
+                <span v-else></span>
+                <span class="text-[10px] text-gray-400">创建于 {{ formatCreatedAt(talent.created_at) }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -418,8 +421,9 @@ const talentTeamMap = computed(() => {
 })
 
 // Status config for grouping
-const STATUS_ORDER = ['面试通过', '面试否决', '当轮通过后否决', '简历未通过', '拒绝岗位', '已离职']
+const STATUS_ORDER = ['雇佣', '面试通过', '面试否决', '当轮通过后否决', '简历未通过', '拒绝岗位', '已离职']
 const STATUS_COLORS = {
+  '雇佣': '#3B82F6',
   '面试通过': '#10B981',
   '面试否决': '#EF4444',
   '当轮通过后否决': '#F59E0B',
@@ -430,6 +434,12 @@ const STATUS_COLORS = {
 
 function statusColor(status) {
   return STATUS_COLORS[status] || '#9CA3AF'
+}
+
+function formatCreatedAt(dateStr) {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 // Unified allGroups: team groups + ungrouped + status groups, all draggable

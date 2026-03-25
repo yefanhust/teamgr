@@ -609,6 +609,7 @@ const ratingOptions = [
 const removingTag = ref(null)
 const showStatusSheet = ref(false)
 const statusActions = [
+  { name: '雇佣', color: '#3B82F6' },
   { name: '面试通过', color: '#10B981' },
   { name: '面试否决', color: '#EF4444' },
   { name: '当轮通过后否决', color: '#F59E0B' },
@@ -619,6 +620,7 @@ const statusActions = [
 ]
 
 function statusColor(status) {
+  if (status === '雇佣') return '#3B82F6'
   if (status === '面试通过') return '#10B981'
   if (status === '面试否决' || status === '简历未通过') return '#EF4444'
   if (status === '当轮通过后否决') return '#F59E0B'
