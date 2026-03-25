@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.talent import Talent, CardDimension, PresetQuestion, ScheduledQueryResult
+from app.models.team import TeamMember
 from app.middleware.auth_middleware import require_auth
 from app.services.llm_service import analyze_query_dimensions, answer_talent_query
 
@@ -87,7 +88,8 @@ def _restore_names(text: str, pseudo_to_name: dict) -> str:
 @router.post("/answer")
 async def chat_answer(req: ChatAnswerRequest, db: Session = Depends(get_db)):
     """Step 2: Extract relevant dimension data, pseudonymize names, answer query, restore names."""
-    all_talents = db.query(Talent).all()
+    team_talent_ids = db.query(TeamMember.talent_id).distinct().subquery()
+    all_talents = db.query(Talent).filter(Talent.id.in_(team_talent_ids)).all()
 
     # Build name privacy mapping
     real_names = [t.name for t in all_talents if t.name]

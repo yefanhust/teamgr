@@ -47,6 +47,7 @@ async def _run_single_query(question: str) -> str:
     """Run the full 2-step LLM flow for a single question. Returns the final answer."""
     from app.database import SessionLocal
     from app.models.talent import Talent, CardDimension
+    from app.models.team import TeamMember
     from app.services.llm_service import analyze_query_dimensions, answer_talent_query
 
     db = SessionLocal()
@@ -60,8 +61,9 @@ async def _run_single_query(question: str) -> str:
         if not relevant_dims:
             return "未找到相关维度，无法回答该问题。"
 
-        # Step 2: Build context with name privacy
-        all_talents = db.query(Talent).all()
+        # Step 2: Build context with name privacy (only talents with team affiliation)
+        team_talent_ids = db.query(TeamMember.talent_id).distinct().subquery()
+        all_talents = db.query(Talent).filter(Talent.id.in_(team_talent_ids)).all()
         real_names = [t.name for t in all_talents if t.name]
         name_to_pseudo, pseudo_to_name = _build_name_mapping(real_names)
         sorted_names = sorted(name_to_pseudo.keys(), key=len, reverse=True)
