@@ -611,6 +611,7 @@ const showStatusSheet = ref(false)
 const statusActions = [
   { name: '面试通过', color: '#10B981' },
   { name: '面试否决', color: '#EF4444' },
+  { name: '当轮通过后否决', color: '#F59E0B' },
   { name: '简历未通过', color: '#EF4444' },
   { name: '拒绝岗位', color: '#6B7280' },
   { name: '已离职', color: '#6B7280' },
@@ -620,6 +621,7 @@ const statusActions = [
 function statusColor(status) {
   if (status === '面试通过') return '#10B981'
   if (status === '面试否决' || status === '简历未通过') return '#EF4444'
+  if (status === '当轮通过后否决') return '#F59E0B'
   if (status === '拒绝岗位' || status === '已离职') return '#6B7280'
   return '#9CA3AF'
 }

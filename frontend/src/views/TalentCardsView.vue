@@ -131,36 +131,59 @@
           </van-button>
         </div>
 
-        <div v-for="(group, gi) in groupedTalents" :key="group.team ? group.team.id : 'ungrouped'" :data-group-idx="gi">
+        <div v-for="(group, gi) in allGroups" :key="group.key" :data-group-idx="gi">
           <div
-            v-if="groupedTalents.length > 1"
+            v-if="allGroups.length > 1"
             class="team-group-header cursor-pointer select-none"
             :class="{ 'mt-8': gi > 0, 'mt-1': gi === 0, 'group-drag-over': dropTargetIdx === gi && dragGroupIdx !== null && dragGroupIdx !== gi }"
-            @click="toggleGroupCollapse(group.team ? group.team.id : 'ungrouped')"
+            @click="toggleGroupCollapse(group.key)"
           >
             <div class="flex items-center gap-3 mb-3">
               <van-icon
-                v-if="group.team"
                 name="wap-nav"
                 size="16"
                 class="drag-handle text-gray-300 cursor-grab flex-shrink-0"
                 @pointerdown="onDragHandlePointerDown($event, gi)"
                 @click.stop
               />
-              <div class="team-group-indicator" :class="group.team ? 'bg-blue-500' : 'bg-gray-400'"></div>
-              <span class="text-lg font-bold" :class="group.team ? 'text-gray-800' : 'text-gray-500'">
-                {{ group.team ? (group.team.parent_name ? group.team.parent_name + ' - ' + group.team.name : group.team.name) : '未分配团队' }}
+              <div
+                v-if="group.type === 'team'"
+                class="team-group-indicator bg-blue-500"
+              ></div>
+              <div
+                v-else-if="group.type === 'status'"
+                class="w-1 h-5 rounded-full"
+                :style="{ background: group.color }"
+              ></div>
+              <div
+                v-else
+                class="team-group-indicator bg-gray-400"
+              ></div>
+              <span class="text-lg font-bold" :class="group.type === 'team' ? 'text-gray-800' : (group.type === 'status' ? '' : 'text-gray-500')" :style="group.type === 'status' ? { color: group.color } : {}">
+                {{ group.label }}
               </span>
-              <span class="team-group-count" :class="group.team ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'">{{ group.talents.length }}人</span>
+              <span
+                v-if="group.type === 'team'"
+                class="team-group-count bg-blue-50 text-blue-600"
+              >{{ group.talents.length }}人</span>
+              <span
+                v-else-if="group.type === 'status'"
+                class="team-group-count"
+                :style="{ background: group.color + '15', color: group.color }"
+              >{{ group.talents.length }}人</span>
+              <span
+                v-else
+                class="team-group-count bg-gray-100 text-gray-500"
+              >{{ group.talents.length }}人</span>
               <van-icon
-                :name="collapsedGroups.has(group.team ? group.team.id : 'ungrouped') ? 'arrow-down' : 'arrow-up'"
+                :name="collapsedGroups.has(group.key) ? 'arrow-down' : 'arrow-up'"
                 size="14"
                 class="text-gray-400 ml-auto"
               />
             </div>
           </div>
           <div
-            v-show="!collapsedGroups.has(group.team ? group.team.id : 'ungrouped')"
+            v-show="!collapsedGroups.has(group.key)"
             class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
           >
             <div
@@ -197,7 +220,7 @@
                 {{ talent.summary || '暂无摘要' }}
               </p>
               <van-tag
-                v-if="talent.status && !talentTeamMap[talent.id]"
+                v-if="talent.status && group.type !== 'team'"
                 :color="statusColor(talent.status)"
                 size="small"
                 class="mt-1"
@@ -205,74 +228,6 @@
             </div>
           </div>
         </div>
-
-        <!-- Status-based sub-groups for ungrouped talents -->
-        <template v-if="statusGroups.length > 0">
-          <div v-for="(sg, si) in statusGroups" :key="'status-' + sg.status">
-            <div
-              class="team-group-header cursor-pointer select-none"
-              :class="{ 'mt-8': si > 0 || groupedTalents.length > 0, 'mt-1': si === 0 && groupedTalents.length === 0 }"
-              @click="toggleGroupCollapse('status-' + sg.status)"
-            >
-              <div class="flex items-center gap-3 mb-3">
-                <div class="w-1 h-5 rounded-full" :style="{ background: sg.color }"></div>
-                <span class="text-lg font-bold" :style="{ color: sg.color }">
-                  {{ sg.label }}
-                </span>
-                <span class="team-group-count" :style="{ background: sg.color + '15', color: sg.color }">{{ sg.talents.length }}人</span>
-                <van-icon
-                  :name="collapsedGroups.has('status-' + sg.status) ? 'arrow-down' : 'arrow-up'"
-                  size="14"
-                  class="text-gray-400 ml-auto"
-                />
-              </div>
-            </div>
-            <div
-              v-show="!collapsedGroups.has('status-' + sg.status)"
-              class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-            >
-              <div
-                v-for="talent in sg.talents"
-                :key="talent.id"
-                class="bg-white rounded-xl shadow-sm p-4 cursor-pointer hover:shadow-md transition-shadow active:bg-gray-50"
-                @click="$router.push(`/talent/${talent.id}`)"
-              >
-                <div class="flex items-start justify-between mb-2">
-                  <div class="flex-1 min-w-0">
-                    <h3 class="text-base font-semibold text-gray-800">{{ talent.name }}</h3>
-                    <p class="text-xs text-gray-500">{{ talent.current_role || talent.department || '' }}</p>
-                  </div>
-                  <div class="flex items-center gap-1 flex-shrink-0 ml-2">
-                    <van-tag
-                      v-for="tag in talent.tags.slice(0, 3)"
-                      :key="tag.id"
-                      :color="tag.color"
-                      size="small"
-                      plain
-                    >
-                      {{ tag.name }}
-                    </van-tag>
-                    <van-icon
-                      name="delete-o"
-                      size="16"
-                      color="#999"
-                      class="ml-1 p-1 rounded-full hover:bg-gray-100"
-                      @click.stop="confirmDelete(talent)"
-                    />
-                  </div>
-                </div>
-                <p class="text-sm text-gray-600 line-clamp-2">
-                  {{ talent.summary || '暂无摘要' }}
-                </p>
-                <van-tag
-                  :color="sg.color"
-                  size="small"
-                  class="mt-1"
-                >{{ talent.status }}</van-tag>
-              </div>
-            </div>
-          </div>
-        </template>
       </van-pull-refresh>
 
       <!-- Scheduled Query Results -->
@@ -463,10 +418,11 @@ const talentTeamMap = computed(() => {
 })
 
 // Status config for grouping
-const STATUS_ORDER = ['面试通过', '面试否决', '简历未通过', '拒绝岗位', '已离职']
+const STATUS_ORDER = ['面试通过', '面试否决', '当轮通过后否决', '简历未通过', '拒绝岗位', '已离职']
 const STATUS_COLORS = {
   '面试通过': '#10B981',
   '面试否决': '#EF4444',
+  '当轮通过后否决': '#F59E0B',
   '简历未通过': '#EF4444',
   '拒绝岗位': '#6B7280',
   '已离职': '#6B7280',
@@ -476,100 +432,98 @@ function statusColor(status) {
   return STATUS_COLORS[status] || '#9CA3AF'
 }
 
-const groupedTalents = computed(() => {
+// Unified allGroups: team groups + ungrouped + status groups, all draggable
+const allGroups = computed(() => {
   const talents = displayedTalents.value
-  if (orgStore.teams.length === 0) {
-    // No teams: put talents without status in one flat group
-    const noStatus = talents.filter(t => !t.status)
-    return noStatus.length > 0 ? [{ team: null, talents: noStatus }] : []
-  }
 
-  const teamGroups = {} // team_id -> { team, talents }
+  // Natural sort helper
+  const cnNum = { '一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' }
+  const toSortKey = (s) => s.replace(/[一二三四五六七八九十]/g, c => cnNum[c])
+  const naturalCmp = (a, b) => toSortKey(a).localeCompare(toSortKey(b), 'zh-CN', { numeric: true })
+
+  // 1. Build team groups
+  const teamGroups = {}
   const ungrouped = []
-
   for (const talent of talents) {
     const teams = talentTeamMap.value[talent.id]
     if (teams && teams.length > 0) {
-      // Put talent under its first team (avoid duplication)
       const team = teams[0]
-      if (!teamGroups[team.id]) {
-        teamGroups[team.id] = { team, talents: [] }
-      }
+      if (!teamGroups[team.id]) teamGroups[team.id] = { key: String(team.id), type: 'team', label: team.parent_name ? team.parent_name + ' - ' + team.name : team.name, team, talents: [] }
       teamGroups[team.id].talents.push(talent)
     } else {
       ungrouped.push(talent)
     }
   }
 
-  // Natural sort: replace Chinese numerals with Arabic for correct ordering
-  const cnNum = { '一': '1', '二': '2', '三': '3', '四': '4', '五': '5', '六': '6', '七': '7', '八': '8', '九': '9', '十': '10' }
-  const toSortKey = (s) => s.replace(/[一二三四五六七八九十]/g, c => cnNum[c])
-  const naturalCmp = (a, b) => toSortKey(a).localeCompare(toSortKey(b), 'zh-CN', { numeric: true })
-
-  const groups = Object.values(teamGroups)
-  // Only put talents without status in "未分配团队"; those with status go to statusGroups
+  // 2. Build status groups from ungrouped talents
   const ungroupedNoStatus = ungrouped.filter(t => !t.status)
-  if (ungroupedNoStatus.length > 0) {
-    groups.push({ team: null, talents: ungroupedNoStatus })
-  }
-
-  // Sort: use custom order if saved, otherwise natural sort
-  const order = customGroupOrder.value
-  if (order.length > 0) {
-    const orderMap = new Map(order.map((id, i) => [String(id), i]))
-    groups.sort((a, b) => {
-      const aKey = a.team ? String(a.team.id) : 'ungrouped'
-      const bKey = b.team ? String(b.team.id) : 'ungrouped'
-      const ai = orderMap.has(aKey) ? orderMap.get(aKey) : 9999
-      const bi = orderMap.has(bKey) ? orderMap.get(bKey) : 9999
-      if (ai !== bi) return ai - bi
-      // Fallback for new teams not in saved order
-      if (!a.team) return 1
-      if (!b.team) return -1
-      const pa = a.team.parent_name || ''
-      const pb = b.team.parent_name || ''
-      if (pa !== pb) return naturalCmp(pa, pb)
-      return naturalCmp(a.team.name, b.team.name)
-    })
-  } else {
-    groups.sort((a, b) => {
-      if (!a.team) return 1
-      if (!b.team) return -1
-      const pa = a.team.parent_name || ''
-      const pb = b.team.parent_name || ''
-      if (pa !== pb) return naturalCmp(pa, pb)
-      return naturalCmp(a.team.name, b.team.name)
-    })
-  }
-  return groups
-})
-
-// Status-based groups for ungrouped talents that have a status
-const statusGroups = computed(() => {
-  const talents = displayedTalents.value
-  // Find ungrouped talents with status
-  const ungroupedWithStatus = talents.filter(t => {
-    const inTeam = talentTeamMap.value[t.id]
-    return (!inTeam || inTeam.length === 0) && t.status
-  })
-  if (ungroupedWithStatus.length === 0) return []
-
+  const ungroupedWithStatus = ungrouped.filter(t => t.status)
   const byStatus = {}
   for (const t of ungroupedWithStatus) {
     if (!byStatus[t.status]) byStatus[t.status] = []
     byStatus[t.status].push(t)
   }
-
-  const groups = []
+  const statusGrps = []
   for (const s of STATUS_ORDER) {
     if (byStatus[s]) {
-      groups.push({ status: s, label: s, color: STATUS_COLORS[s] || '#9CA3AF', talents: byStatus[s] })
+      statusGrps.push({ key: 'status-' + s, type: 'status', label: s, color: STATUS_COLORS[s] || '#9CA3AF', talents: byStatus[s] })
       delete byStatus[s]
     }
   }
-  // Any remaining unknown statuses
-  for (const [s, talents] of Object.entries(byStatus)) {
-    groups.push({ status: s, label: s, color: '#9CA3AF', talents })
+  for (const [s, ts] of Object.entries(byStatus)) {
+    statusGrps.push({ key: 'status-' + s, type: 'status', label: s, color: '#9CA3AF', talents: ts })
+  }
+
+  // 3. Collect all groups
+  const groups = [
+    ...Object.values(teamGroups),
+    ...statusGrps,
+  ]
+  if (ungroupedNoStatus.length > 0) {
+    groups.push({ key: 'ungrouped', type: 'ungrouped', label: '未分配团队', talents: ungroupedNoStatus })
+  }
+
+  // 4. Sort: use custom order if saved, otherwise default order (teams natural, then status order, ungrouped last)
+  const order = customGroupOrder.value
+  if (order.length > 0) {
+    const orderMap = new Map(order.map((id, i) => [String(id), i]))
+    groups.sort((a, b) => {
+      const ai = orderMap.has(a.key) ? orderMap.get(a.key) : 9999
+      const bi = orderMap.has(b.key) ? orderMap.get(b.key) : 9999
+      if (ai !== bi) return ai - bi
+      // Fallback: ungrouped last, then by type, then natural sort
+      if (a.type === 'ungrouped') return 1
+      if (b.type === 'ungrouped') return -1
+      if (a.type === 'team' && b.type === 'team') {
+        const pa = a.team.parent_name || '', pb = b.team.parent_name || ''
+        if (pa !== pb) return naturalCmp(pa, pb)
+        return naturalCmp(a.label, b.label)
+      }
+      // Status groups keep STATUS_ORDER
+      if (a.type === 'status' && b.type === 'status') return STATUS_ORDER.indexOf(a.label) - STATUS_ORDER.indexOf(b.label)
+      // Teams before status groups
+      if (a.type === 'team') return -1
+      if (b.type === 'team') return 1
+      return 0
+    })
+  } else {
+    groups.sort((a, b) => {
+      // ungrouped last
+      if (a.type === 'ungrouped') return 1
+      if (b.type === 'ungrouped') return -1
+      // Teams first, natural sort
+      if (a.type === 'team' && b.type === 'team') {
+        const pa = a.team.parent_name || '', pb = b.team.parent_name || ''
+        if (pa !== pb) return naturalCmp(pa, pb)
+        return naturalCmp(a.label, b.label)
+      }
+      // Teams before status
+      if (a.type === 'team') return -1
+      if (b.type === 'team') return 1
+      // Status groups keep STATUS_ORDER
+      if (a.type === 'status' && b.type === 'status') return STATUS_ORDER.indexOf(a.label) - STATUS_ORDER.indexOf(b.label)
+      return 0
+    })
   }
   return groups
 })
@@ -642,7 +596,7 @@ function onDragHandlePointerDown(e, gi) {
     const from = dragGroupIdx.value
     const to = dropTargetIdx.value
     if (from !== null && to !== null && from !== to) {
-      const order = groupedTalents.value.map(g => g.team ? g.team.id : 'ungrouped')
+      const order = allGroups.value.map(g => g.key)
       const [moved] = order.splice(from, 1)
       order.splice(to, 0, moved)
       customGroupOrder.value = order
