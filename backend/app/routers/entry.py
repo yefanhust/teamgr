@@ -838,6 +838,13 @@ class InterviewEvaluationRequest(BaseModel):
     rating: str
 
 
+class DirectInterviewFeedbackRequest(BaseModel):
+    talent_id: int
+    result: str
+    rating: str
+    evaluation: str
+
+
 async def _process_interview_evaluation_bg(entry_log_id: int, talent_id: int,
                                             interview_records: list[str],
                                             result_str: str, rating: str,
@@ -971,6 +978,42 @@ async def delete_interview_feedback(
     if index < 0 or index >= len(feedback_list):
         raise HTTPException(status_code=404, detail="该面试评价不存在")
     feedback_list.pop(index)
+    card_data["interview_feedback"] = feedback_list
+    talent.card_data = card_data
+    flag_modified(talent, "card_data")
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/interview-feedback-direct")
+async def save_direct_interview_feedback(
+    body: DirectInterviewFeedbackRequest,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Save interview feedback directly without LLM generation."""
+    if body.result not in VALID_INTERVIEW_RESULTS:
+        raise HTTPException(status_code=400, detail=f"面试结果必须是: {', '.join(VALID_INTERVIEW_RESULTS)}")
+    if body.rating not in VALID_INTERVIEW_RATINGS:
+        raise HTTPException(status_code=400, detail=f"评级必须是: {', '.join(VALID_INTERVIEW_RATINGS)}")
+    if not body.evaluation or not body.evaluation.strip():
+        raise HTTPException(status_code=400, detail="面试评价不能为空")
+
+    talent = db.query(Talent).filter(Talent.id == body.talent_id).first()
+    if not talent:
+        raise HTTPException(status_code=404, detail="人才不存在")
+
+    from datetime import datetime
+    rating_label = RATING_LABELS.get(body.rating, body.rating)
+    card_data = dict(talent.card_data or {})
+    feedback_list = list(card_data.get("interview_feedback", []))
+    feedback_list.append({
+        "result": body.result,
+        "rating": body.rating,
+        "rating_label": rating_label,
+        "evaluation": body.evaluation.strip(),
+        "created_at": datetime.now().strftime("%Y-%m-%d"),
+    })
     card_data["interview_feedback"] = feedback_list
     talent.card_data = card_data
     flag_modified(talent, "card_data")

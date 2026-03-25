@@ -102,9 +102,19 @@
         :key="dim.key"
         class="bg-white rounded-xl shadow-sm p-5"
       >
-        <h3 class="text-base font-semibold text-gray-700 mb-3 flex items-center">
-          <span class="w-1 h-4 bg-blue-500 rounded-full mr-2 inline-block"></span>
-          {{ dim.label }}
+        <h3 class="text-base font-semibold text-gray-700 mb-3 flex items-center justify-between">
+          <span class="flex items-center">
+            <span class="w-1 h-4 bg-blue-500 rounded-full mr-2 inline-block"></span>
+            {{ dim.label }}
+          </span>
+          <van-button
+            v-if="dim.key === 'interview_feedback'"
+            size="small"
+            plain
+            type="primary"
+            icon="edit"
+            @click="showDirectFeedbackDialog = true"
+          >直接录入</van-button>
         </h3>
 
         <!-- Custom rendering for interview_feedback -->
@@ -128,7 +138,9 @@
                 <van-icon name="description" size="14" class="text-gray-400 cursor-pointer hover:text-blue-500" @click="copyEvaluation(fb.evaluation)" />
                 <van-icon name="delete-o" size="14" class="text-gray-400 cursor-pointer hover:text-red-500" @click="confirmDeleteFeedback(fb._rawIndex)" />
               </div>
-              <div class="whitespace-pre-line text-gray-700 text-sm leading-relaxed">{{ fb.evaluation }}</div>
+              <textarea v-if="isEditing('interview_feedback', fb._rawIndex, 'evaluation')" v-model="editValue" class="edit-value-input edit-value-input-wide eval-edit-input" ref="editInput"
+                @blur="finishEdit" @keydown.escape.prevent="cancelEdit" @input="autoResize"></textarea>
+              <div v-else class="whitespace-pre-line text-gray-700 text-sm leading-relaxed editable-value" @dblclick.stop="startEdit('interview_feedback', [fb._rawIndex, 'evaluation'], fb.evaluation)">{{ fb.evaluation }}</div>
             </div>
           </div>
         </div>
@@ -474,6 +486,80 @@
         >开始生成</van-button>
       </div>
     </van-popup>
+
+    <!-- Direct Interview Feedback Dialog -->
+    <van-popup
+      v-model:show="showDirectFeedbackDialog"
+      position="bottom"
+      round
+      closeable
+      @close="onDirectFeedbackDialogClose"
+    >
+      <div class="p-5">
+        <h3 class="text-base font-bold text-gray-800 mb-4">直接录入面试结果</h3>
+
+        <!-- Interview Result -->
+        <div class="mb-4">
+          <label class="text-sm font-medium text-gray-600 mb-2 block">面试结果</label>
+          <div class="flex gap-3">
+            <div
+              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
+              :class="directFeedbackForm.result === '通过' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
+              @click="directFeedbackForm.result = '通过'"
+            >通过</div>
+            <div
+              class="flex-1 text-center py-2.5 rounded-lg border-2 cursor-pointer transition-all text-sm font-medium"
+              :class="directFeedbackForm.result === '否决' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'"
+              @click="directFeedbackForm.result = '否决'"
+            >否决</div>
+          </div>
+        </div>
+
+        <!-- Rating -->
+        <div class="mb-4">
+          <label class="text-sm font-medium text-gray-600 mb-2 block">评级</label>
+          <div class="space-y-2">
+            <div
+              v-for="opt in ratingOptions"
+              :key="opt.value"
+              class="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-all"
+              :class="directFeedbackForm.rating === opt.value ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'"
+              @click="directFeedbackForm.rating = opt.value"
+            >
+              <div
+                class="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0"
+                :class="directFeedbackForm.rating === opt.value ? 'border-blue-500' : 'border-gray-300'"
+              >
+                <div v-if="directFeedbackForm.rating === opt.value" class="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
+              </div>
+              <span class="font-medium text-sm" :class="opt.negative ? 'text-red-600' : 'text-gray-800'">{{ opt.value }}</span>
+              <span class="text-xs text-gray-500">{{ opt.label }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Evaluation Text -->
+        <div class="mb-5">
+          <label class="text-sm font-medium text-gray-600 mb-2 block">面试评价</label>
+          <textarea
+            v-model="directFeedbackForm.evaluation"
+            class="w-full border border-gray-300 rounded-lg p-3 text-sm text-gray-700 resize-none focus:outline-none focus:border-blue-500"
+            rows="5"
+            placeholder="请输入面试评价内容..."
+          ></textarea>
+        </div>
+
+        <van-button
+          type="primary"
+          block
+          round
+          :loading="directFeedbackSaving"
+          loading-text="保存中..."
+          :disabled="!directFeedbackForm.result || !directFeedbackForm.rating || !directFeedbackForm.evaluation.trim()"
+          @click="doSaveDirectFeedback"
+        >保存</van-button>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -516,6 +602,9 @@ const showEvalDialog = ref(false)
 const evalGenerating = ref(false)
 const evalResultText = ref('')
 const evalForm = ref({ result: '', rating: '' })
+const showDirectFeedbackDialog = ref(false)
+const directFeedbackSaving = ref(false)
+const directFeedbackForm = ref({ result: '', rating: '', evaluation: '' })
 const entryLogsContainer = ref(null)
 
 const ratingOptions = [
@@ -1050,6 +1139,30 @@ function onEvalDialogClose() {
   evalForm.value = { result: '', rating: '' }
 }
 
+function onDirectFeedbackDialogClose() {
+  directFeedbackForm.value = { result: '', rating: '', evaluation: '' }
+}
+
+async function doSaveDirectFeedback() {
+  const { result, rating, evaluation } = directFeedbackForm.value
+  if (!result || !rating || !evaluation.trim()) {
+    showToast('请填写完整信息')
+    return
+  }
+  directFeedbackSaving.value = true
+  try {
+    await store.saveDirectInterviewFeedback(talent.value.id, result, rating, evaluation)
+    showDirectFeedbackDialog.value = false
+    directFeedbackForm.value = { result: '', rating: '', evaluation: '' }
+    showToast('面试结果已保存')
+    refreshData()
+  } catch (e) {
+    showToast('保存失败: ' + (e.response?.data?.detail || '未知错误'))
+  } finally {
+    directFeedbackSaving.value = false
+  }
+}
+
 function startPolling() {
   if (pollTimer) return
   pollTimer = setInterval(pollProcessingEntries, 3000)
@@ -1114,6 +1227,12 @@ onUnmounted(() => {
 }
 .edit-value-input-wide {
   width: 100%;
+}
+.eval-edit-input {
+  font-size: 16px;
+  padding: 8px 10px;
+  min-height: 120px;
+  line-height: 1.7;
 }
 .formatted-text .fmt-section {
   margin-top: 12px;

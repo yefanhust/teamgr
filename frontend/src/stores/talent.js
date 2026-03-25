@@ -131,6 +131,16 @@ export const useTalentStore = defineStore('talent', () => {
     return res.data
   }
 
+  async function saveDirectInterviewFeedback(talentId, result, rating, evaluation) {
+    const res = await api.post('/api/entry/interview-feedback-direct', {
+      talent_id: talentId,
+      result,
+      rating,
+      evaluation,
+    })
+    return res.data
+  }
+
   return {
     talents,
     tags,
@@ -156,5 +166,6 @@ export const useTalentStore = defineStore('talent', () => {
     deleteTag,
     deleteInterviewFeedback,
     generateInterviewEvaluation,
+    saveDirectInterviewFeedback,
   }
 })
