@@ -249,8 +249,24 @@ function onTeamDragEnd() {
   teamDrag.dropIndex = -1
 }
 
+// Aggregate all project members across all teams (not just current team)
+const allProjectMembers = computed(() => {
+  const map = {}
+  for (const team of store.projectView) {
+    for (const member of team.members) {
+      for (const pid of member.project_ids) {
+        if (!map[pid]) map[pid] = []
+        if (!map[pid].some(m => m.talent_id === member.talent_id)) {
+          map[pid].push(member)
+        }
+      }
+    }
+  }
+  return map
+})
+
 function projectMembers(team, projectId) {
-  return team.members.filter(m => m.project_ids.includes(projectId))
+  return allProjectMembers.value[projectId] || []
 }
 
 function membersWithoutProjects(team) {
