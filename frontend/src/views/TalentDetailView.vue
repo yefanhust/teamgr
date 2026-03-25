@@ -95,22 +95,25 @@
           </div>
         </div>
         <!-- Talent Status -->
-        <div class="flex items-center gap-2 mt-3">
-          <span class="text-sm text-gray-500">状态：</span>
-          <van-tag
-            v-if="talent.status"
-            :color="statusColor(talent.status)"
-            size="medium"
-            class="cursor-pointer"
-            @click="showStatusSheet = true"
-          >{{ talent.status }}</van-tag>
-          <van-tag
-            v-else
-            type="default"
-            size="medium"
-            class="cursor-pointer"
-            @click="showStatusSheet = true"
-          >未设置</van-tag>
+        <div class="flex items-center justify-between mt-3">
+          <div class="flex items-center gap-2">
+            <span class="text-sm text-gray-500">状态：</span>
+            <van-tag
+              v-if="talent.status"
+              :color="statusColor(talent.status)"
+              size="medium"
+              class="cursor-pointer"
+              @click="showStatusSheet = true"
+            >{{ talent.status }}</van-tag>
+            <van-tag
+              v-else
+              type="default"
+              size="medium"
+              class="cursor-pointer"
+              @click="showStatusSheet = true"
+            >未设置</van-tag>
+          </div>
+          <span class="text-xs text-gray-400">创建于 {{ formatDate(talent.created_at) }}</span>
         </div>
       </div>
 
