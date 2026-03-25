@@ -249,8 +249,9 @@ async def lifespan(app: FastAPI):
         check_missed_executions(_scheduler)
 
         # Notification delivery jobs (龙图阁 — per-bot per-function scheduling)
-        from app.services.notification_scheduler import refresh_notification_jobs
+        from app.services.notification_scheduler import refresh_notification_jobs, check_missed_notifications
         refresh_notification_jobs(_scheduler)
+        check_missed_notifications(_scheduler)
 
     logger.info("TeaMgr server started successfully")
 
