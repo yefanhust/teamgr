@@ -415,15 +415,24 @@
           <van-tabs v-model:active="pmSubTab" type="card" class="vibe-tabs">
             <!-- Sub-tab: 项目列表 -->
             <van-tab title="项目列表">
-              <div class="space-y-3 mt-3">
+              <div ref="pmListRef" class="space-y-3 mt-3">
                 <div v-if="pmProjects.length === 0" class="bg-white rounded-xl shadow-sm p-8 text-center">
                   <p class="text-gray-400 text-sm mb-3">暂无项目</p>
                   <van-button size="small" plain type="primary" icon="plus" @click="showPmCreatePopup = true">创建第一个项目</van-button>
                 </div>
-                <template v-for="proj in pmTopProjects" :key="proj.id">
-                  <van-swipe-cell>
-                    <div class="bg-white rounded-xl shadow-sm overflow-hidden" @click="openProjectInfo(proj.id)">
-                      <div class="p-4">
+                <template v-for="(proj, idx) in pmTopProjects" :key="proj.id">
+                  <!-- Drop indicator line -->
+                  <div v-if="pmDrag.active && pmDrag.dropIndex === idx" class="h-0.5 bg-blue-500 rounded-full mx-2 -my-1 relative z-10"></div>
+                  <van-swipe-cell class="pm-project-item" :class="{ 'opacity-40': pmDrag.active && pmDrag.projectId === proj.id }">
+                    <div class="bg-white rounded-xl shadow-sm overflow-hidden flex" @click="openProjectInfo(proj.id)">
+                      <!-- Drag handle -->
+                      <div class="flex items-center px-2 text-gray-300 cursor-grab active:cursor-grabbing touch-none flex-shrink-0"
+                        @pointerdown.stop="onPmDragStart($event, proj.id, idx)"
+                        @click.stop
+                      >
+                        <span class="text-base leading-none select-none">☰</span>
+                      </div>
+                      <div class="p-4 pl-1 flex-1 min-w-0">
                         <div class="flex items-center justify-between mb-2">
                           <div class="flex items-center gap-2">
                             <span class="w-2 h-2 rounded-full" :class="proj.status === 'active' ? 'bg-green-500' : proj.status === 'completed' ? 'bg-blue-400' : 'bg-gray-300'"></span>
@@ -466,6 +475,8 @@
                     </template>
                   </van-swipe-cell>
                 </template>
+                <!-- Drop indicator at the end -->
+                <div v-if="pmDrag.active && pmDrag.dropIndex === pmTopProjects.length" class="h-0.5 bg-blue-500 rounded-full mx-2 -mt-1"></div>
               </div>
             </van-tab>
 
@@ -1927,6 +1938,19 @@
         ></textarea>
       </div>
     </van-dialog>
+
+    <!-- Drag ghost panel -->
+    <Teleport to="body">
+      <div v-if="pmDrag.active && pmDrag.ghostHtml"
+        class="pm-drag-ghost"
+        :style="{
+          left: pmDrag.ghostX + 'px',
+          top: pmDrag.ghostY + 'px',
+          width: pmDrag.ghostWidth + 'px',
+        }"
+        v-html="pmDrag.ghostHtml"
+      ></div>
+    </Teleport>
   </div>
 </template>
 
@@ -2005,7 +2029,100 @@ const pmMembers = ref([])
 
 // Projects list
 const pmProjects = computed(() => pmStore.projects)
-const pmTopProjects = computed(() => pmProjects.value.filter(p => !p.parent_id))
+const PM_ORDER_KEY = 'teamgr_pm_project_order'
+const pmProjectOrder = ref(JSON.parse(localStorage.getItem(PM_ORDER_KEY) || '[]'))
+const pmTopProjects = computed(() => {
+  const tops = pmProjects.value.filter(p => !p.parent_id)
+  const order = pmProjectOrder.value
+  if (order.length === 0) return tops
+  return [...tops].sort((a, b) => {
+    const ia = order.indexOf(a.id)
+    const ib = order.indexOf(b.id)
+    if (ia === -1 && ib === -1) return 0
+    if (ia === -1) return 1
+    if (ib === -1) return -1
+    return ia - ib
+  })
+})
+
+// Project drag reorder
+const pmDrag = reactive({
+  active: false,
+  projectId: null,
+  startIndex: -1,
+  startY: 0,
+  dropIndex: -1,
+  ghostX: 0,
+  ghostY: 0,
+  ghostWidth: 0,
+  ghostHtml: '',
+})
+const pmListRef = ref(null)
+
+function onPmDragStart(e, projectId, index) {
+  pmDrag.projectId = projectId
+  pmDrag.startIndex = index
+  pmDrag.startY = e.clientY
+  pmDrag.active = false
+  pmDrag.dropIndex = -1
+
+  // Capture the card element for ghost clone
+  const itemEl = e.target.closest('.pm-project-item')
+  if (itemEl) {
+    const rect = itemEl.getBoundingClientRect()
+    pmDrag.ghostWidth = rect.width
+    pmDrag.ghostHtml = itemEl.innerHTML
+    pmDrag.ghostX = rect.left
+    pmDrag.ghostY = rect.top
+  }
+
+  window.addEventListener('pointermove', onPmDragMove)
+  window.addEventListener('pointerup', onPmDragEnd, { once: true })
+}
+
+function onPmDragMove(e) {
+  if (!pmDrag.projectId) return
+  if (!pmDrag.active && Math.abs(e.clientY - pmDrag.startY) < 5) return
+  pmDrag.active = true
+
+  // Update ghost position (centered horizontally on cursor, offset above cursor)
+  pmDrag.ghostX = e.clientX
+  pmDrag.ghostY = e.clientY
+
+  const container = pmListRef.value
+  if (!container) return
+  const items = container.querySelectorAll('.pm-project-item')
+  let dropIdx = items.length
+  for (let i = 0; i < items.length; i++) {
+    const rect = items[i].getBoundingClientRect()
+    if (e.clientY < rect.top + rect.height / 2) {
+      dropIdx = i
+      break
+    }
+  }
+  pmDrag.dropIndex = dropIdx
+}
+
+function onPmDragEnd() {
+  window.removeEventListener('pointermove', onPmDragMove)
+  if (pmDrag.active && pmDrag.dropIndex !== -1) {
+    const projects = [...pmTopProjects.value]
+    const fromIdx = pmDrag.startIndex
+    let toIdx = pmDrag.dropIndex
+    if (toIdx > fromIdx) toIdx--
+    if (fromIdx !== toIdx) {
+      const [moved] = projects.splice(fromIdx, 1)
+      projects.splice(toIdx, 0, moved)
+      pmProjectOrder.value = projects.map(p => p.id)
+      localStorage.setItem(PM_ORDER_KEY, JSON.stringify(pmProjectOrder.value))
+    }
+  }
+  pmDrag.active = false
+  pmDrag.projectId = null
+  pmDrag.startIndex = -1
+  pmDrag.dropIndex = -1
+  pmDrag.ghostHtml = ''
+}
 const pmSelectedParentForCreate = ref(null)
 const pmParentProjectSearch = ref('')
 const pmInlineDesc = ref('')
@@ -4174,5 +4291,20 @@ function formatDateTime(isoStr) {
 /* PC端改进对话框限制最大宽度 */
 .improve-dialog {
   max-width: 560px !important;
+}
+
+/* Drag ghost panel */
+.pm-drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 9999;
+  transform: translate(-50%, -50%) scale(0.95);
+  opacity: 0.75;
+  filter: blur(1px);
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  transition: opacity 0.1s;
 }
 </style>
