@@ -1579,13 +1579,14 @@
             clearable
             @focus="searchPmTalents"
             @update:model-value="searchPmTalents"
+            @keydown="handlePmTalentKeydown"
           />
-          <div v-if="pmShowTalentList && pmTalentResults.length > 0" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
+          <div v-if="pmShowTalentList && pmTalentResults.length > 0" ref="pmTalentListRef" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
             <div
-              v-for="t in pmTalentResults"
+              v-for="(t, idx) in pmTalentResults"
               :key="t.id"
               class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
-              :class="pmSelectedTalent?.id === t.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
+              :class="idx === pmTalentHighlightIndex ? 'bg-blue-100 text-blue-600' : pmSelectedTalent?.id === t.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
               @click="pmSelectedTalent = t; pmTalentSearch = t.name; pmShowTalentList = false"
             >
               {{ t.name }}<span v-if="t.current_role" class="text-xs text-gray-400 ml-2">{{ t.current_role }}</span>
@@ -1987,6 +1988,8 @@ const showPmInfoPopup = ref(false)
 const pmTalentSearch = ref('')
 const pmShowTalentList = ref(false)
 const pmTalentResults = ref([])
+const pmTalentHighlightIndex = ref(-1)
+const pmTalentListRef = ref(null)
 const pmSelectedTalent = ref(null)
 const pmProjectSearch = ref('')
 const pmShowProjectList = ref(false)
@@ -3771,9 +3774,53 @@ async function searchPmTalents() {
   try {
     const res = await api.get('/api/talents/search', { params: { q: pmTalentSearch.value } })
     pmTalentResults.value = res.data
+    pmTalentHighlightIndex.value = -1
     pmShowTalentList.value = true
   } catch (e) { pmTalentResults.value = [] }
 }
+
+function handlePmTalentKeydown(e) {
+  if (!pmShowTalentList.value || pmTalentResults.value.length === 0) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    pmTalentHighlightIndex.value = Math.min(pmTalentHighlightIndex.value + 1, pmTalentResults.value.length - 1)
+    scrollTalentHighlightIntoView()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    pmTalentHighlightIndex.value = Math.max(pmTalentHighlightIndex.value - 1, 0)
+    scrollTalentHighlightIntoView()
+  } else if (e.key === 'Enter' && pmTalentHighlightIndex.value >= 0) {
+    e.preventDefault()
+    const t = pmTalentResults.value[pmTalentHighlightIndex.value]
+    pmSelectedTalent.value = t
+    pmTalentSearch.value = t.name
+    pmShowTalentList.value = false
+    pmTalentHighlightIndex.value = -1
+  }
+}
+
+function scrollTalentHighlightIntoView() {
+  nextTick(() => {
+    const container = pmTalentListRef.value
+    if (!container) return
+    const items = container.children
+    const target = items[pmTalentHighlightIndex.value]
+    if (target) target.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function handlePmUpdateEsc(e) {
+  if (e.key === 'Escape') {
+    showPmUpdatePopup.value = false
+  }
+}
+watch(showPmUpdatePopup, (val) => {
+  if (val) {
+    document.addEventListener('keydown', handlePmUpdateEsc)
+  } else {
+    document.removeEventListener('keydown', handlePmUpdateEsc)
+  }
+})
 
 async function searchPmParentProjects() {
   try {
