@@ -435,13 +435,11 @@
                       <div class="p-4 pl-1 flex-1 min-w-0">
                         <div class="flex items-center justify-between mb-2">
                           <div class="flex items-center gap-2">
-                            <span class="w-2 h-2 rounded-full" :class="proj.status === 'active' ? 'bg-green-500' : proj.status === 'completed' ? 'bg-blue-400' : 'bg-gray-300'"></span>
+                            <span class="w-2 h-2 rounded-full" :class="proj.status === 'active' ? 'bg-green-500' : proj.status === 'suspended' ? 'bg-yellow-500' : proj.status === 'completed' ? 'bg-blue-400' : 'bg-gray-300'"></span>
                             <span class="font-medium text-gray-800">{{ proj.name }}</span>
                           </div>
                           <div class="flex items-center gap-2">
-                            <van-tag v-if="proj.status === 'active'" type="success" size="small" plain>进行中</van-tag>
-                            <van-tag v-else-if="proj.status === 'completed'" type="primary" size="small" plain>已完成</van-tag>
-                            <van-tag v-else type="default" size="small" plain>已归档</van-tag>
+                            <StatusPicker size="sm" :model-value="proj.status" @update:model-value="changePmStatus(proj.id, $event)" @click.stop />
                             <van-icon name="delete-o" size="16" color="#EF4444" class="pm-delete-btn cursor-pointer" @click.stop="deletePmProject(proj.id)" />
                             <van-icon name="arrow" size="14" color="#999" />
                           </div>
@@ -459,10 +457,11 @@
                             @click.stop="openProjectInfo(child.id)"
                           >
                             <div class="flex items-center gap-2">
-                              <span class="w-1.5 h-1.5 rounded-full" :class="child.status === 'active' ? 'bg-green-400' : 'bg-gray-300'"></span>
+                              <span class="w-1.5 h-1.5 rounded-full" :class="child.status === 'active' ? 'bg-green-400' : child.status === 'suspended' ? 'bg-yellow-400' : child.status === 'completed' ? 'bg-blue-400' : 'bg-gray-300'"></span>
                               <span class="text-sm text-gray-700">{{ child.name }}</span>
                             </div>
                             <div class="flex items-center gap-2">
+                              <StatusPicker size="sm" :model-value="child.status" @update:model-value="changePmStatus(child.id, $event)" @click.stop />
                               <span class="text-xs text-gray-400">{{ child.member_count }}人 / {{ child.update_count }}更新</span>
                               <van-icon name="delete-o" size="14" color="#EF4444" class="pm-delete-btn cursor-pointer" @click.stop="deletePmProject(child.id)" />
                             </div>
@@ -535,7 +534,7 @@
                           <span class="text-sm font-medium text-gray-700">{{ mp.project_name }}</span>
                           <van-tag v-if="mp.role" size="small" plain type="primary">{{ mp.role }}</van-tag>
                         </div>
-                        <van-tag :type="mp.project_status === 'active' ? 'success' : 'default'" size="small" plain>{{ mp.project_status === 'active' ? '进行中' : mp.project_status === 'completed' ? '已完成' : '归档' }}</van-tag>
+                        <StatusPicker size="sm" :model-value="mp.project_status" @update:model-value="changePmStatus(mp.project_id, $event)" />
                       </div>
                       <p v-if="mp.latest_update" class="text-xs text-gray-500">最新: {{ mp.latest_update.parsed_data?.progress || mp.latest_update.raw_input }}</p>
                       <p v-if="mp.latest_update?.parsed_data?.completion_pct != null" class="mt-1">
@@ -1789,7 +1788,7 @@
           />
           <h3 v-else class="text-xl font-bold text-gray-800 cursor-pointer hover:text-blue-600" @dblclick="startEditPmName">{{ pmInfoData.name }}</h3>
           <div class="flex items-center gap-2">
-            <van-tag :type="pmInfoData.status === 'active' ? 'success' : 'primary'" size="medium">{{ pmInfoData.status === 'active' ? '进行中' : pmInfoData.status === 'completed' ? '已完成' : '已归档' }}</van-tag>
+            <StatusPicker :model-value="pmInfoData.status" @update:model-value="changePmStatus(pmInfoData.id, $event)" />
             <van-button size="mini" plain type="primary" icon="replay" :loading="pmInfoRefreshing" @click="refreshPmInfo">刷新</van-button>
           </div>
         </div>
@@ -1963,6 +1962,7 @@ import { showToast, showConfirmDialog } from 'vant'
 import api from '../api'
 import { Chart, BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js'
 import VoiceInputButton from '../components/VoiceInputButton.vue'
+import StatusPicker from '../components/StatusPicker.vue'
 
 Chart.register(BarController, CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 import TopNavBar from '../components/TopNavBar.vue'
@@ -4019,7 +4019,10 @@ async function clearPmInfoParent() {
 async function changePmStatus(id, status) {
   try {
     await pmStore.updateProject(id, { status })
-    pmInfoData.value = await pmStore.getProjectInfo(id)
+    if (pmInfoData.value && pmInfoData.value.id === id) {
+      pmInfoData.value = await pmStore.getProjectInfo(id)
+    }
+    loadPmProjects()
     showToast('状态已更新')
   } catch (e) { showToast('更新失败') }
 }
