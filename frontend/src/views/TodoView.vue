@@ -452,8 +452,9 @@
                         </div>
                         <!-- Sub-projects -->
                         <div v-if="proj.children && proj.children.length > 0" class="mt-3 pl-3 border-l-2 border-gray-100 space-y-2">
-                          <div v-for="child in proj.children" :key="child.id"
-                            class="flex items-center justify-between p-2 bg-gray-50 rounded-lg cursor-pointer"
+                          <div v-for="child in sortedChildren(proj.children)" :key="child.id"
+                            class="flex items-center justify-between p-2 bg-gray-50 rounded-lg cursor-pointer transition-opacity"
+                            :class="{ 'opacity-40': child.status === 'completed' }"
                             @click.stop="openProjectInfo(child.id)"
                           >
                             <div class="flex items-center gap-2">
@@ -2037,6 +2038,14 @@ const pmTopProjects = computed(() => {
   // Server returns projects sorted by display_order already, just preserve that order
   return tops
 })
+
+// Sort children: active first, suspended next, completed last
+function sortedChildren(children) {
+  const order = { active: 0, suspended: 1, completed: 2 }
+  return [...children].sort((a, b) => {
+    return (order[a.status] ?? 0) - (order[b.status] ?? 0)
+  })
+}
 
 // Project drag reorder
 const pmDrag = reactive({
