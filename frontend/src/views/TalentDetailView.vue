@@ -81,17 +81,29 @@
         </p>
 
         <div class="grid grid-cols-2 gap-2 text-sm">
-          <div v-if="talent.current_role">
-            <span class="text-gray-500">职位：</span>{{ talent.current_role }}
+          <div v-if="talent.current_role || editingBasicField === 'current_role'">
+            <span class="text-gray-500">职位：</span>
+            <textarea v-if="editingBasicField === 'current_role'" v-model="editValue" class="edit-value-input" ref="editBasicInput"
+              @blur="finishEditBasic" @keydown.enter.prevent="finishEditBasic" @keydown.escape="cancelEditBasic" rows="1" />
+            <span v-else class="editable-value" @dblclick.stop="startEditBasic('current_role', talent.current_role)">{{ talent.current_role }}</span>
           </div>
-          <div v-if="talent.department">
-            <span class="text-gray-500">部门：</span>{{ talent.department }}
+          <div v-if="talent.department || editingBasicField === 'department'">
+            <span class="text-gray-500">部门：</span>
+            <textarea v-if="editingBasicField === 'department'" v-model="editValue" class="edit-value-input" ref="editBasicInput"
+              @blur="finishEditBasic" @keydown.enter.prevent="finishEditBasic" @keydown.escape="cancelEditBasic" rows="1" />
+            <span v-else class="editable-value" @dblclick.stop="startEditBasic('department', talent.department)">{{ talent.department }}</span>
           </div>
-          <div v-if="talent.email">
-            <span class="text-gray-500">邮箱：</span>{{ talent.email }}
+          <div v-if="talent.email || editingBasicField === 'email'">
+            <span class="text-gray-500">邮箱：</span>
+            <textarea v-if="editingBasicField === 'email'" v-model="editValue" class="edit-value-input" ref="editBasicInput"
+              @blur="finishEditBasic" @keydown.enter.prevent="finishEditBasic" @keydown.escape="cancelEditBasic" rows="1" />
+            <span v-else class="editable-value" @dblclick.stop="startEditBasic('email', talent.email)">{{ talent.email }}</span>
           </div>
-          <div v-if="talent.phone">
-            <span class="text-gray-500">电话：</span>{{ talent.phone }}
+          <div v-if="talent.phone || editingBasicField === 'phone'">
+            <span class="text-gray-500">电话：</span>
+            <textarea v-if="editingBasicField === 'phone'" v-model="editValue" class="edit-value-input" ref="editBasicInput"
+              @blur="finishEditBasic" @keydown.enter.prevent="finishEditBasic" @keydown.escape="cancelEditBasic" rows="1" />
+            <span v-else class="editable-value" @dblclick.stop="startEditBasic('phone', talent.phone)">{{ talent.phone }}</span>
           </div>
         </div>
         <!-- Talent Status -->
@@ -584,6 +596,8 @@ const updateAvailable = ref(false)
 const editing = ref(null) // { dimKey, path: [], isArray: false }
 const editValue = ref('')
 const editInput = ref(null)
+const editingBasicField = ref(null) // 'current_role' | 'department' | 'email' | 'phone'
+const editBasicInput = ref(null)
 const editingTagId = ref(null)
 const editingTagName = ref('')
 const tagEditInput = ref(null)
@@ -953,6 +967,39 @@ async function finishEdit() {
 
   try {
     const updated = await store.updateTalent(talent.value.id, { card_data: { [dimKey]: dimVal } })
+    talent.value = updated
+    showToast('已保存')
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+function startEditBasic(field, value) {
+  editingBasicField.value = field
+  editValue.value = String(value ?? '')
+  nextTick(() => {
+    const el = editBasicInput.value
+    const input = Array.isArray(el) ? el[0] : el
+    if (input) {
+      input.focus()
+      input.select()
+    }
+  })
+}
+
+function cancelEditBasic() {
+  editingBasicField.value = null
+  editValue.value = ''
+}
+
+async function finishEditBasic() {
+  if (!editingBasicField.value) return
+  const field = editingBasicField.value
+  const newVal = editValue.value
+  editingBasicField.value = null
+
+  try {
+    const updated = await store.updateTalent(talent.value.id, { [field]: newVal })
     talent.value = updated
     showToast('已保存')
   } catch (e) {
