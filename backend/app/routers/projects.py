@@ -54,6 +54,7 @@ def _project_to_dict(p: Project, include_children: bool = False) -> dict:
         "member_count": len(p.members),
         "update_count": len(p.updates),
         "created_at": p.created_at.isoformat() if p.created_at else None,
+        "display_order": p.display_order or 0,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
     if include_children:
@@ -100,7 +101,7 @@ async def list_projects(
         query = query.filter(Project.status == status)
     if top_only:
         query = query.filter(Project.parent_id.is_(None))
-    projects = query.order_by(Project.last_update_at.desc().nullslast(), Project.created_at.desc()).all()
+    projects = query.order_by(Project.display_order.asc(), Project.last_update_at.desc().nullslast(), Project.created_at.desc()).all()
 
     if q.strip():
         projects = [
@@ -134,6 +135,20 @@ async def create_project(
     db.commit()
     db.refresh(project)
     return _project_to_dict(project, include_children=True)
+
+
+@router.put("/reorder")
+async def reorder_projects(
+    body: dict,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Update display_order for projects. Body: {"order": [id1, id2, ...]}"""
+    order = body.get("order", [])
+    for idx, project_id in enumerate(order):
+        db.query(Project).filter(Project.id == project_id).update({"display_order": idx + 1})
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/search")
@@ -307,7 +322,7 @@ async def update_project(
         project.name_pinyin_initials = initials
     if body.description is not None:
         project.description = body.description
-    if body.status is not None and body.status in ("active", "completed", "archived"):
+    if body.status is not None and body.status in ("active", "suspended", "completed", "archived"):
         project.status = body.status
     if body.parent_id != -1:  # -1 means field not provided
         if body.parent_id is not None and body.parent_id != project.id:

@@ -46,6 +46,7 @@ class Project(Base):
     llm_summary = Column(Text, default="")
     llm_summary_updated_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    display_order = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     children = relationship("Project", backref=backref("parent", remote_side="Project.id"))

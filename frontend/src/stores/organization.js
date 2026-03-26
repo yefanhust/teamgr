@@ -69,6 +69,12 @@ export const useOrganizationStore = defineStore('organization', () => {
     return res.data
   }
 
+  async function updateProjectStatus(projectId, status) {
+    await api.put(`/api/projects/${projectId}`, { status })
+    // Refresh project view to update counts and statuses
+    await fetchProjectView()
+  }
+
   return {
     teams,
     projectView,
@@ -82,5 +88,6 @@ export const useOrganizationStore = defineStore('organization', () => {
     setLeader,
     updateMemberTitle,
     fetchProjectView,
+    updateProjectStatus,
   }
 })

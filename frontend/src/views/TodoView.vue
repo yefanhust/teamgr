@@ -2029,20 +2029,10 @@ const pmMembers = ref([])
 
 // Projects list
 const pmProjects = computed(() => pmStore.projects)
-const PM_ORDER_KEY = 'teamgr_pm_project_order'
-const pmProjectOrder = ref(JSON.parse(localStorage.getItem(PM_ORDER_KEY) || '[]'))
 const pmTopProjects = computed(() => {
   const tops = pmProjects.value.filter(p => !p.parent_id)
-  const order = pmProjectOrder.value
-  if (order.length === 0) return tops
-  return [...tops].sort((a, b) => {
-    const ia = order.indexOf(a.id)
-    const ib = order.indexOf(b.id)
-    if (ia === -1 && ib === -1) return 0
-    if (ia === -1) return 1
-    if (ib === -1) return -1
-    return ia - ib
-  })
+  // Server returns projects sorted by display_order already, just preserve that order
+  return tops
 })
 
 // Project drag reorder
@@ -2113,8 +2103,8 @@ function onPmDragEnd() {
     if (fromIdx !== toIdx) {
       const [moved] = projects.splice(fromIdx, 1)
       projects.splice(toIdx, 0, moved)
-      pmProjectOrder.value = projects.map(p => p.id)
-      localStorage.setItem(PM_ORDER_KEY, JSON.stringify(pmProjectOrder.value))
+      const order = projects.map(p => p.id)
+      api.put('/api/projects/reorder', { order }).then(() => pmStore.fetchProjects())
     }
   }
   pmDrag.active = false

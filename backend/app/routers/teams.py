@@ -87,6 +87,8 @@ async def get_project_view(
                 project_ids_set.add(pm.project_id)
                 talent_project_map.setdefault(pm.talent_id, []).append(pm.project_id)
 
+        # Build project dict and collect active project IDs
+        active_project_ids = set()
         if project_ids_set:
             projects = db.query(Project).filter(Project.id.in_(project_ids_set)).all()
             for p in projects:
@@ -95,16 +97,19 @@ async def get_project_view(
                     "name": p.name,
                     "status": p.status,
                 })
+                if p.status == "active":
+                    active_project_ids.add(p.id)
 
         for m in team.members:
             member_projects = talent_project_map.get(m.talent_id, [])
+            active_count = sum(1 for pid in member_projects if pid in active_project_ids)
             team_data["members"].append({
                 "talent_id": m.talent_id,
                 "name": m.talent.name if m.talent else "",
                 "avatar_url": (m.talent.card_data or {}).get("avatar_url", "") if m.talent else "",
                 "is_leader": m.is_leader,
                 "project_ids": member_projects,
-                "project_count": len(member_projects),
+                "project_count": active_count,
             })
 
         result.append(team_data)

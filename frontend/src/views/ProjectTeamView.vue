@@ -53,9 +53,18 @@
               <div class="project-node">
                 <van-icon name="orders-o" size="14" color="#3b82f6" />
                 <span class="project-node-name">{{ project.name }}</span>
-                <van-tag :type="project.status === 'active' ? 'primary' : 'default'" size="mini">
-                  {{ project.status === 'active' ? '进行中' : project.status === 'completed' ? '已完成' : '归档' }}
-                </van-tag>
+                <select
+                  class="status-select"
+                  :class="'status-' + project.status"
+                  :value="project.status"
+                  @pointerdown.stop
+                  @click.stop
+                  @change.stop="onStatusChange($event, project.id)"
+                >
+                  <option value="active">进行中</option>
+                  <option value="suspended">挂起</option>
+                  <option value="completed">已完成</option>
+                </select>
               </div>
               <!-- Tree connector -->
               <div v-if="projectMembers(team, project.id).length > 0" class="tree-connector">
@@ -325,6 +334,15 @@ function onTreePointerUp(e) {
   }
 }
 
+async function onStatusChange(e, projectId) {
+  const newStatus = e.target.value
+  try {
+    await store.updateProjectStatus(projectId, newStatus)
+  } catch (err) {
+    console.error('Failed to update project status:', err)
+  }
+}
+
 function goToTalent(talentId) {
   router.push(`/talent/${talentId}`)
 }
@@ -504,6 +522,42 @@ onUnmounted(() => {
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Status dropdown */
+.status-select {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid #d1d5db;
+  background: white;
+  cursor: pointer;
+  outline: none;
+  appearance: auto;
+  flex-shrink: 0;
+}
+
+.status-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 1px #3b82f6;
+}
+
+.status-select.status-active {
+  color: #1d4ed8;
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.status-select.status-suspended {
+  color: #b45309;
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.status-select.status-completed {
+  color: #15803d;
+  border-color: #86efac;
+  background: #f0fdf4;
 }
 
 /* Tree connector lines */
