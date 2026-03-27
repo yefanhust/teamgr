@@ -30,6 +30,8 @@ class ProjectUpdateSchema(BaseModel):
     description: Optional[str] = None
     status: Optional[str] = None
     parent_id: Optional[int] = -1  # -1 means not provided; None means clear parent
+    started_at: Optional[str] = None  # ISO date string, e.g. "2025-03-01"
+    llm_summary: Optional[str] = None
 
 
 class UpdateCreate(BaseModel):
@@ -284,6 +286,44 @@ async def get_project_analysis_status():
     return {"status": _project_analysis_bg["status"]}
 
 
+@router.put("/members/{member_id}/role")
+async def update_member_role(
+    member_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    member = db.query(ProjectMember).filter(ProjectMember.id == member_id).first()
+    if not member:
+        raise HTTPException(status_code=404, detail="成员不存在")
+    member.role = body.get("role", "")
+    db.commit()
+    db.refresh(member)
+    return {"id": member.id, "role": member.role}
+
+
+@router.put("/updates/{update_id}")
+async def update_project_update(
+    update_id: int,
+    body: dict,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    update = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+    if not update:
+        raise HTTPException(status_code=404, detail="更新记录不存在")
+    new_content = body.get("content", "").strip()
+    if new_content:
+        update.raw_input = new_content
+        if update.parsed_data and isinstance(update.parsed_data, dict):
+            update.parsed_data = {**update.parsed_data, "progress": new_content}
+        else:
+            update.parsed_data = {"progress": new_content}
+    db.commit()
+    db.refresh(update)
+    return _update_to_dict(update)
+
+
 @router.get("/{project_id}")
 async def get_project(
     project_id: int,
@@ -331,6 +371,14 @@ async def update_project(
                 project.parent_id = body.parent_id
         elif body.parent_id is None:
             project.parent_id = None
+    if body.started_at is not None:
+        try:
+            project.started_at = datetime.fromisoformat(body.started_at)
+        except (ValueError, TypeError):
+            pass
+    if body.llm_summary is not None:
+        project.llm_summary = body.llm_summary
+        project.llm_summary_updated_at = datetime.utcnow()
 
     db.commit()
     db.refresh(project)

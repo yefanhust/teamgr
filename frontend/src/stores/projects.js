@@ -90,6 +90,16 @@ export const useProjectsStore = defineStore('projects', () => {
     return res.data
   }
 
+  async function updateMemberRole(memberId, role) {
+    const res = await api.put(`/api/projects/members/${memberId}/role`, { role })
+    return res.data
+  }
+
+  async function updateProjectUpdate(updateId, content) {
+    const res = await api.put(`/api/projects/updates/${updateId}`, { content })
+    return res.data
+  }
+
   return {
     projects,
     currentProject,
@@ -107,5 +117,7 @@ export const useProjectsStore = defineStore('projects', () => {
     getProjectInfo,
     refreshProjectInfo,
     searchProjects,
+    updateMemberRole,
+    updateProjectUpdate,
   }
 })

@@ -1803,9 +1803,10 @@
             </div>
             <textarea
               v-model="pmEditDescText"
-              class="w-full text-sm border border-blue-300 rounded-lg p-2 outline-none resize-y min-h-[60px]"
+              class="w-full text-base border border-blue-300 rounded-lg p-3 outline-none resize-y min-h-[60px]"
               @blur="savePmDesc"
               @keydown.escape="pmEditingDesc = false"
+              @input="autoResizeTextarea($event.target)"
               ref="pmDescTextarea"
             ></textarea>
           </div>
@@ -1886,9 +1887,27 @@
         </div>
 
         <!-- LLM Summary -->
-        <div v-if="pmInfoData.llm_summary" class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-4 mb-4">
           <h4 class="text-sm font-semibold text-gray-600 mb-2">项目概览（AI 生成）</h4>
-          <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(pmInfoData.llm_summary)"></div>
+          <div v-if="pmEditingSummary">
+            <textarea
+              v-model="pmEditSummaryText"
+              ref="pmSummaryTextarea"
+              class="w-full text-base border border-blue-300 rounded-lg p-3 outline-none resize-y min-h-[120px]"
+              @blur="savePmSummary"
+              @keydown.escape="pmEditingSummary = false"
+              @input="autoResizeTextarea($event.target)"
+            ></textarea>
+            <p class="text-xs text-gray-400 mt-1">支持 Markdown 格式，点击外部保存</p>
+          </div>
+          <div
+            v-else
+            class="cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+            @dblclick="startEditPmSummary"
+          >
+            <div v-if="pmInfoData.llm_summary" class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(pmInfoData.llm_summary)"></div>
+            <p v-else class="text-sm text-gray-400">暂无概览（双击编辑）</p>
+          </div>
         </div>
 
         <!-- Update timeline -->
@@ -1900,7 +1919,21 @@
                 <span class="text-xs text-gray-400">{{ formatDateTime(upd.created_at) }}</span>
                 <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
               </div>
-              <p class="text-sm text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+              <div v-if="pmEditingUpdateId === upd.id">
+                <textarea
+                  v-model="pmEditUpdateText"
+                  ref="pmUpdateInput"
+                  class="w-full text-base border border-blue-300 rounded-lg p-3 outline-none resize-y min-h-[48px]"
+                  @blur="saveUpdateRecord(upd)"
+                  @keydown.escape="pmEditingUpdateId = null"
+                  @input="autoResizeTextarea($event.target)"
+                ></textarea>
+              </div>
+              <p
+                v-else
+                class="text-sm text-gray-600 cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+                @dblclick="startEditUpdate(upd)"
+              >{{ upd.parsed_data?.progress || upd.raw_input }}</p>
               <p v-if="upd.parsed_data?.completion_pct != null" class="text-xs text-blue-500 mt-1">完成度: {{ upd.parsed_data.completion_pct }}%</p>
             </div>
           </div>
@@ -2022,6 +2055,12 @@ const pmNameInput = ref(null)
 const pmEditingDesc = ref(false)
 const pmEditDescText = ref('')
 const pmDescTextarea = ref(null)
+const pmEditingSummary = ref(false)
+const pmEditSummaryText = ref('')
+const pmSummaryTextarea = ref(null)
+const pmEditingUpdateId = ref(null)
+const pmEditUpdateText = ref('')
+const pmUpdateInput = ref(null)
 const pmInfoSettingParent = ref(false)
 const pmInfoParentSearch = ref('')
 const pmInfoParentResults = ref([])
@@ -3973,6 +4012,8 @@ async function openProjectInfo(id) {
   pmInfoParentResults.value = []
   pmEditingName.value = false
   pmEditingDesc.value = false
+  pmEditingSummary.value = false
+  pmEditingUpdateId.value = null
   try {
     pmInfoData.value = await pmStore.getProjectInfo(id)
   } catch (e) {
@@ -4020,10 +4061,19 @@ async function savePmName() {
   }
 }
 
+function autoResizeTextarea(el) {
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = el.scrollHeight + 'px'
+}
+
 function startEditPmDesc() {
   pmEditDescText.value = pmInfoData.value?.description || ''
   pmEditingDesc.value = true
-  nextTick(() => { pmDescTextarea.value?.focus() })
+  nextTick(() => {
+    const el = pmDescTextarea.value
+    if (el) { autoResizeTextarea(el); el.focus() }
+  })
 }
 
 async function savePmDesc() {
@@ -4034,6 +4084,54 @@ async function savePmDesc() {
   try {
     await pmStore.updateProject(pmInfoData.value.id, { description: newDesc })
     pmInfoData.value.description = newDesc
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+function startEditPmSummary() {
+  pmEditSummaryText.value = pmInfoData.value?.llm_summary || ''
+  pmEditingSummary.value = true
+  nextTick(() => {
+    const el = pmSummaryTextarea.value
+    if (el) { autoResizeTextarea(el); el.focus() }
+  })
+}
+
+async function savePmSummary() {
+  pmEditingSummary.value = false
+  if (!pmInfoData.value) return
+  const newSummary = pmEditSummaryText.value.trim()
+  if (newSummary === (pmInfoData.value.llm_summary || '')) return
+  try {
+    await pmStore.updateProject(pmInfoData.value.id, { llm_summary: newSummary })
+    pmInfoData.value.llm_summary = newSummary
+    showToast('已保存')
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+function startEditUpdate(upd) {
+  pmEditingUpdateId.value = upd.id
+  pmEditUpdateText.value = upd.raw_input || ''
+  nextTick(() => {
+    const el = pmUpdateInput.value
+    const input = Array.isArray(el) ? el[0] : el
+    if (input) { autoResizeTextarea(input); input.focus() }
+  })
+}
+
+async function saveUpdateRecord(upd) {
+  pmEditingUpdateId.value = null
+  const newText = pmEditUpdateText.value.trim()
+  if (!newText || newText === (upd.raw_input || '')) return
+  try {
+    await pmStore.updateProjectUpdate(upd.id, newText)
+    upd.raw_input = newText
+    // Also update the display text
+    if (upd.parsed_data) upd.parsed_data.progress = newText
+    showToast('已保存')
   } catch (e) {
     showToast('保存失败')
   }
