@@ -116,6 +116,7 @@ SCHEDULER_TYPES = {
     "daily_project_analysis": "项目效率分析",
     "daily_backup": "数据库备份",
     "daily_tag_organize": "人才卡标签自动整理",
+    "daily_todo_tag_organize": "TODO标签自动整理",
     "daily_diary_comment": "手记每日评论",
 }
 
@@ -128,6 +129,7 @@ SCHEDULER_DESCRIPTIONS = {
     "daily_project_analysis": "分析活跃项目的健康度、进展、资源分配和风险",
     "daily_backup": "将数据库备份到腾讯云 COS",
     "daily_tag_organize": "每日自动执行人才卡标签一键整理（合并同义标签、建立层级分类）",
+    "daily_todo_tag_organize": "每日自动执行TODO标签整理（精简、编辑、合并同义标签、建立层级分类）",
     "daily_diary_comment": "每晚对当天手记进行 AI 分析，针对问题、困惑或想法提供评论建议和情绪支持（仅使用本地模型）",
 }
 
@@ -140,6 +142,7 @@ _SCHEDULER_DEFAULTS = {
     "repeat_todo_check": {"interval_hours": 1},
     "daily_backup": {"cron_hour": 3, "cron_minute": 0},
     "daily_tag_organize": {"cron_hour": 22, "cron_minute": 0},
+    "daily_todo_tag_organize": {"cron_hour": 22, "cron_minute": 30},
     "daily_diary_comment": {"cron_hour": 23, "cron_minute": 0},
 }
 

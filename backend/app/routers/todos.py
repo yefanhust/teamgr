@@ -885,27 +885,48 @@ def delete_todo_tag(tag_id: int, db: Session = Depends(get_db)):
 
 # --- Tag organize (one-click) ---
 
-def _build_todo_organize_prompt(tag_names: list[str]) -> str:
-    return f"""你是一个标签分类专家。请完成以下两个任务：
+DEFAULT_TODO_ORGANIZE_INSTRUCTIONS = """你是一个标签分类专家。请完成以下四个任务：
 
-## 任务1：合并同义标签
+## 任务1：精简标签
+删除过于模糊或无实际分类意义的标签，例如"其他"、"杂项"、"待定"等。
+删除过于具体而失去通用性的标签（如包含具体日期、具体人名的标签）。
+
+## 任务2：编辑标签
+标签语义应当尽量原子化，每个标签只表达一个独立概念，不要组合多个概念。
+
+## 任务3：合并同义标签
 找出语义相同或高度相似的标签组，选择最简洁准确的一个作为保留名，其余作为待合并项。
 判断标准：含义本质相同只是措辞不同。
 注意：含义不同的标签不要合并。
 
-## 任务2：分层归类
+## 任务4：分层归类
 将合并后的标签归类为一级标签（大分类）和二级标签（具体标签）的层级结构。
 要求：
 1. 一级标签是新创建的大分类名称（如"工作事务"、"个人生活"、"学习成长"等），数量控制在3-8个
-2. 每个保留的标签都必须归入某个一级标签下作为二级标签
-3. 一级标签名称要简洁、有概括性
-4. 所有保留的标签都必须被分配，不能遗漏
+2. 每个一级标签下的二级标签数量控制在20个以内
+3. 每个保留的标签都必须归入某个一级标签下作为二级标签
+4. 一级标签名称要简洁、有概括性
+5. 所有保留的标签都必须被分配，不能遗漏""".strip()
+
+
+def _get_todo_organize_instructions() -> str:
+    from app.config import get_instruction
+    return get_instruction("todo_organize_tags", DEFAULT_TODO_ORGANIZE_INSTRUCTIONS)
+
+
+def _build_todo_organize_prompt(tag_names: list[str]) -> str:
+    instructions = _get_todo_organize_instructions()
+    return f"""{instructions}
 
 现有标签列表：
 {json.dumps(tag_names, ensure_ascii=False)}
 
 请严格按以下JSON格式返回，不要包含其他内容：
 {{
+  "deletes": ["需要删除的标签1", "需要删除的标签2"],
+  "renames": [
+    {{"from": "原标签名", "to": "新标签名"}}
+  ],
   "merges": [
     {{"keep": "保留的标签名", "remove": ["待合并标签1", "待合并标签2"]}}
   ],
@@ -918,7 +939,60 @@ def _build_todo_organize_prompt(tag_names: list[str]) -> str:
   ]
 }}
 
+如果没有需要删除的标签，deletes 返回空数组 []。
+如果没有需要重命名的标签，renames 返回空数组 []。
 如果没有需要合并的标签，merges 返回空数组 []。"""
+
+
+@router.get("/tags/organize-prompt")
+async def get_todo_organize_prompt():
+    """Get the current TODO organize prompt instructions."""
+    return {"instructions": _get_todo_organize_instructions(), "default": DEFAULT_TODO_ORGANIZE_INSTRUCTIONS}
+
+
+@router.put("/tags/organize-prompt")
+async def save_todo_organize_prompt(body: dict):
+    """Save custom TODO organize prompt instructions."""
+    from app.config import save_instruction
+    instructions = body.get("instructions", "").strip()
+    save_instruction("todo_organize_tags", instructions)
+    return {"ok": True}
+
+
+def _delete_todo_tags(db: Session, delete_names: list[str]) -> list[str]:
+    """Delete tags by name. Returns list of deleted tag names."""
+    deleted = []
+    for name in delete_names:
+        tag = db.query(TodoTag).filter(TodoTag.name == name).first()
+        if not tag:
+            continue
+        db.query(TodoItemTag).filter(TodoItemTag.tag_id == tag.id).delete()
+        db.delete(tag)
+        deleted.append(name)
+    if deleted:
+        db.flush()
+    return deleted
+
+
+def _rename_todo_tags(db: Session, renames: list[dict]) -> list[str]:
+    """Rename tags. Returns list of human-readable descriptions."""
+    descriptions = []
+    for r in renames:
+        old_name = r.get("from", "")
+        new_name = r.get("to", "")
+        if not old_name or not new_name or old_name == new_name:
+            continue
+        tag = db.query(TodoTag).filter(TodoTag.name == old_name).first()
+        if not tag:
+            continue
+        existing = db.query(TodoTag).filter(TodoTag.name == new_name).first()
+        if existing:
+            continue
+        tag.name = new_name
+        descriptions.append(f"{old_name} → {new_name}")
+    if descriptions:
+        db.flush()
+    return descriptions
 
 
 def _merge_todo_tags(db: Session, merges: list[dict]) -> list[str]:
@@ -1098,6 +1172,18 @@ async def organize_todo_tags(scope: str = "todo", db: Session = Depends(get_db))
                 text = re.sub(r'^```\w*\n?', '', text)
                 text = re.sub(r'\n?```$', '', text)
             result = json.loads(text)
+
+            deletes = result.get("deletes", [])
+            if deletes:
+                deleted = _delete_todo_tags(db, deletes)
+                if deleted:
+                    yield f"data: {json.dumps({'type': 'delete', 'deletes': deleted}, ensure_ascii=False)}\n\n"
+
+            renames = result.get("renames", [])
+            if renames:
+                rename_descs = _rename_todo_tags(db, renames)
+                if rename_descs:
+                    yield f"data: {json.dumps({'type': 'rename', 'renames': rename_descs}, ensure_ascii=False)}\n\n"
 
             merges = result.get("merges", [])
             if merges:
@@ -1675,3 +1761,137 @@ async def trigger_analysis_stream(db: Session = Depends(get_db)):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# --- Daily TODO tag organize (cron) ---
+
+def run_daily_todo_tag_organize():
+    """Background job: run TODO tag organize (non-streaming)."""
+    import time
+    from app.database import SessionLocal
+    from app.services.llm_service import _record_llm_usage
+
+    db = SessionLocal()
+    try:
+        tags = db.query(TodoTag).filter(TodoTag.scope == "todo").all()
+        if not tags:
+            logger.info("Daily todo tag organize: no tags, skipping")
+            return
+
+        tag_names = [t.name for t in tags]
+        prompt = _build_todo_organize_prompt(tag_names)
+
+        from google import genai
+        from google.genai import types as genai_types
+        from app.config import get_gemini_config, get_model_defaults
+        from app.services.llm_service import get_current_model_name
+
+        cfg = get_gemini_config()
+        api_key = cfg.get("api_key", "")
+        if not api_key or api_key == "your-gemini-api-key-here":
+            logger.warning("Daily todo tag organize: Gemini API key not configured, skipping")
+            return
+
+        organize_model = get_model_defaults().get("todo-organize-tags") or get_model_defaults().get("organize-tags") or get_current_model_name()
+        client = genai.Client(api_key=api_key)
+
+        t0 = time.monotonic()
+        response = client.models.generate_content(
+            model=organize_model,
+            contents=prompt,
+            config=genai_types.GenerateContentConfig(
+                thinking_config=genai_types.ThinkingConfig(include_thoughts=True),
+            ),
+        )
+
+        full_text = ""
+        for part in response.candidates[0].content.parts:
+            if not getattr(part, 'thought', False):
+                full_text += getattr(part, 'text', '') or ''
+
+        duration_ms = int((time.monotonic() - t0) * 1000)
+        usage = getattr(response, 'usage_metadata', None)
+        isl = getattr(usage, 'prompt_token_count', 0) if usage else 0
+        osl = getattr(usage, 'candidates_token_count', 0) if usage else 0
+        _record_llm_usage(organize_model, "todo-organize-tags", duration_ms, isl, osl)
+
+        text = full_text.strip()
+        if text.startswith("```"):
+            text = re.sub(r'^```\w*\n?', '', text)
+            text = re.sub(r'\n?```$', '', text)
+        result = json.loads(text)
+
+        deletes = result.get("deletes", [])
+        if deletes:
+            deleted = _delete_todo_tags(db, deletes)
+            logger.info(f"Daily todo tag organize: deleted {len(deleted)} tags")
+
+        renames = result.get("renames", [])
+        if renames:
+            rename_descs = _rename_todo_tags(db, renames)
+            logger.info(f"Daily todo tag organize: renamed {len(rename_descs)} tags")
+
+        merges = result.get("merges", [])
+        if merges:
+            merge_descs = _merge_todo_tags(db, merges)
+            logger.info(f"Daily todo tag organize: merged {len(merge_descs)} groups")
+
+        categories = result.get("categories", [])
+        if categories:
+            _apply_todo_tag_hierarchy(db, categories, scope="todo")
+            logger.info(f"Daily todo tag organize: applied {len(categories)} categories")
+        else:
+            logger.warning("Daily todo tag organize: LLM returned no categories")
+
+        logger.info("Daily todo tag organize completed successfully")
+
+    except Exception as e:
+        logger.error(f"Daily todo tag organize failed: {e}")
+    finally:
+        db.close()
+
+
+def check_missed_todo_tag_organize(scheduler):
+    """On startup, check if yesterday's todo tag organize was missed and schedule recovery."""
+    from datetime import datetime, timedelta
+    from app.database import SessionLocal
+    from app.models.talent import LLMUsageLog
+    from app.config import get_scheduler_config
+
+    if scheduler is None:
+        return
+
+    sc = get_scheduler_config().get("daily_todo_tag_organize", {})
+    cron_hour = sc.get("cron_hour", 22)
+    cron_minute = sc.get("cron_minute", 30)
+
+    now = datetime.now()
+    yesterday = now - timedelta(days=1)
+    scheduled_yesterday = yesterday.replace(hour=cron_hour, minute=cron_minute, second=0, microsecond=0)
+
+    db = SessionLocal()
+    try:
+        last_run = (
+            db.query(LLMUsageLog)
+            .filter(
+                LLMUsageLog.call_type == "todo-organize-tags",
+                LLMUsageLog.timestamp >= scheduled_yesterday,
+            )
+            .first()
+        )
+        if last_run:
+            return
+
+        delay_seconds = 90
+        run_at = datetime.now() + timedelta(seconds=delay_seconds)
+        scheduler.add_job(
+            run_daily_todo_tag_organize,
+            "date",
+            run_date=run_at,
+            id="todo_tag_organize_recovery",
+        )
+        logger.info(f"Todo tag organize: missed execution detected, recovery scheduled in {delay_seconds}s")
+    except Exception as e:
+        logger.warning(f"Todo tag organize missed execution check failed: {e}")
+    finally:
+        db.close()

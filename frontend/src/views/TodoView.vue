@@ -28,6 +28,12 @@
               >
                 一键整理
               </van-button>
+              <van-icon
+                name="edit"
+                size="16"
+                class="text-gray-400 cursor-pointer hover:text-blue-500 ml-1"
+                @click="openOrganizePromptEditor"
+              />
             </div>
             <!-- Organize progress -->
             <div v-if="organizing || organizeStatus" class="mb-3 bg-gray-50 rounded-lg p-3 text-sm">
@@ -2038,6 +2044,29 @@
         v-html="pmDrag.ghostHtml"
       ></div>
     </Teleport>
+
+    <!-- Organize Prompt Editor -->
+    <van-popup
+      v-model:show="showPromptEditor"
+      position="bottom"
+      round
+      :style="{ height: '80vh' }"
+    >
+      <div class="flex flex-col h-full">
+        <div class="flex items-center justify-between px-4 py-3 border-b">
+          <van-button size="small" @click="showPromptEditor = false">取消</van-button>
+          <span class="font-medium text-gray-700">编辑整理规则</span>
+          <van-button size="small" type="primary" @click="saveOrganizePrompt">保存</van-button>
+        </div>
+        <textarea
+          v-model="organizePromptText"
+          class="flex-1 w-full p-4 text-sm text-gray-700 leading-relaxed focus:outline-none resize-none"
+        />
+        <div class="flex justify-end px-4 py-2 border-t">
+          <span class="text-xs text-gray-400 cursor-pointer hover:text-blue-500" @click="resetOrganizePrompt">恢复默认</span>
+        </div>
+      </div>
+    </van-popup>
   </div>
 </template>
 
@@ -2331,6 +2360,10 @@ const organizing = ref(false)
 const organizeStream = ref('')
 const thinkingStream = ref('')
 const thinkingPre = ref(null)
+// Organize prompt editor state
+const showPromptEditor = ref(false)
+const organizePromptText = ref('')
+const organizePromptDefault = ref('')
 const organizePre = ref(null)
 const organizeStatus = ref('')
 const organizeStatusText = ref('')
@@ -2845,6 +2878,12 @@ function handleSSELine(line) {
       organizeStatusText.value = `思考完成 (${data.elapsed}s)，正在生成分类结果...`
     } else if (data.type === 'chunk') {
       organizeStream.value += data.content
+    } else if (data.type === 'delete') {
+      const count = data.deletes.length
+      organizeStream.value += `\n--- 删除了 ${count} 个标签 ---\n` + data.deletes.map(d => `  ${d}`).join('\n') + '\n'
+    } else if (data.type === 'rename') {
+      const count = data.renames.length
+      organizeStream.value += `\n--- 重命名了 ${count} 个标签 ---\n` + data.renames.map(r => `  ${r}`).join('\n') + '\n'
     } else if (data.type === 'merge') {
       const count = data.merges.length
       organizeStream.value += `\n--- 合并了 ${count} 组相似标签 ---\n` + data.merges.map(m => `  ${m}`).join('\n') + '\n'
@@ -2915,6 +2954,42 @@ async function organizeTags() {
   } finally {
     organizing.value = false
   }
+}
+
+// --- Organize prompt editor ---
+
+async function openOrganizePromptEditor() {
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    const res = await fetch('/api/todos/tags/organize-prompt', {
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    const data = await res.json()
+    organizePromptText.value = data.instructions
+    organizePromptDefault.value = data.default
+    showPromptEditor.value = true
+  } catch (e) {
+    showToast('加载失败')
+  }
+}
+
+async function saveOrganizePrompt() {
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    await fetch('/api/todos/tags/organize-prompt', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ instructions: organizePromptText.value }),
+    })
+    showToast('已保存')
+    showPromptEditor.value = false
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+function resetOrganizePrompt() {
+  organizePromptText.value = organizePromptDefault.value
 }
 
 // --- Requirement tag organize ---

@@ -230,6 +230,18 @@ async def lifespan(app: FastAPI):
         logger.info(f"Tag organize job registered: daily at {to.get('cron_hour', 22):02d}:{to.get('cron_minute', 0):02d}")
         check_missed_tag_organize(_scheduler)
 
+        from app.routers.todos import run_daily_todo_tag_organize, check_missed_todo_tag_organize
+        tto = sc.get("daily_todo_tag_organize", {})
+        _scheduler.add_job(
+            run_daily_todo_tag_organize,
+            "cron",
+            hour=tto.get("cron_hour", 22),
+            minute=tto.get("cron_minute", 30),
+            id="daily_todo_tag_organize",
+        )
+        logger.info(f"Todo tag organize job registered: daily at {tto.get('cron_hour', 22):02d}:{tto.get('cron_minute', 30):02d}")
+        check_missed_todo_tag_organize(_scheduler)
+
         # Diary daily comment job
         from app.routers.diary import run_daily_diary_comment_sync
         dc = sc.get("daily_diary_comment", {})
