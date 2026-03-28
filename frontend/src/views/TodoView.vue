@@ -1205,21 +1205,29 @@
             <van-tab title="任务效率">
               <div class="space-y-3 mt-3">
                 <!-- Duration Stats Chart -->
-                <div v-if="durationStats.length > 0" class="bg-white rounded-xl shadow-sm p-4">
+                <div class="bg-white rounded-xl shadow-sm p-4">
                   <div class="flex items-center justify-between mb-3">
                     <span class="text-sm font-medium text-gray-700">各类任务平均耗时</span>
-                    <div class="flex items-center gap-2">
-                      <span class="text-xs text-gray-400">{{ durationStats[0]?.generated_date }}</span>
-                      <van-button size="mini" plain type="primary" :loading="generatingStats" @click="triggerDurationStats">刷新</van-button>
+                    <van-button size="mini" plain type="primary" :loading="generatingStats" @click="triggerDurationStats">刷新</van-button>
+                  </div>
+                  <div class="flex items-center gap-1 mb-3">
+                    <button
+                      v-for="w in [{key:'7d',label:'过去7天'},{key:'30d',label:'过去一月'},{key:'all',label:'历史汇总'}]"
+                      :key="w.key"
+                      class="px-2.5 py-1 text-xs rounded-full transition-colors"
+                      :class="durationStatsWindow === w.key ? 'bg-purple-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'"
+                      @click="switchDurationWindow(w.key)"
+                    >{{ w.label }}</button>
+                  </div>
+                  <div v-if="durationStats.length > 0">
+                    <div class="duration-chart-container" :style="{ height: Math.max(180, durationStats.length * 40 + 60) + 'px' }">
+                      <canvas ref="durationChartCanvas"></canvas>
                     </div>
                   </div>
-                  <div class="duration-chart-container" :style="{ height: Math.max(180, durationStats.length * 40 + 60) + 'px' }">
-                    <canvas ref="durationChartCanvas"></canvas>
+                  <div v-else class="text-center py-4">
+                    <p class="text-gray-400 text-sm mb-3">暂无耗时统计数据</p>
+                    <van-button size="small" plain type="primary" icon="chart-trending-o" :loading="generatingStats" @click="triggerDurationStats">生成耗时图表</van-button>
                   </div>
-                </div>
-                <div v-else-if="!analysisStatus" class="bg-white rounded-xl shadow-sm p-4 text-center">
-                  <p class="text-gray-400 text-sm mb-3">暂无耗时统计数据</p>
-                  <van-button size="small" plain type="primary" icon="chart-trending-o" :loading="generatingStats" @click="triggerDurationStats">生成耗时图表</van-button>
                 </div>
 
                 <!-- Task analysis streaming / status -->
@@ -1354,6 +1362,51 @@
         <div class="flex gap-3">
           <van-button block plain type="default" size="small" @click="onTimePickerSkip">不设时间</van-button>
           <van-button block type="primary" size="small" @click="onTimePickerConfirm">确定</van-button>
+        </div>
+      </div>
+    </van-popup>
+
+    <!-- Tag Tasks Popup (from duration chart bar click) -->
+    <van-popup
+      v-model:show="showTagTasks"
+      position="bottom"
+      round
+      :style="{ maxHeight: '70vh' }"
+    >
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-semibold text-gray-800">
+            「{{ tagTasksTitle }}」已完成任务
+            <span class="text-xs text-gray-400 font-normal ml-1">{{ tagTasksList.length }}条</span>
+          </h3>
+          <van-icon name="cross" size="20" class="cursor-pointer text-gray-400" @click="showTagTasks = false" />
+        </div>
+        <div v-if="tagTasksList.length === 0" class="text-center py-6 text-gray-400 text-sm">暂无任务</div>
+        <div v-else class="space-y-2 overflow-y-auto" style="max-height: calc(70vh - 60px)">
+          <div
+            v-for="item in tagTasksList"
+            :key="item.id"
+            class="bg-gray-50 rounded-lg p-3 cursor-pointer active:bg-gray-100 transition-colors"
+            @click="showTagTasks = false; openDetail(item)"
+          >
+            <div class="flex items-start gap-2">
+              <span class="text-sm text-gray-700 min-w-0 break-words">{{ item.title }}</span>
+              <van-tag v-if="item.high_priority" type="danger" size="small" plain class="flex-shrink-0">高优</van-tag>
+            </div>
+            <div class="flex items-center gap-1 mt-1 flex-wrap">
+              <van-tag
+                v-for="tag in (item.tags || [])"
+                :key="tag.id"
+                :color="tag.color"
+                size="small"
+                plain
+              >{{ tag.name }}</van-tag>
+              <span class="text-xs text-gray-400">完成于 {{ formatDateTime(item.completed_at) }}</span>
+              <span v-if="item.created_at && item.completed_at" class="text-xs text-gray-400">
+                耗时 {{ formatDuration(item.created_at, item.completed_at) }}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </van-popup>
@@ -2232,6 +2285,10 @@ const analysisStreamEl = ref(null)
 const durationStats = ref([])
 const durationChartCanvas = ref(null)
 const generatingStats = ref(false)
+const durationStatsWindow = ref('30d')
+const showTagTasks = ref(false)
+const tagTasksTitle = ref('')
+const tagTasksList = ref([])
 
 // Project Analysis
 const projectAnalyses = ref([])
@@ -3121,7 +3178,7 @@ async function loadAnalyses() {
 
 async function loadDurationStats() {
   try {
-    const res = await api.get('/api/todos/duration-stats')
+    const res = await api.get('/api/todos/duration-stats', { params: { window: durationStatsWindow.value } })
     durationStats.value = res.data
     await nextTick()
     renderDurationChart()
@@ -3133,13 +3190,19 @@ async function loadDurationStats() {
 async function triggerDurationStats() {
   generatingStats.value = true
   try {
-    await api.post('/api/todos/duration-stats/trigger')
+    await api.post(`/api/todos/duration-stats/trigger?window=${durationStatsWindow.value}`)
     await loadDurationStats()
   } catch (e) {
     showToast('生成失败')
   } finally {
     generatingStats.value = false
   }
+}
+
+function switchDurationWindow(w) {
+  if (durationStatsWindow.value === w) return
+  durationStatsWindow.value = w
+  loadDurationStats()
 }
 
 // Plugin: draw std-dev whisker lines at the end of each bar
@@ -3207,6 +3270,8 @@ function renderDurationChart() {
     _stdHours: stdHours,
   }
 
+  const tagNames = stats.map(s => s.tag_name)
+
   durationChartInstance = new Chart(durationChartCanvas.value, {
     type: 'bar',
     data: { labels, datasets: [dataset] },
@@ -3215,6 +3280,12 @@ function renderDurationChart() {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
+      onClick(evt, elements) {
+        if (elements.length > 0) {
+          const idx = elements[0].index
+          onChartBarClick(tagNames[idx])
+        }
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -3235,11 +3306,27 @@ function renderDurationChart() {
           ticks: { font: { size: 11 } },
         },
         y: {
-          ticks: { font: { size: 11 } },
+          ticks: { font: { size: 11 }, cursor: 'pointer' },
         },
       },
     },
   })
+}
+
+function onChartBarClick(tagName) {
+  const windowDays = durationStatsWindow.value === '7d' ? 7 : durationStatsWindow.value === '30d' ? 30 : null
+  const cutoff = windowDays ? new Date(Date.now() - windowDays * 86400000) : null
+  const tasks = store.completed.filter(t => {
+    if (t.vibe_status) return false
+    if (cutoff && new Date(t.completed_at) < cutoff) return false
+    const tNames = (t.tags || []).map(tag => tag.name)
+    if (tagName === '无标签') return tNames.length === 0
+    return tNames.includes(tagName)
+  })
+  tasks.sort((a, b) => new Date(b.completed_at) - new Date(a.completed_at))
+  tagTasksTitle.value = tagName
+  tagTasksList.value = tasks
+  showTagTasks.value = true
 }
 
 async function triggerAnalysis() {

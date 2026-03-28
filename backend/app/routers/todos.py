@@ -279,19 +279,63 @@ async def create_todo(body: TodoCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/duration-stats")
-def get_duration_stats(db: Session = Depends(get_db)):
-    """Get latest duration statistics per tag."""
-    stats = db.query(TodoDurationStats).order_by(TodoDurationStats.avg_duration_minutes.desc()).all()
-    return [
-        {
-            "tag_name": s.tag_name,
-            "avg_duration_minutes": s.avg_duration_minutes,
-            "std_dev_minutes": s.std_dev_minutes,
-            "task_count": s.task_count,
-            "generated_date": s.generated_date,
-        }
-        for s in stats
-    ]
+def get_duration_stats(db: Session = Depends(get_db), window: str = "30d"):
+    """Get duration statistics per tag for a given time window.
+
+    window: '7d' (past 7 days), '30d' (past month), 'all' (all history)
+    """
+    return _compute_duration_stats_live(db, window)
+
+
+def _compute_duration_stats_live(db: Session, window: str = "30d"):
+    """Compute duration stats on-the-fly for the requested time window."""
+    import statistics as _stats
+
+    db.expire_all()
+
+    query = db.query(TodoItem).filter(
+        TodoItem.completed == True,
+        TodoItem.completed_at.isnot(None),
+        TodoItem.created_at.isnot(None),
+        (TodoItem.vibe_status == None) | (TodoItem.vibe_status == ""),
+    )
+
+    if window == "7d":
+        cutoff = datetime.utcnow() - timedelta(days=7)
+        query = query.filter(TodoItem.completed_at >= cutoff)
+    elif window == "30d":
+        cutoff = datetime.utcnow() - timedelta(days=30)
+        query = query.filter(TodoItem.completed_at >= cutoff)
+    # 'all' — no date filter
+
+    completed_items = query.all()
+
+    tag_durations: dict[str, list[float]] = {}
+    for item in completed_items:
+        dur_min = (item.completed_at - item.created_at).total_seconds() / 60.0
+        if dur_min < 0:
+            continue
+        tag_names = [t.name for t in item.tags] if item.tags else []
+        if not tag_names:
+            tag_names = ["无标签"]
+        for tn in tag_names:
+            tag_durations.setdefault(tn, []).append(dur_min)
+
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    results = []
+    for tag_name, durations in tag_durations.items():
+        avg = _stats.mean(durations)
+        std = _stats.stdev(durations) if len(durations) >= 2 else 0.0
+        results.append({
+            "tag_name": tag_name,
+            "avg_duration_minutes": round(avg, 1),
+            "std_dev_minutes": round(std, 1),
+            "task_count": len(durations),
+            "generated_date": today,
+        })
+
+    results.sort(key=lambda x: x["avg_duration_minutes"], reverse=True)
+    return results
 
 
 @router.get("/analysis")
@@ -1278,10 +1322,10 @@ def run_daily_duration_stats():
 
 
 @router.post("/duration-stats/trigger")
-def trigger_duration_stats(db: Session = Depends(get_db)):
-    """Manually trigger duration stats computation."""
-    compute_duration_stats(db)
-    return {"ok": True}
+def trigger_duration_stats(db: Session = Depends(get_db), window: str = "30d"):
+    """Manually trigger duration stats computation and return fresh data."""
+    compute_duration_stats(db)  # keep nightly cache updated
+    return _compute_duration_stats_live(db, window)
 
 
 DEFAULT_TODO_ANALYSIS_PROMPT = """你是一个任务管理效率顾问。以下是用户最近7天完成的任务列表（含标题、标签、优先级、总周期、实际工作时间、等待时间、中途停止次数等）。
