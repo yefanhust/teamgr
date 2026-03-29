@@ -5,6 +5,7 @@ import os
 import time
 import traceback
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -300,11 +301,6 @@ async def _process_docx_from_file_bg(entry_log_id: int):
         except Exception:
             pass
     finally:
-        try:
-            if os.path.exists(docx_path):
-                os.remove(docx_path)
-        except OSError:
-            pass
         db.close()
 
 
@@ -461,12 +457,6 @@ async def _process_pdf_from_file_bg(entry_log_id: int):
         except Exception:
             pass
     finally:
-        # Clean up PDF file
-        try:
-            if os.path.exists(pdf_path):
-                os.remove(pdf_path)
-        except OSError:
-            pass
         db.close()
 
 
@@ -571,6 +561,29 @@ async def upload_document_resume(
         "talent_id": talent.id,
         "status": "uploaded",
     }
+
+
+@router.get("/file/{entry_id}")
+def get_entry_file(entry_id: int, db: Session = Depends(get_db), _=Depends(require_auth)):
+    """Serve the original uploaded file (PDF/DOCX) for an entry log."""
+    entry = db.query(EntryLog).filter(EntryLog.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if entry.source not in ("pdf", "docx"):
+        raise HTTPException(status_code=400, detail="No file associated with this entry")
+
+    ext = ".docx" if entry.source == "docx" else ".pdf"
+    file_path = os.path.join(DOC_UPLOAD_DIR, f"{entry_id}{ext}")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" if ext == ".docx" else "application/pdf"
+    # Extract original filename from content field: "[PDF上传] filename.pdf"
+    original_name = f"resume{ext}"
+    if entry.content and "] " in entry.content:
+        original_name = entry.content.split("] ", 1)[1].strip() or original_name
+
+    return FileResponse(file_path, media_type=media_type, filename=original_name)
 
 
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
@@ -786,6 +799,15 @@ async def delete_entry_log(
     entry = db.query(EntryLog).filter(EntryLog.id == entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="记录不存在")
+    # Clean up uploaded file if exists
+    if entry.source in ("pdf", "docx"):
+        ext = ".docx" if entry.source == "docx" else ".pdf"
+        file_path = os.path.join(DOC_UPLOAD_DIR, f"{entry_id}{ext}")
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except OSError:
+                pass
     db.delete(entry)
     db.commit()
     return {"message": "已删除"}

@@ -734,7 +734,7 @@ async def create_requirement(body: RequirementCreate, db: Session = Depends(get_
 
     # Auto-tag using LLM (requirement scope)
     try:
-        tag_names = await _auto_tag(item.title)
+        tag_names = await _auto_tag(item.title, call_type="req-auto-tag")
         if tag_names:
             _assign_tags(db, item, tag_names, scope="requirement")
             db.refresh(item)
@@ -1092,7 +1092,8 @@ async def organize_todo_tags(scope: str = "todo", db: Session = Depends(get_db))
                 yield f"data: {json.dumps({'type': 'error', 'content': 'LLM模型不可用'}, ensure_ascii=False)}\n\n"
                 return
 
-            organize_model = get_model_defaults().get("todo-organize-tags") or get_model_defaults().get("organize-tags") or get_current_model_name()
+            organize_call_type = "req-organize-tags" if scope == "requirement" else "todo-organize-tags"
+            organize_model = get_model_defaults().get(organize_call_type) or get_model_defaults().get("organize-tags") or get_current_model_name()
             client = genai.Client(api_key=api_key)
 
             queue = asyncio.Queue()
@@ -1165,7 +1166,7 @@ async def organize_todo_tags(scope: str = "todo", db: Session = Depends(get_db))
             duration_ms = int((time.monotonic() - t0) * 1000)
             isl = getattr(usage, 'prompt_token_count', 0) or getattr(usage, 'input_tokens', 0) if usage else 0
             osl = getattr(usage, 'candidates_token_count', 0) or getattr(usage, 'output_tokens', 0) if usage else 0
-            _record_llm_usage(organize_model, "todo-organize-tags", duration_ms, isl, osl)
+            _record_llm_usage(organize_model, organize_call_type, duration_ms, isl, osl)
 
             text = full_text.strip()
             if text.startswith("```"):
@@ -1220,7 +1221,7 @@ async def organize_todo_tags(scope: str = "todo", db: Session = Depends(get_db))
 
 # --- Auto-tag helper ---
 
-async def _auto_tag(title: str) -> list[str]:
+async def _auto_tag(title: str, call_type: str = "todo-auto-tag") -> list[str]:
     """Use LLM to generate 1-3 short tags for a todo item."""
     from app.services.llm_service import _call_model_text
 
@@ -1233,7 +1234,7 @@ async def _auto_tag(title: str) -> list[str]:
 ["标签1", "标签2"]"""
 
     try:
-        text = await _call_model_text(prompt, call_type="todo-auto-tag")
+        text = await _call_model_text(prompt, call_type=call_type)
         if not text:
             return []
         text = text.strip()

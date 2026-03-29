@@ -375,6 +375,8 @@ LLM_CALL_TYPES = {
     "diary-auto-tag": "手记自动打标",
     "diary-comment": "手记每日评论",
     "interview-evaluation": "面试评价生成",
+    "req-auto-tag": "需求自动打标",
+    "req-organize-tags": "需求标签整理",
 }
 
 

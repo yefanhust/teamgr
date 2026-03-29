@@ -365,6 +365,11 @@
               <!-- Debug expandable panels -->
               <div class="mt-1.5 flex gap-2 flex-wrap">
                 <span
+                  v-if="log.source === 'pdf' || log.source === 'docx'"
+                  class="text-xs text-teal-600 cursor-pointer hover:underline"
+                  @click="openOriginalFile(log)"
+                >▶ 查看原文档</span>
+                <span
                   v-if="getParsedDebug(log).extracted_text"
                   class="text-xs text-orange-500 cursor-pointer hover:underline"
                   @click="toggleDebugSection(log.id, 'text')"
@@ -790,6 +795,28 @@ function toggleLogExpand(logId) {
 function toggleDebugSection(logId, section) {
   const key = logId + ':' + section
   debugSections.value = { ...debugSections.value, [key]: !debugSections.value[key] }
+}
+
+async function openOriginalFile(log) {
+  try {
+    const res = await api.get(`/api/entry/file/${log.id}`, { responseType: 'blob' })
+    const url = URL.createObjectURL(res.data)
+    if (log.source === 'pdf') {
+      window.open(url, '_blank')
+    } else {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = log.content?.split('] ')[1]?.trim() || `resume.${log.source}`
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+  } catch (e) {
+    if (e.response?.status === 404) {
+      showToast('原始文档不存在（早期上传未保留原文件）')
+    } else {
+      showToast('无法打开原始文档')
+    }
+  }
 }
 
 function getParsedDebug(log) {

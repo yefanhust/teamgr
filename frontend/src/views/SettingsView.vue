@@ -320,6 +320,7 @@ const PAGE_GROUPS = [
     color: '#8B5CF6',
     children: [
       { page: 'TODO', color: '#8B5CF6', types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis'] },
+      { page: '研发', color: '#6366F1', types: ['req-auto-tag', 'req-organize-tags'] },
       { page: '项目管理', color: '#10B981', types: ['project-summary', 'project-update-parse', 'project-analysis'] },
     ],
   },
