@@ -24,66 +24,103 @@
           <div class="pl-5">
           <p class="text-xs text-gray-400 mb-3">配置各定时任务的执行时间，修改后即时生效</p>
 
-          <div class="space-y-2">
-            <div
-              v-for="(label, key) in schedulerTypes"
-              :key="key"
-              class="bg-white rounded-xl shadow-sm overflow-hidden"
-            >
-              <div class="p-3 flex items-center justify-between gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="text-sm font-medium text-gray-800 flex items-center gap-1.5">
-                    {{ label }}
-                    <van-icon
-                      v-if="schedulerInstructions[key]"
-                      name="edit"
-                      size="14"
-                      class="text-gray-400 cursor-pointer hover:text-blue-500"
-                      @click="togglePromptExpand(key)"
-                    />
+          <div v-for="group in schedulerGroups" :key="group.page" class="mb-5">
+            <h3 class="text-sm font-semibold text-gray-600 mb-2 flex items-center gap-1.5">
+              <span class="inline-block w-1 h-4 rounded-full" :style="{ backgroundColor: group.color }"></span>
+              {{ group.page }}
+            </h3>
+
+            <!-- Parent group with children -->
+            <div v-if="group.children" class="pl-4">
+              <div v-for="child in group.children" :key="child.page" class="mb-4">
+                <h4 class="text-xs font-semibold text-gray-500 mb-2 flex items-center gap-1.5">
+                  <span class="inline-block w-1 h-3 rounded-full" :style="{ backgroundColor: child.color }"></span>
+                  {{ child.page }}
+                </h4>
+                <div class="space-y-2 pl-4">
+                  <div
+                    v-for="key in child.types"
+                    :key="key"
+                    class="bg-white rounded-xl shadow-sm overflow-hidden"
+                  >
+                    <div class="p-3 flex items-center justify-between gap-3">
+                      <div class="flex-1 min-w-0">
+                        <div class="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                          {{ schedulerTypes[key] }}
+                          <van-icon
+                            v-if="schedulerInstructions[key]"
+                            name="edit"
+                            size="14"
+                            class="text-gray-400 cursor-pointer hover:text-blue-500"
+                            @click="togglePromptExpand(key)"
+                          />
+                        </div>
+                        <div class="text-xs text-gray-400">{{ schedulerDescriptions[key] || key }}</div>
+                      </div>
+                      <template v-if="schedulers[key]?.interval_hours !== undefined">
+                        <div class="flex items-center gap-1">
+                          <span class="text-xs text-gray-500">每</span>
+                          <input type="number" :value="schedulers[key].interval_hours" @change="schedulers[key].interval_hours = Math.max(1, Number($event.target.value) || 1)" class="w-14 text-sm text-center border border-gray-200 rounded-lg px-1 py-1.5 bg-gray-50" min="1" max="24" />
+                          <span class="text-xs text-gray-500">小时</span>
+                        </div>
+                      </template>
+                      <template v-else>
+                        <span class="text-sm text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-2 py-1 rounded" @click="openSchedulerTimePicker(key)">{{ formatTime(schedulers[key]?.cron_hour, schedulers[key]?.cron_minute) }}</span>
+                      </template>
+                    </div>
+                    <div v-if="schedulerInstructions[key] && expandedPrompts[key]" class="border-t border-gray-100 px-3 pb-3 pt-2">
+                      <div class="flex items-center justify-between mb-1.5">
+                        <span class="text-xs text-gray-500">提示词模板</span>
+                        <span v-if="schedulerInstructions[key]?.prompt !== schedulerInstructions[key]?.default" class="text-xs text-orange-500 cursor-pointer hover:text-orange-600" @click="resetPrompt(key)">恢复默认</span>
+                      </div>
+                      <textarea v-model="schedulerInstructions[key].prompt" class="w-full text-xs text-gray-700 border border-gray-200 rounded-lg p-2 bg-gray-50 resize-y leading-relaxed" rows="8" placeholder="输入提示词模板..."></textarea>
+                      <p class="text-xs text-gray-400 mt-1">可用占位符：{{ key === 'daily_todo_analysis' ? '{tasks_text}' : '{projects_text}' }}（运行时自动替换为实际数据）</p>
+                    </div>
                   </div>
-                  <div class="text-xs text-gray-400">{{ schedulerDescriptions[key] || key }}</div>
                 </div>
-                <!-- Interval type -->
-                <template v-if="schedulers[key]?.interval_hours !== undefined">
-                  <div class="flex items-center gap-1">
-                    <span class="text-xs text-gray-500">每</span>
-                    <input
-                      type="number"
-                      :value="schedulers[key].interval_hours"
-                      @change="schedulers[key].interval_hours = Math.max(1, Number($event.target.value) || 1)"
-                      class="w-14 text-sm text-center border border-gray-200 rounded-lg px-1 py-1.5 bg-gray-50"
-                      min="1"
-                      max="24"
-                    />
-                    <span class="text-xs text-gray-500">小时</span>
-                  </div>
-                </template>
-                <!-- Cron type -->
-                <template v-else>
-                  <span
-                    class="text-sm text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-2 py-1 rounded"
-                    @click="openSchedulerTimePicker(key)"
-                  >{{ formatTime(schedulers[key]?.cron_hour, schedulers[key]?.cron_minute) }}</span>
-                </template>
               </div>
-              <!-- Expandable prompt editor -->
-              <div v-if="schedulerInstructions[key] && expandedPrompts[key]" class="border-t border-gray-100 px-3 pb-3 pt-2">
-                <div class="flex items-center justify-between mb-1.5">
-                  <span class="text-xs text-gray-500">提示词模板</span>
-                  <span
-                    v-if="schedulerInstructions[key]?.prompt !== schedulerInstructions[key]?.default"
-                    class="text-xs text-orange-500 cursor-pointer hover:text-orange-600"
-                    @click="resetPrompt(key)"
-                  >恢复默认</span>
+            </div>
+
+            <!-- Leaf group with types directly -->
+            <div v-else class="space-y-2 pl-4">
+              <div
+                v-for="key in group.types"
+                :key="key"
+                class="bg-white rounded-xl shadow-sm overflow-hidden"
+              >
+                <div class="p-3 flex items-center justify-between gap-3">
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+                      {{ schedulerTypes[key] }}
+                      <van-icon
+                        v-if="schedulerInstructions[key]"
+                        name="edit"
+                        size="14"
+                        class="text-gray-400 cursor-pointer hover:text-blue-500"
+                        @click="togglePromptExpand(key)"
+                      />
+                    </div>
+                    <div class="text-xs text-gray-400">{{ schedulerDescriptions[key] || key }}</div>
+                  </div>
+                  <template v-if="schedulers[key]?.interval_hours !== undefined">
+                    <div class="flex items-center gap-1">
+                      <span class="text-xs text-gray-500">每</span>
+                      <input type="number" :value="schedulers[key].interval_hours" @change="schedulers[key].interval_hours = Math.max(1, Number($event.target.value) || 1)" class="w-14 text-sm text-center border border-gray-200 rounded-lg px-1 py-1.5 bg-gray-50" min="1" max="24" />
+                      <span class="text-xs text-gray-500">小时</span>
+                    </div>
+                  </template>
+                  <template v-else>
+                    <span class="text-sm text-blue-500 cursor-pointer hover:text-blue-700 font-mono bg-blue-50 px-2 py-1 rounded" @click="openSchedulerTimePicker(key)">{{ formatTime(schedulers[key]?.cron_hour, schedulers[key]?.cron_minute) }}</span>
+                  </template>
                 </div>
-                <textarea
-                  v-model="schedulerInstructions[key].prompt"
-                  class="w-full text-xs text-gray-700 border border-gray-200 rounded-lg p-2 bg-gray-50 resize-y leading-relaxed"
-                  rows="8"
-                  placeholder="输入提示词模板..."
-                ></textarea>
-                <p class="text-xs text-gray-400 mt-1">可用占位符：{{ key === 'daily_todo_analysis' ? '{tasks_text}' : '{projects_text}' }}（运行时自动替换为实际数据）</p>
+                <div v-if="schedulerInstructions[key] && expandedPrompts[key]" class="border-t border-gray-100 px-3 pb-3 pt-2">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs text-gray-500">提示词模板</span>
+                    <span v-if="schedulerInstructions[key]?.prompt !== schedulerInstructions[key]?.default" class="text-xs text-orange-500 cursor-pointer hover:text-orange-600" @click="resetPrompt(key)">恢复默认</span>
+                  </div>
+                  <textarea v-model="schedulerInstructions[key].prompt" class="w-full text-xs text-gray-700 border border-gray-200 rounded-lg p-2 bg-gray-50 resize-y leading-relaxed" rows="8" placeholder="输入提示词模板..."></textarea>
+                  <p class="text-xs text-gray-400 mt-1">可用占位符：{{ key === 'daily_todo_analysis' ? '{tasks_text}' : '{projects_text}' }}（运行时自动替换为实际数据）</p>
+                </div>
               </div>
             </div>
           </div>
@@ -246,6 +283,38 @@ import { showToast } from 'vant'
 import DrumTimePicker from '../components/DrumTimePicker.vue'
 import MessageHubTab from '../components/MessageHubTab.vue'
 
+// Group scheduler types by first-level page
+const SCHEDULER_GROUPS = [
+  {
+    page: 'Studio',
+    color: '#8B5CF6',
+    children: [
+      { page: 'TODO', color: '#8B5CF6', types: ['daily_todo_analysis', 'daily_duration_stats', 'repeat_todo_check', 'daily_todo_tag_organize'] },
+      { page: '项目管理', color: '#10B981', types: ['daily_project_analysis'] },
+    ],
+  },
+  {
+    page: '灵感',
+    color: '#F97316',
+    types: ['daily_idea_aggregation'],
+  },
+  {
+    page: '人才',
+    color: '#3B82F6',
+    types: ['daily_scheduled_queries', 'daily_tag_organize'],
+  },
+  {
+    page: '手记',
+    color: '#EC4899',
+    types: ['daily_diary_comment'],
+  },
+  {
+    page: '系统',
+    color: '#6B7280',
+    types: ['daily_backup'],
+  },
+]
+
 // Group call types by first-level page
 const PAGE_GROUPS = [
   {
@@ -329,6 +398,34 @@ const pageGroups = computed(() => {
     })
     .filter(g => g.children ? g.children.length > 0 : g.types.length > 0)
   // Collect any ungrouped call types into a "其他" group
+  const ungrouped = known.filter(t => !grouped.has(t))
+  if (ungrouped.length) {
+    result.push({ page: '其他', color: '#9ca3af', types: ungrouped })
+  }
+  return result
+})
+
+const schedulerGroups = computed(() => {
+  const known = Object.keys(schedulerTypes.value)
+  if (!known.length) return []
+  const grouped = new Set()
+  const result = SCHEDULER_GROUPS
+    .map(g => {
+      if (g.children) {
+        const children = g.children
+          .map(c => {
+            const types = c.types.filter(t => known.includes(t))
+            types.forEach(t => grouped.add(t))
+            return { ...c, types }
+          })
+          .filter(c => c.types.length > 0)
+        return { ...g, children }
+      }
+      const types = g.types.filter(t => known.includes(t))
+      types.forEach(t => grouped.add(t))
+      return { ...g, types }
+    })
+    .filter(g => g.children ? g.children.length > 0 : g.types.length > 0)
   const ungrouped = known.filter(t => !grouped.has(t))
   if (ungrouped.length) {
     result.push({ page: '其他', color: '#9ca3af', types: ungrouped })
