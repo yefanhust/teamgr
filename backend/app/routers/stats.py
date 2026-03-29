@@ -48,8 +48,9 @@ def get_llm_logs(
 
 @router.get("/llm-summary")
 def get_llm_summary(db: Session = Depends(get_db)):
-    """Return aggregated stats grouped by model_name."""
-    rows = (
+    """Return aggregated stats grouped by model_name, with per-call-type breakdown."""
+    # Per-model aggregation
+    model_rows = (
         db.query(
             LLMUsageLog.model_name,
             func.count(LLMUsageLog.id).label("call_count"),
@@ -62,6 +63,29 @@ def get_llm_summary(db: Session = Depends(get_db)):
         .group_by(LLMUsageLog.model_name)
         .all()
     )
+
+    # Per-model per-call-type breakdown
+    detail_rows = (
+        db.query(
+            LLMUsageLog.model_name,
+            LLMUsageLog.call_type,
+            func.count(LLMUsageLog.id).label("call_count"),
+        )
+        .group_by(LLMUsageLog.model_name, LLMUsageLog.call_type)
+        .all()
+    )
+
+    # Build breakdown map: model_name -> [{call_type, call_count}, ...]
+    breakdown_map: dict[str, list] = {}
+    for row in detail_rows:
+        breakdown_map.setdefault(row.model_name, []).append({
+            "call_type": row.call_type,
+            "call_count": row.call_count,
+        })
+    # Sort each model's breakdown by call_count descending
+    for items in breakdown_map.values():
+        items.sort(key=lambda x: x["call_count"], reverse=True)
+
     return [
         {
             "model_name": row.model_name,
@@ -71,6 +95,7 @@ def get_llm_summary(db: Session = Depends(get_db)):
             "avg_output_tokens": round(row.avg_output_tokens or 0),
             "total_input_tokens": row.total_input_tokens or 0,
             "total_output_tokens": row.total_output_tokens or 0,
+            "breakdown": breakdown_map.get(row.model_name, []),
         }
-        for row in rows
+        for row in model_rows
     ]

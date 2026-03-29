@@ -45,6 +45,17 @@
                   <div class="font-semibold text-gray-700">{{ s.total_output_tokens.toLocaleString() }}</div>
                 </div>
               </div>
+              <!-- Per-call-type breakdown -->
+              <div v-if="s.breakdown && s.breakdown.length > 0" class="mt-3 pt-3 border-t border-gray-100">
+                <div class="text-xs text-gray-400 mb-1.5">调用类型分布</div>
+                <div class="flex flex-wrap gap-1.5">
+                  <span v-for="b in s.breakdown" :key="b.call_type"
+                    class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-gray-50 text-xs text-gray-600">
+                    <span>{{ callTypeLabel(b.call_type) }}</span>
+                    <span class="font-semibold text-blue-600">{{ b.call_count }}</span>
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -142,12 +153,52 @@ function formatTime(iso) {
 }
 
 function callTypeLabel(type) {
-  const map = { 'text-entry': '文本录入', 'pdf-parse': 'PDF解析', 'semantic-search': '语义搜索' }
+  const map = {
+    'text-entry': '信息录入',
+    'pdf-parse': 'PDF解析',
+    'image-parse': '图片解析',
+    'semantic-search': '语义搜索',
+    'chat-analyze': '维度分析',
+    'chat-answer': '回答生成',
+    'organize-tags': '标签整理',
+    'idea-classify': '灵感分类',
+    'idea-insight': '灵感洞见',
+    'todo-auto-tag': '任务打标',
+    'todo-organize-tags': '任务标签整理',
+    'todo-analysis': '效率分析',
+    'scholar-categorize': '对话分类',
+    'project-summary': '项目概览',
+    'project-update-parse': '进展解析',
+    'project-analysis': '项目分析',
+    'diary-auto-tag': '手记打标',
+    'diary-comment': '手记评论',
+    'interview-evaluation': '面试评价',
+  }
   return map[type] || type
 }
 
 function callTypeStyle(type) {
-  const map = { 'text-entry': 'primary', 'pdf-parse': 'success', 'semantic-search': 'warning' }
+  const map = {
+    'text-entry': 'primary',
+    'pdf-parse': 'success',
+    'image-parse': 'success',
+    'semantic-search': 'warning',
+    'chat-analyze': 'primary',
+    'chat-answer': 'primary',
+    'organize-tags': 'danger',
+    'idea-classify': 'warning',
+    'idea-insight': 'warning',
+    'todo-auto-tag': 'success',
+    'todo-organize-tags': 'danger',
+    'todo-analysis': 'primary',
+    'scholar-categorize': 'warning',
+    'project-summary': 'success',
+    'project-update-parse': 'success',
+    'project-analysis': 'primary',
+    'diary-auto-tag': 'danger',
+    'diary-comment': 'danger',
+    'interview-evaluation': 'warning',
+  }
   return map[type] || 'default'
 }
 </script>

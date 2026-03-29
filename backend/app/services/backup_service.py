@@ -4,7 +4,7 @@ import logging
 import sqlite3
 import tarfile
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from app.config import get_cos_config, get_backup_config
@@ -116,6 +116,10 @@ def _collect_backup_files(tmp_dir: str) -> str:
         if instructions_yaml.exists():
             tar.add(str(instructions_yaml), arcname="config/instructions.yaml")
 
+        trusted_devices = _CONFIG_DIR / "trusted_devices.json"
+        if trusted_devices.exists():
+            tar.add(str(trusted_devices), arcname="config/trusted_devices.json")
+
         # 3. Scholar data
         scholar_conv = _DATA_DIR / "scholar-conversations.json"
         if scholar_conv.exists():
@@ -141,6 +145,16 @@ def _collect_backup_files(tmp_dir: str) -> str:
             for f in vibe_sessions.iterdir():
                 if f.is_file():
                     tar.add(str(f), arcname=f"data/vibe-sessions/{f.name}")
+
+        # 5. User uploaded files (docs & PDFs)
+        for upload_dir_name in ("doc-uploads", "pdf-uploads"):
+            upload_dir = _DATA_DIR / upload_dir_name
+            if upload_dir.is_dir():
+                for root, dirs, files in os.walk(upload_dir):
+                    for fname in files:
+                        fpath = os.path.join(root, fname)
+                        arcname = os.path.relpath(fpath, _DATA_DIR)
+                        tar.add(fpath, arcname=f"data/{arcname}")
 
     return archive_path
 
@@ -183,6 +197,64 @@ def _notify_backup_failure(error_msg: str):
         send_notification_sync(title, content)
     except Exception as e:
         logger.error(f"Failed to send backup failure notification: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Retention: delete backups older than N days
+# ---------------------------------------------------------------------------
+
+_RETENTION_DAYS = 30
+
+
+def _cleanup_old_backups(client, bucket: str, prefix: str):
+    """Delete COS backup objects older than _RETENTION_DAYS days."""
+    cutoff = datetime.utcnow() - timedelta(days=_RETENTION_DAYS)
+    marker = ""
+    deleted = 0
+
+    try:
+        while True:
+            resp = client.list_objects(
+                Bucket=bucket,
+                Prefix=prefix + "teamgr_",
+                Marker=marker,
+                MaxKeys=1000,
+            )
+            contents = resp.get("Contents", [])
+            if not contents:
+                break
+
+            to_delete = []
+            for obj in contents:
+                key = obj["Key"]
+                # Skip the "latest" pointer
+                if key.endswith("latest.tar.gz.enc"):
+                    continue
+                last_modified = obj.get("LastModified", "")
+                if last_modified:
+                    # COS returns ISO format like "2026-03-15T04:30:12.000Z"
+                    mod_time = datetime.strptime(
+                        last_modified, "%Y-%m-%dT%H:%M:%S.%fZ"
+                    )
+                    if mod_time < cutoff:
+                        to_delete.append({"Key": key})
+
+            if to_delete:
+                client.delete_objects(
+                    Bucket=bucket,
+                    Delete={"Object": to_delete, "Quiet": "true"},
+                )
+                deleted += len(to_delete)
+
+            if resp.get("IsTruncated") == "true":
+                marker = resp.get("NextMarker", contents[-1]["Key"])
+            else:
+                break
+
+        if deleted:
+            logger.info(f"Cleaned up {deleted} old backups (>{_RETENTION_DAYS} days)")
+    except Exception as e:
+        logger.warning(f"Failed to clean up old backups: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +347,9 @@ def backup_to_cos():
 
         _log_backup("success", started_at, cos_key=cos_key,
                      file_size=file_size, encrypted=True)
+
+        # Step 4: Clean up old backups (retain last N days)
+        _cleanup_old_backups(client, bucket, prefix)
 
     except ImportError:
         error_msg = "cos-python-sdk-v5 or cryptography not installed"
