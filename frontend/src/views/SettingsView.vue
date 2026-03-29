@@ -180,9 +180,9 @@
                       @change="onModelChange(callType, $event.target.value)"
                       class="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 text-gray-700 min-w-[140px] max-w-[200px]"
                     >
-                      <option value="">Global Default</option>
+                      <option value="" :disabled="LOCAL_ONLY_TYPES.has(callType)">Global Default</option>
                       <optgroup v-if="networkModels.length" label="Cloud">
-                        <option v-for="m in networkModels" :key="m.name" :value="m.name">{{ m.name }}</option>
+                        <option v-for="m in networkModels" :key="m.name" :value="m.name" :disabled="LOCAL_ONLY_TYPES.has(callType)">{{ m.name }}</option>
                       </optgroup>
                       <optgroup v-if="localModels.length" label="Local">
                         <option v-for="m in localModels" :key="m.name" :value="m.name">{{ m.name }}</option>
@@ -219,9 +219,9 @@
                     @change="onModelChange(callType, $event.target.value)"
                     class="text-sm border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 text-gray-700 min-w-[140px] max-w-[200px]"
                   >
-                    <option value="">Global Default</option>
+                    <option value="" :disabled="LOCAL_ONLY_TYPES.has(callType)">Global Default</option>
                     <optgroup v-if="networkModels.length" label="Cloud">
-                      <option v-for="m in networkModels" :key="m.name" :value="m.name">{{ m.name }}</option>
+                      <option v-for="m in networkModels" :key="m.name" :value="m.name" :disabled="LOCAL_ONLY_TYPES.has(callType)">{{ m.name }}</option>
                     </optgroup>
                     <optgroup v-if="localModels.length" label="Local">
                       <option v-for="m in localModels" :key="m.name" :value="m.name">{{ m.name }}</option>
@@ -296,17 +296,15 @@ const SCHEDULER_GROUPS = [
   {
     page: '灵感',
     color: '#F97316',
-    types: ['daily_idea_aggregation'],
+    children: [
+      { page: '灵感', color: '#F97316', types: ['daily_idea_aggregation'] },
+      { page: '流光剪影', color: '#EC4899', types: ['daily_diary_comment'] },
+    ],
   },
   {
     page: '人才',
     color: '#3B82F6',
     types: ['daily_scheduled_queries', 'daily_tag_organize'],
-  },
-  {
-    page: '手记',
-    color: '#EC4899',
-    types: ['daily_diary_comment'],
   },
   {
     page: '系统',
@@ -322,13 +320,16 @@ const PAGE_GROUPS = [
     color: '#8B5CF6',
     children: [
       { page: 'TODO', color: '#8B5CF6', types: ['todo-auto-tag', 'todo-organize-tags', 'todo-analysis'] },
-      { page: '项目管理', color: '#10B981', types: ['project-summary', 'project-update-parse'] },
+      { page: '项目管理', color: '#10B981', types: ['project-summary', 'project-update-parse', 'project-analysis'] },
     ],
   },
   {
     page: '灵感',
     color: '#F97316',
-    types: ['idea-classify', 'idea-insight'],
+    children: [
+      { page: '灵感', color: '#F97316', types: ['idea-classify', 'idea-insight'] },
+      { page: '流光剪影', color: '#EC4899', types: ['diary-auto-tag', 'diary-comment'] },
+    ],
   },
   {
     page: '人才',
@@ -372,6 +373,7 @@ const callTypePromptHints = {
   'interview-evaluation': '可用占位符：{talent_name} {talent_summary_line} {result} {rating} {rating_label} {records_text}',
 }
 
+const LOCAL_ONLY_TYPES = new Set(['diary-auto-tag', 'diary-comment'])
 const networkModels = computed(() => availableModels.value.filter(m => m.location === 'network'))
 const localModels = computed(() => availableModels.value.filter(m => m.location === 'local'))
 
