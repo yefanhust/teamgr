@@ -1,9 +1,11 @@
+import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Form, UploadFile, File
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,9 @@ from app.middleware.auth_middleware import require_auth
 from app.models.project import Project, ProjectUpdate, ProjectMember, ProjectAnalysis
 from app.models.talent import Talent
 from app.services.pinyin_service import get_pinyin_data, match_pinyin
+
+PROJECT_DOC_DIR = os.path.join(os.environ.get("TEAMGR_DATA_DIR", "data"), "project-doc-uploads")
+MAX_PDF_SIZE = 20 * 1024 * 1024  # 20MB
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -65,7 +70,7 @@ def _project_to_dict(p: Project, include_children: bool = False) -> dict:
 
 
 def _update_to_dict(u: ProjectUpdate) -> dict:
-    return {
+    d = {
         "id": u.id,
         "project_id": u.project_id,
         "project_name": u.project.name if u.project else "",
@@ -75,6 +80,9 @@ def _update_to_dict(u: ProjectUpdate) -> dict:
         "parsed_data": u.parsed_data or {},
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
+    if u.file_name:
+        d["file_name"] = u.file_name
+    return d
 
 
 def _member_to_dict(m: ProjectMember) -> dict:
@@ -407,8 +415,6 @@ async def submit_update(
     db: Session = Depends(get_db),
     _=Depends(require_auth),
 ):
-    import asyncio
-
     project = db.query(Project).filter(Project.id == body.project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -456,6 +462,95 @@ async def submit_update(
     asyncio.create_task(_parse_update_bg(update_id, body.content, talent_name, project_name, model))
 
     return _update_to_dict(update)
+
+
+@router.post("/updates/pdf")
+async def submit_update_pdf(
+    project_id: int = Form(...),
+    talent_id: int = Form(...),
+    file: UploadFile = File(...),
+    model: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Upload a PDF as a project update. The PDF content is extracted and summarised by LLM."""
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext != ".pdf":
+        raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    talent = db.query(Talent).filter(Talent.id == talent_id).first()
+    if not talent:
+        raise HTTPException(status_code=404, detail="人才不存在")
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_PDF_SIZE:
+        raise HTTPException(status_code=400, detail="文件大小不能超过 20MB")
+
+    # Create update record immediately
+    update = ProjectUpdate(
+        project_id=project_id,
+        talent_id=talent_id,
+        raw_input=f"[PDF上传] {filename}，正在解析...",
+        parsed_data={},
+        file_name=filename,
+    )
+    db.add(update)
+
+    # Update project timestamps
+    now = datetime.utcnow()
+    project.last_update_at = now
+    if not project.started_at:
+        project.started_at = now
+
+    # Auto-maintain project member
+    existing_member = (
+        db.query(ProjectMember)
+        .filter(ProjectMember.project_id == project_id, ProjectMember.talent_id == talent_id)
+        .first()
+    )
+    if not existing_member:
+        db.add(ProjectMember(project_id=project_id, talent_id=talent_id))
+
+    db.commit()
+    db.refresh(update)
+
+    # Save PDF to disk
+    os.makedirs(PROJECT_DOC_DIR, exist_ok=True)
+    save_path = os.path.join(PROJECT_DOC_DIR, f"{update.id}.pdf")
+    with open(save_path, "wb") as f:
+        f.write(file_bytes)
+
+    logger.info(f"[ProjectPDF] Saved {filename} ({len(file_bytes)} bytes) as update {update.id}")
+
+    # Background: extract text → LLM summarise → update record
+    asyncio.create_task(_process_pdf_update_bg(
+        update.id, file_bytes, talent.name, project.name, model
+    ))
+
+    return _update_to_dict(update)
+
+
+@router.get("/updates/{update_id}/file")
+def get_update_file(
+    update_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Serve the original uploaded PDF for a project update."""
+    update = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+    if not update or not update.file_name:
+        raise HTTPException(status_code=404, detail="该更新没有关联文件")
+
+    file_path = os.path.join(PROJECT_DOC_DIR, f"{update_id}.pdf")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    return FileResponse(file_path, media_type="application/pdf", filename=update.file_name)
 
 
 @router.get("/{project_id}/updates")
@@ -573,6 +668,96 @@ async def _parse_update_bg(update_id: int, content: str, talent_name: str, proje
             db.close()
     except Exception as e:
         logger.warning(f"Background LLM parse failed for update {update_id}: {e}")
+
+
+async def _process_pdf_update_bg(update_id: int, file_bytes: bytes, talent_name: str, project_name: str, model: str = None):
+    """Background task: extract PDF text → LLM summarise → update record."""
+    from app.database import SessionLocal
+    from app.services.llm_service import _call_model_text, _strip_think_tags
+    from app.services.pdf_service import extract_markdown_from_pdf, extract_text_from_pdf
+
+    db = SessionLocal()
+    try:
+        # Extract text from PDF
+        md_text = ""
+        plain_text = ""
+        try:
+            md_text = extract_markdown_from_pdf(file_bytes)
+        except Exception as e:
+            logger.warning(f"[ProjectPDF] markdown extraction failed for update {update_id}: {e}")
+        try:
+            plain_text = extract_text_from_pdf(file_bytes)
+        except Exception as e:
+            logger.warning(f"[ProjectPDF] plain text extraction failed for update {update_id}: {e}")
+
+        content = md_text or plain_text
+        if not content or len(content.strip()) < 10:
+            # Cannot extract meaningful text
+            upd = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+            if upd:
+                upd.raw_input = f"[PDF上传] {upd.file_name}（无法提取文本内容）"
+                upd.parsed_data = {"progress": f"上传了 PDF 文件: {upd.file_name}", "blockers": "", "next_steps": "", "completion_pct": None, "role_hint": ""}
+                db.commit()
+            return
+
+        # Truncate if too long (keep first ~8000 chars for LLM)
+        truncated = content[:8000] if len(content) > 8000 else content
+
+        # LLM: generate very concise summary
+        prompt = f"""你是项目管理助手。以下是「{talent_name}」在项目「{project_name}」相关的一份 PDF 文档内容。
+请用1-3句话做非常精炼的总结，重点提炼核心信息和关键结论。直接输出总结文字，不要任何前缀。
+
+文档内容：
+{truncated}"""
+
+        summary = None
+        try:
+            raw = await _call_model_text(prompt, call_type="project-update-pdf", model_override=model)
+            if raw:
+                summary = _strip_think_tags(raw).strip()
+        except Exception as e:
+            logger.warning(f"[ProjectPDF] LLM summary failed for update {update_id}: {e}")
+
+        upd = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+        if not upd:
+            return
+
+        if summary:
+            upd.raw_input = summary
+        else:
+            upd.raw_input = f"[PDF上传] {upd.file_name}"
+
+        db.commit()
+        logger.info(f"[ProjectPDF] Summary done for update {update_id}")
+
+        # Now run structured parse on the summary
+        if summary:
+            parsed_data = await _parse_update_with_llm(summary, talent_name, project_name, model_override=model)
+            upd = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+            if upd:
+                upd.parsed_data = parsed_data
+                if parsed_data.get("role_hint"):
+                    member = (
+                        db.query(ProjectMember)
+                        .filter(ProjectMember.project_id == upd.project_id, ProjectMember.talent_id == upd.talent_id)
+                        .first()
+                    )
+                    if member and not member.role:
+                        member.role = parsed_data["role_hint"]
+                db.commit()
+                logger.info(f"[ProjectPDF] Structured parse done for update {update_id}")
+
+    except Exception as e:
+        logger.error(f"[ProjectPDF] Processing failed for update {update_id}: {e}")
+        try:
+            upd = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+            if upd and "正在解析" in upd.raw_input:
+                upd.raw_input = f"[PDF上传] {upd.file_name}（解析失败）"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
 
 
 # ---- LLM helpers ----

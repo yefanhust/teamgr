@@ -97,6 +97,7 @@ def _migrate_schema():
         ("talents", "status", "TEXT DEFAULT ''"),
         ("talents", "recruitment_type", "TEXT DEFAULT ''"),
         ("projects", "display_order", "INTEGER DEFAULT 0"),
+        ("project_updates", "file_name", "TEXT"),
     ]
     with engine.connect() as conn:
         for table, column, col_type in migrations:

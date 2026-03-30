@@ -516,6 +516,9 @@
                         <p class="text-sm text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
                         <div v-if="upd.parsed_data?.blockers" class="text-xs text-red-400 mt-1">阻碍: {{ upd.parsed_data.blockers }}</div>
                         <div v-if="upd.parsed_data?.next_steps" class="text-xs text-blue-400 mt-1">下一步: {{ upd.parsed_data.next_steps }}</div>
+                        <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
+                          <van-icon name="description" size="12" />{{ upd.file_name }}
+                        </a>
                       </div>
                     </div>
                   </div>
@@ -544,6 +547,9 @@
                         <StatusPicker size="sm" :model-value="mp.project_status" @update:model-value="changePmStatus(mp.project_id, $event)" />
                       </div>
                       <p v-if="mp.latest_update" class="text-xs text-gray-500">最新: {{ mp.latest_update.parsed_data?.progress || mp.latest_update.raw_input }}</p>
+                      <a v-if="mp.latest_update?.file_name" :href="'/api/projects/updates/' + mp.latest_update.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700">
+                        <van-icon name="description" size="12" />{{ mp.latest_update.file_name }}
+                      </a>
                       <p v-if="mp.latest_update?.parsed_data?.completion_pct != null" class="mt-1">
                         <van-progress :percentage="mp.latest_update.parsed_data.completion_pct" stroke-width="6" />
                       </p>
@@ -1741,6 +1747,7 @@
             </div>
           </div>
           <van-field
+            v-if="!pmPdfFile"
             v-model="pmUpdateContent"
             type="textarea"
             rows="4"
@@ -1748,6 +1755,21 @@
             maxlength="2000"
             show-word-limit
           />
+          <!-- PDF selected display -->
+          <div v-if="pmPdfFile" class="border border-blue-200 rounded-lg p-3 bg-blue-50/50 flex items-center gap-2">
+            <van-icon name="description" size="20" color="#3B82F6" />
+            <span class="text-sm text-gray-700 flex-1 truncate">{{ pmPdfFile.name }}</span>
+            <span class="text-xs text-gray-400">{{ (pmPdfFile.size / 1024 / 1024).toFixed(1) }}MB</span>
+            <van-icon name="cross" size="16" class="text-gray-400 cursor-pointer" @click="pmPdfFile = null" />
+          </div>
+          <!-- PDF upload button -->
+          <div v-if="!pmPdfFile" class="mt-2">
+            <label class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-gray-50 text-gray-500 text-xs cursor-pointer hover:bg-gray-100 transition border border-gray-200">
+              <van-icon name="description" size="14" />
+              <span>上传 PDF</span>
+              <input type="file" accept=".pdf" class="hidden" @change="onPmPdfSelect" />
+            </label>
+          </div>
         </div>
 
         <!-- Submit -->
@@ -1755,14 +1777,14 @@
           type="primary"
           block
           :loading="pmSubmitting"
-          :disabled="!pmSelectedTalent || !pmSelectedProject || !pmUpdateContent.trim()"
+          :disabled="!pmSelectedTalent || !pmSelectedProject || (!pmUpdateContent.trim() && !pmPdfFile)"
           @click="submitPmUpdate"
         >
-          提交
+          {{ pmPdfFile ? '上传并解析 PDF' : '提交' }}
         </van-button>
 
         <!-- Hint -->
-        <p class="text-xs text-gray-400 text-center">提交后 LLM 将在后台自动解析进展内容</p>
+        <p class="text-xs text-gray-400 text-center">{{ pmPdfFile ? '上传后 LLM 将自动提取内容并生成精炼总结' : '提交后 LLM 将在后台自动解析进展内容' }}</p>
       </div>
     </van-popup>
 
@@ -1984,6 +2006,9 @@
                 class="text-sm text-gray-600 cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
                 @dblclick="startEditUpdate(upd)"
               >{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+              <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
+                <van-icon name="description" size="12" />{{ upd.file_name }}
+              </a>
               <p v-if="upd.parsed_data?.completion_pct != null" class="text-xs text-blue-500 mt-1">完成度: {{ upd.parsed_data.completion_pct }}%</p>
             </div>
           </div>
@@ -2103,6 +2128,7 @@ const pmShowProjectList = ref(false)
 const pmProjectResults = ref([])
 const pmSelectedProject = ref(null)
 const pmUpdateContent = ref('')
+const pmPdfFile = ref(null)
 const pmSubmitting = ref(false)
 const pmLastResult = ref(null)
 const showPmModelPicker = ref(false)
@@ -4129,23 +4155,48 @@ async function createPmProject() {
   }
 }
 
+function onPmPdfSelect(e) {
+  const file = e.target.files?.[0]
+  if (!file) return
+  if (file.size > 20 * 1024 * 1024) {
+    showToast('文件大小不能超过 20MB')
+    e.target.value = ''
+    return
+  }
+  pmPdfFile.value = file
+  pmUpdateContent.value = ''
+  e.target.value = ''
+}
+
 async function submitPmUpdate() {
-  if (!pmSelectedTalent.value || !pmSelectedProject.value || !pmUpdateContent.value.trim()) return
+  if (!pmSelectedTalent.value || !pmSelectedProject.value) return
+  if (!pmPdfFile.value && !pmUpdateContent.value.trim()) return
   pmSubmitting.value = true
+  const wasPdf = !!pmPdfFile.value
   try {
-    await pmStore.submitUpdate(
-      pmSelectedProject.value.id,
-      pmSelectedTalent.value.id,
-      pmUpdateContent.value.trim(),
-      pmCurrentModel.value || null
-    )
+    if (pmPdfFile.value) {
+      await pmStore.submitUpdatePdf(
+        pmSelectedProject.value.id,
+        pmSelectedTalent.value.id,
+        pmPdfFile.value,
+        pmCurrentModel.value || null
+      )
+    } else {
+      await pmStore.submitUpdate(
+        pmSelectedProject.value.id,
+        pmSelectedTalent.value.id,
+        pmUpdateContent.value.trim(),
+        pmCurrentModel.value || null
+      )
+    }
     // Clear talent and content, keep project selection for next entry
     pmSelectedTalent.value = null
     pmTalentSearch.value = ''
     pmShowTalentList.value = false
     pmTalentResults.value = []
     pmUpdateContent.value = ''
-    showToast('已提交，LLM 正在后台处理')
+    pmPdfFile.value = null
+    showToast(wasPdf ? 'PDF 已上传，后台正在解析' : '已提交，LLM 正在后台处理')
     // Refresh boards in background
     loadPmTimeline()
     loadPmMembers()

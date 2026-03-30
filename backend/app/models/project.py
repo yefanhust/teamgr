@@ -25,6 +25,7 @@ class ProjectUpdate(Base):
     talent_id = Column(Integer, ForeignKey("talents.id", ondelete="SET NULL"), nullable=True)
     raw_input = Column(Text, nullable=False)
     parsed_data = Column(JSON, default=dict)
+    file_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     project = relationship("Project", back_populates="updates")

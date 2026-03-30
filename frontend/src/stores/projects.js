@@ -100,6 +100,19 @@ export const useProjectsStore = defineStore('projects', () => {
     return res.data
   }
 
+  async function submitUpdatePdf(projectId, talentId, file, model = null) {
+    const formData = new FormData()
+    formData.append('project_id', projectId)
+    formData.append('talent_id', talentId)
+    formData.append('file', file)
+    if (model) formData.append('model', model)
+    const res = await api.post('/api/projects/updates/pdf', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    await fetchProjects()
+    return res.data
+  }
+
   return {
     projects,
     currentProject,
@@ -119,5 +132,6 @@ export const useProjectsStore = defineStore('projects', () => {
     searchProjects,
     updateMemberRole,
     updateProjectUpdate,
+    submitUpdatePdf,
   }
 })
