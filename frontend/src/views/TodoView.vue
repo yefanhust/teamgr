@@ -1033,15 +1033,6 @@
                     <div class="flex flex-col gap-1.5 flex-shrink-0">
                       <van-button
                         size="small"
-                        :type="item.completed ? 'default' : 'warning'"
-                        :disabled="item.completed"
-                        :plain="item.completed"
-                        @click.stop="revertToVerifying(item)"
-                      >
-                        返回验证
-                      </van-button>
-                      <van-button
-                        size="small"
                         type="danger"
                         plain
                         icon="delete-o"

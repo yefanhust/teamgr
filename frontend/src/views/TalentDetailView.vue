@@ -106,7 +106,7 @@
             <span v-else class="editable-value" @dblclick.stop="startEditBasic('phone', talent.phone)">{{ talent.phone }}</span>
           </div>
         </div>
-        <!-- Talent Status -->
+        <!-- Talent Status & Recruitment Type -->
         <div class="flex items-center justify-between mt-3">
           <div class="flex items-center gap-2">
             <span class="text-sm text-gray-500">状态：</span>
@@ -124,6 +124,22 @@
               class="cursor-pointer"
               @click="showStatusSheet = true"
             >未设置</van-tag>
+            <span class="text-gray-300">|</span>
+            <span class="text-sm text-gray-500">招聘类型：</span>
+            <van-tag
+              v-if="talent.recruitment_type"
+              :color="recruitmentTypeColor(talent.recruitment_type)"
+              size="medium"
+              class="cursor-pointer"
+              @click="showRecruitmentSheet = true"
+            >{{ talent.recruitment_type }}</van-tag>
+            <van-tag
+              v-else
+              type="default"
+              size="medium"
+              class="cursor-pointer"
+              @click="showRecruitmentSheet = true"
+            >未设置</van-tag>
           </div>
           <span class="text-xs text-gray-400">创建于 {{ formatDate(talent.created_at) }}</span>
         </div>
@@ -136,25 +152,6 @@
         cancel-text="取消"
         @select="onStatusSelect"
       />
-
-      <!-- Recruitment Type -->
-      <div class="flex items-center gap-2 mt-2 px-5 pb-3">
-        <span class="text-sm text-gray-500">招聘类型：</span>
-        <van-tag
-          v-if="talent.recruitment_type"
-          :color="recruitmentTypeColor(talent.recruitment_type)"
-          size="medium"
-          class="cursor-pointer"
-          @click="showRecruitmentSheet = true"
-        >{{ talent.recruitment_type }}</van-tag>
-        <van-tag
-          v-else
-          type="default"
-          size="medium"
-          class="cursor-pointer"
-          @click="showRecruitmentSheet = true"
-        >未设置</van-tag>
-      </div>
 
       <!-- Recruitment Type ActionSheet -->
       <van-action-sheet
@@ -390,7 +387,7 @@
                 <div v-if="getParsedSummaryLines(log).length === 0" class="text-gray-400">（未提取到信息）</div>
               </div>
               <!-- Debug expandable panels -->
-              <div class="mt-1.5 flex gap-2 flex-wrap">
+              <div class="mt-1.5 flex gap-2 flex-wrap items-center">
                 <span
                   v-if="log.source === 'pdf' || log.source === 'docx'"
                   class="text-xs text-teal-600 cursor-pointer hover:underline"
@@ -408,6 +405,11 @@
                   class="text-xs text-purple-500 cursor-pointer hover:underline"
                   @click="toggleDebugSection(log.id, 'llm')"
                 >{{ debugSections[log.id + ':llm'] ? '▼ 收起原始JSON' : '▶ 原始JSON' }}</span>
+                <span
+                  v-if="log.source === 'pdf' || log.source === 'docx'"
+                  class="text-xs text-red-500 cursor-pointer hover:underline"
+                  @click="reparseEntry(log)"
+                >↻ 重新解析</span>
               </div>
               <div v-if="debugSections[log.id + ':text']" class="mt-2 bg-orange-50 border border-orange-200 rounded-lg p-3 max-h-80 overflow-auto">
                 <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ getParsedDebug(log).extracted_text || '(无提取文本)' }}</pre>
@@ -760,7 +762,7 @@ function formatStructuredText(text) {
     .replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 
   if (hasHeaders) s = s.replace(/【/g, '\n【')
-  if (hasNumbered) s = s.replace(/(\s)(\d{1,2}[\.\、]\s*[A-Za-z\u4e00-\u9fff])/g, '\n$2')
+  if (hasNumbered) s = s.replace(/([；。：！？\s])(\d{1,2}[\.\、]\s*[A-Za-z\u4e00-\u9fff])/g, '$1\n$2')
   if (hasBullets) s = s.replace(/(\s)(•)/g, '\n$2')
 
   const lines = s.split('\n').map(l => l.trim()).filter(Boolean)
