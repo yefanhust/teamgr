@@ -1583,7 +1583,23 @@
         <!-- Meta -->
         <div class="flex items-center gap-4 text-xs text-gray-400 flex-wrap">
           <span>创建于 {{ formatDateTime(detailItem.created_at) }}</span>
-          <span v-if="detailItem.started_at">
+          <span v-if="editingStartedAt" class="inline-flex items-center gap-1">
+            开始于
+            <input
+              type="datetime-local"
+              :value="editingStartedAtValue"
+              class="text-xs border border-blue-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
+              @change="saveStartedAt($event.target.value)"
+              @blur="editingStartedAt = false"
+              @keydown.escape="editingStartedAt = false"
+              ref="startedAtInput"
+            />
+          </span>
+          <span
+            v-else-if="detailItem.started_at"
+            class="cursor-pointer hover:text-blue-500"
+            @dblclick.stop="startEditStartedAt"
+          >
             开始于 {{ formatDateTime(detailItem.started_at) }}
           </span>
           <span v-if="detailItem.deadline">
@@ -1736,7 +1752,13 @@
           <div class="flex items-center justify-between mb-1">
             <div class="flex items-center gap-1">
               <label class="text-sm text-gray-500">进展内容</label>
-              <VoiceInputButton v-model="pmUpdateContent" :size="14" />
+              <VoiceInputButton v-if="!pmPdfFile" v-model="pmUpdateContent" :size="14" />
+              <!-- PDF upload trigger - inline with label for visibility -->
+              <label v-if="!pmPdfFile" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 text-xs cursor-pointer hover:bg-orange-100 transition border border-orange-200 ml-1">
+                <van-icon name="upgrade" size="13" />
+                <span>PDF</span>
+                <input type="file" accept=".pdf" class="hidden" @change="onPmPdfSelect" />
+              </label>
             </div>
             <div
               class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 text-xs cursor-pointer hover:bg-blue-100 transition"
@@ -1746,6 +1768,16 @@
               <van-icon name="arrow-down" size="10" />
             </div>
           </div>
+          <!-- PDF selected display -->
+          <div v-if="pmPdfFile" class="border border-orange-200 rounded-lg p-3 bg-orange-50/50 flex items-center gap-2">
+            <van-icon name="description" size="22" color="#EA580C" />
+            <div class="flex-1 min-w-0">
+              <p class="text-sm text-gray-700 truncate">{{ pmPdfFile.name }}</p>
+              <p class="text-xs text-gray-400">{{ (pmPdfFile.size / 1024 / 1024).toFixed(1) }}MB · 上传后将由 LLM 自动总结</p>
+            </div>
+            <van-icon name="cross" size="18" class="text-gray-400 cursor-pointer flex-shrink-0" @click="pmPdfFile = null" />
+          </div>
+          <!-- Text input (hidden when PDF selected) -->
           <van-field
             v-if="!pmPdfFile"
             v-model="pmUpdateContent"
@@ -1755,21 +1787,6 @@
             maxlength="2000"
             show-word-limit
           />
-          <!-- PDF selected display -->
-          <div v-if="pmPdfFile" class="border border-blue-200 rounded-lg p-3 bg-blue-50/50 flex items-center gap-2">
-            <van-icon name="description" size="20" color="#3B82F6" />
-            <span class="text-sm text-gray-700 flex-1 truncate">{{ pmPdfFile.name }}</span>
-            <span class="text-xs text-gray-400">{{ (pmPdfFile.size / 1024 / 1024).toFixed(1) }}MB</span>
-            <van-icon name="cross" size="16" class="text-gray-400 cursor-pointer" @click="pmPdfFile = null" />
-          </div>
-          <!-- PDF upload button -->
-          <div v-if="!pmPdfFile" class="mt-2">
-            <label class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full bg-gray-50 text-gray-500 text-xs cursor-pointer hover:bg-gray-100 transition border border-gray-200">
-              <van-icon name="description" size="14" />
-              <span>上传 PDF</span>
-              <input type="file" accept=".pdf" class="hidden" @change="onPmPdfSelect" />
-            </label>
-          </div>
         </div>
 
         <!-- Submit -->
@@ -2305,6 +2322,9 @@ const detailItemTagIds = ref(new Set())
 const detailRepeatRule = ref('')
 const detailRepeatInterval = ref(1)
 const detailRepeatIncludeWeekends = ref(false)
+const editingStartedAt = ref(false)
+const editingStartedAtValue = ref('')
+const startedAtInput = ref(null)
 
 // Calendar pickers
 const calendarMinDate = new Date()
@@ -4442,6 +4462,33 @@ async function saveRepeatConfig() {
       repeat_interval: detailRepeatInterval.value || 1,
       repeat_include_weekends: detailRepeatIncludeWeekends.value,
     })
+    detailItem.value = { ...detailItem.value, ...updated }
+  } catch (e) {
+    showToast('保存失败')
+  }
+}
+
+function startEditStartedAt() {
+  if (!detailItem.value?.started_at) return
+  // Convert ISO string to local datetime-local format
+  const iso = detailItem.value.started_at
+  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
+  const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  editingStartedAtValue.value = local
+  editingStartedAt.value = true
+  nextTick(() => {
+    startedAtInput.value?.focus()
+  })
+}
+
+async function saveStartedAt(localVal) {
+  editingStartedAt.value = false
+  if (!detailItem.value || !localVal) return
+  // Convert local datetime to UTC ISO string
+  const localDate = new Date(localVal)
+  const utcIso = localDate.toISOString().replace('Z', '')
+  try {
+    const updated = await store.updateTodo(detailItem.value.id, { started_at: utcIso })
     detailItem.value = { ...detailItem.value, ...updated }
   } catch (e) {
     showToast('保存失败')

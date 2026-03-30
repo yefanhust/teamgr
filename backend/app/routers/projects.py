@@ -550,7 +550,15 @@ def get_update_file(
     if not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="文件不存在")
 
-    return FileResponse(file_path, media_type="application/pdf", filename=update.file_name)
+    from starlette.responses import Response
+    with open(file_path, "rb") as f:
+        content = f.read()
+    safe_name = update.file_name.replace('"', '\\"')
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+    )
 
 
 @router.get("/{project_id}/updates")

@@ -371,6 +371,7 @@ LLM_CALL_TYPES = {
     "scholar-categorize": "大学士-历史对话分类",
     "project-summary": "项目概览生成",
     "project-update-parse": "项目进展解析",
+    "project-update-pdf": "项目进展PDF总结",
     "project-analysis": "项目效率分析",
     "diary-auto-tag": "手记自动打标",
     "diary-comment": "手记每日评论",
