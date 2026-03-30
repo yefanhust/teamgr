@@ -51,7 +51,9 @@
     <div v-if="talent" class="max-w-3xl mx-auto px-4 py-4 space-y-4">
       <!-- Basic Info Card -->
       <div class="bg-white rounded-xl shadow-sm p-5">
-        <h2 class="text-xl font-bold text-gray-800">{{ talent.name }}</h2>
+        <textarea v-if="editingBasicField === 'name'" v-model="editValue" class="edit-value-input text-xl font-bold" ref="editBasicInput"
+          @blur="finishEditBasic" @keydown.enter.prevent="finishEditBasic" @keydown.escape="cancelEditBasic" rows="1" />
+        <h2 v-else class="text-xl font-bold text-gray-800 editable-value" @dblclick.stop="startEditBasic('name', talent.name)">{{ talent.name }}</h2>
         <div v-if="talent.tags.length" class="flex gap-1 flex-wrap mt-2">
           <template v-for="tag in talent.tags" :key="tag.id">
             <input
@@ -1101,7 +1103,8 @@ async function finishEditBasic() {
     talent.value = updated
     showToast('已保存')
   } catch (e) {
-    showToast('保存失败')
+    const detail = e.response?.data?.detail
+    showToast(detail || '保存失败')
   }
 }
 
