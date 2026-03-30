@@ -1608,8 +1608,8 @@
           <span v-if="detailItem.completed_at">
             完成于 {{ formatDateTime(detailItem.completed_at) }}
           </span>
-          <span v-if="(detailItem.total_working_seconds || 0) > 0" class="text-green-500">
-            工作时间 {{ formatSeconds(detailItem.total_working_seconds) }}
+          <span v-if="detailItem.work_status === 'in_progress' || (detailItem.total_working_seconds || 0) > 0" class="text-green-500">
+            工作时间 {{ formatWorkingTime(detailItem) }}
           </span>
           <span v-if="(detailItem.stop_count || 0) > 0" class="text-red-400">
             停止 {{ detailItem.stop_count }} 次
@@ -3232,8 +3232,13 @@ function formatWorkingTime(item) {
   // Trigger reactivity from timer tick
   void workingTimerTick.value
   const base = item.total_working_seconds || 0
-  if (item.work_status !== 'in_progress' || !item.paused_at) return formatSeconds(base)
-  const elapsed = Math.max(0, Math.floor((Date.now() - new Date(item.paused_at).getTime()) / 1000))
+  if (item.work_status !== 'in_progress') return formatSeconds(base)
+  // When no pause/resume cycles (base==0), use started_at as reference
+  // This correctly handles edited started_at where paused_at wasn't updated
+  const ref = (base === 0 && item.started_at) ? item.started_at : item.paused_at
+  if (!ref) return formatSeconds(base)
+  const refUtc = ref.endsWith('Z') ? ref : ref + 'Z'
+  const elapsed = Math.max(0, Math.floor((Date.now() - new Date(refUtc).getTime()) / 1000))
   return formatSeconds(base + elapsed)
 }
 

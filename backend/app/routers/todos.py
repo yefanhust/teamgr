@@ -398,7 +398,20 @@ def update_todo(todo_id: int, body: TodoUpdate, db: Session = Depends(get_db)):
         if body.started_at == "":
             item.started_at = None
         else:
-            item.started_at = datetime.fromisoformat(body.started_at)
+            old_started_at = item.started_at
+            new_started_at = datetime.fromisoformat(body.started_at)
+            item.started_at = new_started_at
+            # Recalculate working time when started_at changes
+            if old_started_at:
+                delta = new_started_at - old_started_at
+                delta_seconds = int(delta.total_seconds())
+                old_total = item.total_working_seconds or 0
+                if old_total > 0:
+                    # Has accumulated pause/resume segments - adjust total
+                    item.total_working_seconds = max(0, old_total - delta_seconds)
+                elif item.work_status == "in_progress" and item.paused_at:
+                    # No accumulated segments (simple case) - shift paused_at
+                    item.paused_at = item.paused_at + delta
     if body.high_priority is not None:
         item.high_priority = body.high_priority
     # Repeat config
