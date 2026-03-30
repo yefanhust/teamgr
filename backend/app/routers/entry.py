@@ -284,7 +284,11 @@ async def _process_docx_from_file_bg(entry_log_id: int):
             "extracted_text_length": len(best_text),
         }
         entry_log.llm_response = json.dumps(result, ensure_ascii=False)
-        entry_log.status = "done"
+        if result.get("_error"):
+            entry_log.status = "failed"
+            logger.warning(f"DOCX parsing returned error for entry {entry_log_id}: {result['_error']}")
+        else:
+            entry_log.status = "done"
         entry_log.model_name = get_current_model_name()
 
         db.commit()
@@ -440,7 +444,12 @@ async def _process_pdf_from_file_bg(entry_log_id: int):
             "extracted_text_length": len(best_text),
         }
         entry_log.llm_response = json.dumps(result, ensure_ascii=False)
-        entry_log.status = "done"
+        # Detect LLM failure: if _error is present, parsing failed
+        if result.get("_error"):
+            entry_log.status = "failed"
+            logger.warning(f"PDF parsing returned error for entry {entry_log_id}: {result['_error']}")
+        else:
+            entry_log.status = "done"
         entry_log.model_name = get_current_model_name()
 
         db.commit()
@@ -586,6 +595,36 @@ def get_entry_file(entry_id: int, db: Session = Depends(get_db), _=Depends(requi
     return FileResponse(file_path, media_type=media_type, filename=original_name)
 
 
+@router.post("/reparse/{entry_id}")
+async def reparse_entry(entry_id: int, db: Session = Depends(get_db), _=Depends(require_auth)):
+    """Re-trigger parsing for a failed or empty entry log. Only works for PDF/DOCX entries with saved files."""
+    entry = db.query(EntryLog).filter(EntryLog.id == entry_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="Entry not found")
+    if entry.source not in ("pdf", "docx"):
+        raise HTTPException(status_code=400, detail="只有 PDF/DOCX 类型的录入支持重新解析")
+    if entry.status == "processing":
+        raise HTTPException(status_code=400, detail="该录入正在解析中")
+
+    ext = ".docx" if entry.source == "docx" else ".pdf"
+    file_path = os.path.join(DOC_UPLOAD_DIR, f"{entry_id}{ext}")
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="原始文件不存在，无法重新解析")
+
+    # Reset status and clear previous result
+    entry.status = "processing"
+    entry.llm_response = None
+    db.commit()
+
+    # Fire background processing
+    if entry.source == "docx":
+        asyncio.create_task(_process_docx_from_file_bg(entry_id))
+    else:
+        asyncio.create_task(_process_pdf_from_file_bg(entry_id))
+
+    return {"message": "已开始重新解析", "entry_id": entry_id}
+
+
 ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB per image
 MAX_IMAGE_COUNT = 10
@@ -660,7 +699,11 @@ async def _process_image_entry_bg(entry_log_id: int, talent_id: int,
         entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
         if entry_log:
             entry_log.llm_response = json.dumps(result, ensure_ascii=False)
-            entry_log.status = "done"
+            if result.get("_error"):
+                entry_log.status = "failed"
+                logger.warning(f"Image parsing returned error for entry {entry_log_id}: {result['_error']}")
+            else:
+                entry_log.status = "done"
             entry_log.model_name = get_current_model_name()
 
         db.commit()

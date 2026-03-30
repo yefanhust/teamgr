@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import api from '../api'
 
 export const useTalentStore = defineStore('talent', () => {
@@ -8,15 +8,34 @@ export const useTalentStore = defineStore('talent', () => {
   const dimensions = ref([])
   const total = ref(0)
   const loading = ref(false)
+  const loadingMore = ref(false)
+  const currentPage = ref(1)
+  const pageSize = ref(50)
+  const hasMore = computed(() => talents.value.length < total.value)
 
   async function fetchTalents(params = {}) {
     loading.value = true
+    currentPage.value = 1
     try {
-      const res = await api.get('/api/talents', { params })
+      const res = await api.get('/api/talents', { params: { page: 1, page_size: pageSize.value, ...params } })
       talents.value = res.data.items
       total.value = res.data.total
     } finally {
       loading.value = false
+    }
+  }
+
+  async function loadMore() {
+    if (loadingMore.value || !hasMore.value) return
+    loadingMore.value = true
+    try {
+      const nextPage = currentPage.value + 1
+      const res = await api.get('/api/talents', { params: { page: nextPage, page_size: pageSize.value } })
+      talents.value = [...talents.value, ...res.data.items]
+      total.value = res.data.total
+      currentPage.value = nextPage
+    } finally {
+      loadingMore.value = false
     }
   }
 
@@ -145,7 +164,10 @@ export const useTalentStore = defineStore('talent', () => {
     dimensions,
     total,
     loading,
+    loadingMore,
+    hasMore,
     fetchTalents,
+    loadMore,
     fetchTags,
     fetchDimensions,
     getTalent,

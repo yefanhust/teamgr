@@ -156,10 +156,15 @@
                 :style="{ background: group.color }"
               ></div>
               <div
+                v-else-if="group.type === 'recruitment'"
+                class="w-1 h-5 rounded-full"
+                :style="{ background: group.color }"
+              ></div>
+              <div
                 v-else
                 class="team-group-indicator bg-gray-400"
               ></div>
-              <span class="text-lg font-bold" :class="group.type === 'team' ? 'text-gray-800' : (group.type === 'status' ? '' : 'text-gray-500')" :style="group.type === 'status' ? { color: group.color } : {}">
+              <span class="text-lg font-bold" :class="group.type === 'team' ? 'text-gray-800' : (group.type === 'status' || group.type === 'recruitment' ? '' : 'text-gray-500')" :style="(group.type === 'status' || group.type === 'recruitment') ? { color: group.color } : {}">
                 {{ group.label }}
               </span>
               <span
@@ -167,7 +172,7 @@
                 class="team-group-count bg-blue-50 text-blue-600"
               >{{ group.talents.length }}人</span>
               <span
-                v-else-if="group.type === 'status'"
+                v-else-if="group.type === 'status' || group.type === 'recruitment'"
                 class="team-group-count"
                 :style="{ background: group.color + '15', color: group.color }"
               >{{ group.talents.length }}人</span>
@@ -220,16 +225,38 @@
                 {{ talent.summary || '暂无摘要' }}
               </p>
               <div class="flex items-center justify-between mt-1">
-                <van-tag
-                  v-if="talent.status && group.type !== 'team'"
-                  :color="statusColor(talent.status)"
-                  size="small"
-                >{{ talent.status }}</van-tag>
-                <span v-else></span>
+                <div class="flex items-center gap-1">
+                  <van-tag
+                    v-if="talent.status && group.type !== 'team'"
+                    :color="statusColor(talent.status)"
+                    size="small"
+                  >{{ talent.status }}</van-tag>
+                  <van-tag
+                    v-if="talent.recruitment_type && group.type === 'ungrouped'"
+                    :color="recruitmentTypeColor(talent.recruitment_type)"
+                    size="small"
+                    plain
+                  >{{ talent.recruitment_type }}</van-tag>
+                </div>
                 <span class="text-[10px] text-gray-400">创建于 {{ formatCreatedAt(talent.created_at) }}</span>
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Load More -->
+        <div v-if="store.hasMore && !quickSearchResults" class="text-center py-4">
+          <van-button
+            size="small"
+            :loading="store.loadingMore"
+            loading-text="加载中..."
+            @click="store.loadMore()"
+          >
+            加载更多（已显示 {{ store.talents.length }}/{{ store.total }}）
+          </van-button>
+        </div>
+        <div v-else-if="store.talents.length > 0 && !quickSearchResults && !store.loading" class="text-center py-3 text-xs text-gray-400">
+          共 {{ store.total }} 人
         </div>
       </van-pull-refresh>
 
@@ -436,6 +463,11 @@ function statusColor(status) {
   return STATUS_COLORS[status] || '#9CA3AF'
 }
 
+const RECRUITMENT_TYPE_COLORS = { '社招': '#3B82F6', '校招': '#8B5CF6', '实习': '#F59E0B', '活水': '#10B981' }
+function recruitmentTypeColor(type) {
+  return RECRUITMENT_TYPE_COLORS[type] || '#9CA3AF'
+}
+
 function formatCreatedAt(dateStr) {
   if (!dateStr) return ''
   const d = new Date(dateStr)
@@ -484,16 +516,39 @@ const allGroups = computed(() => {
     statusGrps.push({ key: 'status-' + s, type: 'status', label: s, color: '#9CA3AF', talents: ts })
   }
 
-  // 3. Collect all groups
+  // 3. Build recruitment type subgroups from ungrouped-no-status talents
+  const RECRUITMENT_ORDER = ['社招', '校招', '实习', '活水']
+  const RECRUITMENT_COLORS = { '社招': '#3B82F6', '校招': '#8B5CF6', '实习': '#F59E0B', '活水': '#10B981' }
+  const byRecruitment = {}
+  const ungroupedNoRecruitment = []
+  for (const t of ungroupedNoStatus) {
+    if (t.recruitment_type && RECRUITMENT_ORDER.includes(t.recruitment_type)) {
+      if (!byRecruitment[t.recruitment_type]) byRecruitment[t.recruitment_type] = []
+      byRecruitment[t.recruitment_type].push(t)
+    } else {
+      ungroupedNoRecruitment.push(t)
+    }
+  }
+  const recruitmentGrps = []
+  for (const r of RECRUITMENT_ORDER) {
+    if (byRecruitment[r]) {
+      recruitmentGrps.push({ key: 'recruit-' + r, type: 'recruitment', label: '未分配团队 - ' + r, color: RECRUITMENT_COLORS[r], talents: byRecruitment[r] })
+    }
+  }
+
+  // 4. Collect all groups
   const groups = [
     ...Object.values(teamGroups),
     ...statusGrps,
   ]
-  if (ungroupedNoStatus.length > 0) {
-    groups.push({ key: 'ungrouped', type: 'ungrouped', label: '未分配团队', talents: ungroupedNoStatus })
+  // Add recruitment subgroups and remaining ungrouped
+  groups.push(...recruitmentGrps)
+  if (ungroupedNoRecruitment.length > 0) {
+    groups.push({ key: 'ungrouped', type: 'ungrouped', label: '未分配团队', talents: ungroupedNoRecruitment })
   }
 
-  // 4. Sort: use custom order if saved, otherwise default order (teams natural, then status order, ungrouped last)
+  // 5. Sort: use custom order if saved, otherwise default order (teams natural, then status order, recruitment, ungrouped last)
+  const typePriority = { team: 0, status: 1, recruitment: 2, ungrouped: 3 }
   const order = customGroupOrder.value
   if (order.length > 0) {
     const orderMap = new Map(order.map((id, i) => [String(id), i]))
@@ -501,37 +556,29 @@ const allGroups = computed(() => {
       const ai = orderMap.has(a.key) ? orderMap.get(a.key) : 9999
       const bi = orderMap.has(b.key) ? orderMap.get(b.key) : 9999
       if (ai !== bi) return ai - bi
-      // Fallback: ungrouped last, then by type, then natural sort
-      if (a.type === 'ungrouped') return 1
-      if (b.type === 'ungrouped') return -1
+      // Fallback by type priority
+      const pa = typePriority[a.type] ?? 9, pb = typePriority[b.type] ?? 9
+      if (pa !== pb) return pa - pb
       if (a.type === 'team' && b.type === 'team') {
-        const pa = a.team.parent_name || '', pb = b.team.parent_name || ''
-        if (pa !== pb) return naturalCmp(pa, pb)
+        const pna = a.team.parent_name || '', pnb = b.team.parent_name || ''
+        if (pna !== pnb) return naturalCmp(pna, pnb)
         return naturalCmp(a.label, b.label)
       }
-      // Status groups keep STATUS_ORDER
       if (a.type === 'status' && b.type === 'status') return STATUS_ORDER.indexOf(a.label) - STATUS_ORDER.indexOf(b.label)
-      // Teams before status groups
-      if (a.type === 'team') return -1
-      if (b.type === 'team') return 1
+      if (a.type === 'recruitment' && b.type === 'recruitment') return RECRUITMENT_ORDER.indexOf(a.label.replace('未分配团队 - ', '')) - RECRUITMENT_ORDER.indexOf(b.label.replace('未分配团队 - ', ''))
       return 0
     })
   } else {
     groups.sort((a, b) => {
-      // ungrouped last
-      if (a.type === 'ungrouped') return 1
-      if (b.type === 'ungrouped') return -1
-      // Teams first, natural sort
+      const pa = typePriority[a.type] ?? 9, pb = typePriority[b.type] ?? 9
+      if (pa !== pb) return pa - pb
       if (a.type === 'team' && b.type === 'team') {
-        const pa = a.team.parent_name || '', pb = b.team.parent_name || ''
-        if (pa !== pb) return naturalCmp(pa, pb)
+        const pna = a.team.parent_name || '', pnb = b.team.parent_name || ''
+        if (pna !== pnb) return naturalCmp(pna, pnb)
         return naturalCmp(a.label, b.label)
       }
-      // Teams before status
-      if (a.type === 'team') return -1
-      if (b.type === 'team') return 1
-      // Status groups keep STATUS_ORDER
       if (a.type === 'status' && b.type === 'status') return STATUS_ORDER.indexOf(a.label) - STATUS_ORDER.indexOf(b.label)
+      if (a.type === 'recruitment' && b.type === 'recruitment') return RECRUITMENT_ORDER.indexOf(a.label.replace('未分配团队 - ', '')) - RECRUITMENT_ORDER.indexOf(b.label.replace('未分配团队 - ', ''))
       return 0
     })
   }

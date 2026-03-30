@@ -26,6 +26,7 @@ class Talent(Base):
     card_data = Column(JSON, default=dict)
     summary = Column(Text, default="")
     status = Column(String(50), default="")
+    recruitment_type = Column(String(20), default="")  # 社招 / 校招 / 实习 / 活水
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -485,11 +485,11 @@ async def parse_pdf_content(
         result = _extract_json(text)
         if not isinstance(result, dict):
             logger.warning(f"LLM returned non-dict type: {type(result)}")
-            return _empty_result
+            return {**_empty_result, "_error": f"LLM返回了非字典类型: {type(result)}"}
         return result
     except Exception as e:
         logger.error(f"LLM PDF parsing failed: {e}")
-        return _empty_result
+        return {**_empty_result, "_error": f"LLM解析失败: {e}"}
 
 
 async def parse_image_content(
@@ -573,12 +573,12 @@ async def parse_image_content(
         if not isinstance(result, dict):
             logger.warning(f"LLM returned non-dict type: {type(result)}")
             return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
-                    "extracted_info": {}}
+                    "extracted_info": {}, "_error": f"LLM返回了非字典类型: {type(result)}"}
         return result
     except Exception as e:
         logger.error(f"LLM image parsing failed: {e}")
         return {"card_data": {}, "summary": "", "suggested_tags": [], "new_dimensions": [],
-                "extracted_info": {}}
+                "extracted_info": {}, "_error": f"LLM解析失败: {e}"}
 
 
 async def classify_idea(

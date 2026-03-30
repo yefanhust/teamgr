@@ -137,6 +137,33 @@
         @select="onStatusSelect"
       />
 
+      <!-- Recruitment Type -->
+      <div class="flex items-center gap-2 mt-2 px-5 pb-3">
+        <span class="text-sm text-gray-500">招聘类型：</span>
+        <van-tag
+          v-if="talent.recruitment_type"
+          :color="recruitmentTypeColor(talent.recruitment_type)"
+          size="medium"
+          class="cursor-pointer"
+          @click="showRecruitmentSheet = true"
+        >{{ talent.recruitment_type }}</van-tag>
+        <van-tag
+          v-else
+          type="default"
+          size="medium"
+          class="cursor-pointer"
+          @click="showRecruitmentSheet = true"
+        >未设置</van-tag>
+      </div>
+
+      <!-- Recruitment Type ActionSheet -->
+      <van-action-sheet
+        v-model:show="showRecruitmentSheet"
+        :actions="recruitmentActions"
+        cancel-text="取消"
+        @select="onRecruitmentSelect"
+      />
+
       <!-- Dimension Cards -->
       <div
         v-for="dim in dimensions"
@@ -389,10 +416,13 @@
                 <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words">{{ formatLlmResponse(log.llm_response) }}</pre>
               </div>
             </template>
-            <!-- Failed entry: show error -->
-            <template v-if="!selectMode && log.llm_response && log.status === 'failed'">
-              <div class="mt-2 bg-red-50 border border-red-200 rounded-lg p-3">
+            <!-- Failed entry: show error + reparse button -->
+            <template v-if="!selectMode && log.status === 'failed'">
+              <div v-if="log.llm_response" class="mt-2 bg-red-50 border border-red-200 rounded-lg p-3">
                 <pre class="text-xs text-red-700 whitespace-pre-wrap break-words">{{ formatLlmResponse(log.llm_response) }}</pre>
+              </div>
+              <div v-if="log.source === 'pdf' || log.source === 'docx'" class="mt-2">
+                <van-button size="small" type="primary" plain @click="reparseEntry(log)">重新解析</van-button>
               </div>
             </template>
           </div>
@@ -662,6 +692,33 @@ async function onStatusSelect(action) {
   }
 }
 
+// Recruitment type
+const showRecruitmentSheet = ref(false)
+const recruitmentActions = [
+  { name: '社招', color: '#3B82F6' },
+  { name: '校招', color: '#8B5CF6' },
+  { name: '实习', color: '#F59E0B' },
+  { name: '活水', color: '#10B981' },
+  { name: '清除招聘类型', color: '#9CA3AF' },
+]
+
+function recruitmentTypeColor(type) {
+  const map = { '社招': '#3B82F6', '校招': '#8B5CF6', '实习': '#F59E0B', '活水': '#10B981' }
+  return map[type] || '#9CA3AF'
+}
+
+async function onRecruitmentSelect(action) {
+  showRecruitmentSheet.value = false
+  const newType = action.name === '清除招聘类型' ? '' : action.name
+  try {
+    const updated = await store.updateTalent(talent.value.id, { recruitment_type: newType })
+    talent.value = updated
+    showToast(newType ? `招聘类型已设为「${newType}」` : '招聘类型已清除')
+  } catch (e) {
+    showToast('更新失败')
+  }
+}
+
 let pollTimer = null
 
 const actions = [
@@ -902,6 +959,18 @@ async function refreshData() {
     updateAvailable.value = false
   } catch (e) {
     showToast('刷新失败')
+  }
+}
+
+async function reparseEntry(log) {
+  try {
+    await api.post(`/api/entry/reparse/${log.id}`)
+    log.status = 'processing'
+    log.llm_response = null
+    showToast('已开始重新解析')
+    startPolling()
+  } catch (e) {
+    showToast(e.response?.data?.detail || '重新解析失败')
   }
 }
 
