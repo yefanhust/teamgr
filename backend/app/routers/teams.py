@@ -92,6 +92,8 @@ async def get_project_view(
         if project_ids_set:
             projects = db.query(Project).filter(Project.id.in_(project_ids_set)).all()
             for p in projects:
+                if p.status == "completed":
+                    continue
                 team_data["projects"].append({
                     "id": p.id,
                     "name": p.name,

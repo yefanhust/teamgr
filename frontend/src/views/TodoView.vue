@@ -1727,14 +1727,15 @@
             clearable
             @focus="searchPmParentProjects"
             @update:model-value="searchPmParentProjects"
+            @keydown="handlePmParentProjectKeydown"
           />
-          <div v-if="pmShowParentProjectList && (pmParentProjectResults.length > 0 || pmParentProjectSearch.trim())" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
+          <div v-if="pmShowParentProjectList && (pmParentProjectResults.length > 0 || pmParentProjectSearch.trim())" ref="pmParentProjectListRef" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
             <div
-              v-for="p in pmParentProjectResults"
+              v-for="(p, idx) in pmParentProjectResults"
               :key="p.id"
               class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
-              :class="pmSelectedParentForCreate?.id === p.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
-              @click="pmSelectedParentForCreate = p; pmParentProjectSearch = ''; pmShowParentProjectList = false; onParentSelected(p)"
+              :class="idx === pmParentProjectHighlightIndex ? 'bg-blue-100 text-blue-600' : 'text-gray-700'"
+              @click="selectPmParentProject(p)"
             >
               <span class="font-medium">{{ p.name }}</span>
               <span v-if="p.children?.length" class="text-xs text-gray-400 ml-2">{{ p.children.length }} 子项目</span>
@@ -2199,17 +2200,19 @@ const pmMembers = ref([])
 // Projects list
 const pmProjects = computed(() => pmStore.projects)
 const pmTopProjects = computed(() => {
-  const tops = pmProjects.value.filter(p => !p.parent_id)
+  const tops = pmProjects.value.filter(p => !p.parent_id && p.status !== 'completed')
   // Server returns projects sorted by display_order already, just preserve that order
   return tops
 })
 
-// Sort children: active first, suspended next, completed last
+// Sort children: active first, suspended next; hide completed
 function sortedChildren(children) {
-  const order = { active: 0, suspended: 1, completed: 2 }
-  return [...children].sort((a, b) => {
-    return (order[a.status] ?? 0) - (order[b.status] ?? 0)
-  })
+  const order = { active: 0, suspended: 1 }
+  return [...children]
+    .filter(c => c.status !== 'completed')
+    .sort((a, b) => {
+      return (order[a.status] ?? 0) - (order[b.status] ?? 0)
+    })
 }
 
 // Project drag reorder
@@ -2295,16 +2298,19 @@ const pmParentProjectSearch = ref('')
 const pmInlineDesc = ref('')
 const pmShowParentProjectList = ref(false)
 const pmParentProjectResults = ref([])
+const pmParentProjectHighlightIndex = ref(-1)
+const pmParentProjectListRef = ref(null)
 
-// Filtered project results: if a parent is selected, show only its children; otherwise show all
+// Filtered project results: if a parent is selected, show only its children;
+// otherwise show non-parent projects (exclude projects that have children)
 const pmFilteredProjectResults = computed(() => {
   const results = pmProjectResults.value
   if (pmSelectedParentForCreate.value) {
     // Show children of the selected parent
     return results.filter(p => p.parent_id === pmSelectedParentForCreate.value.id)
   }
-  // No parent selected: show all projects (flat, with parent_name for context)
-  return results
+  // No parent selected: exclude parent projects (those with children)
+  return results.filter(p => !p.children || p.children.length === 0)
 })
 
 
@@ -4107,6 +4113,13 @@ function handlePmUpdateEsc(e) {
 watch(showPmUpdatePopup, (val) => {
   if (val) {
     document.addEventListener('keydown', handlePmUpdateEsc)
+    // Reset all dropdown lists when popup opens
+    pmShowTalentList.value = false
+    pmTalentHighlightIndex.value = -1
+    pmShowProjectList.value = false
+    pmProjectHighlightIndex.value = -1
+    pmShowParentProjectList.value = false
+    pmParentProjectHighlightIndex.value = -1
   } else {
     document.removeEventListener('keydown', handlePmUpdateEsc)
   }
@@ -4118,7 +4131,43 @@ async function searchPmParentProjects() {
     // Only show top-level projects as potential parents
     pmParentProjectResults.value = res.filter(p => !p.parent_id)
     pmShowParentProjectList.value = true
+    pmParentProjectHighlightIndex.value = -1
   } catch (e) { pmParentProjectResults.value = [] }
+}
+
+function selectPmParentProject(p) {
+  pmSelectedParentForCreate.value = p
+  pmParentProjectSearch.value = ''
+  pmShowParentProjectList.value = false
+  pmParentProjectHighlightIndex.value = -1
+  onParentSelected(p)
+}
+
+function handlePmParentProjectKeydown(e) {
+  if (!pmShowParentProjectList.value || pmParentProjectResults.value.length === 0) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    pmParentProjectHighlightIndex.value = Math.min(pmParentProjectHighlightIndex.value + 1, pmParentProjectResults.value.length - 1)
+    scrollParentProjectHighlightIntoView()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    pmParentProjectHighlightIndex.value = Math.max(pmParentProjectHighlightIndex.value - 1, 0)
+    scrollParentProjectHighlightIntoView()
+  } else if (e.key === 'Enter' && pmParentProjectHighlightIndex.value >= 0) {
+    e.preventDefault()
+    const p = pmParentProjectResults.value[pmParentProjectHighlightIndex.value]
+    selectPmParentProject(p)
+  }
+}
+
+function scrollParentProjectHighlightIntoView() {
+  nextTick(() => {
+    const container = pmParentProjectListRef.value
+    if (!container) return
+    const items = container.children
+    const target = items[pmParentProjectHighlightIndex.value]
+    if (target) target.scrollIntoView({ block: 'nearest' })
+  })
 }
 
 async function createPmParentProjectInline() {
