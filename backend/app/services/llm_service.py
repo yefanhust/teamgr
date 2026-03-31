@@ -350,8 +350,20 @@ async def update_talent_card(
         updates = result.get("card_updates") or result.get("card_data") or {}
         merged = dict(existing_card_data)
         for dim_key, dim_val in updates.items():
+            # Skip JSON Schema definitions (LLM artefacts)
+            if isinstance(dim_val, dict) and "type" in dim_val and "properties" in dim_val:
+                continue
+            if dim_val is None or dim_val == "" or dim_val == [] or dim_val == {}:
+                continue
             if isinstance(dim_val, dict) and isinstance(merged.get(dim_key), dict):
-                merged[dim_key] = {**merged[dim_key], **dim_val}
+                inner = dict(merged[dim_key])
+                for k, v in dim_val.items():
+                    if isinstance(v, dict) and "type" in v and "properties" in v:
+                        continue
+                    if (v is None or v == "" or v == [] or v == {}) and inner.get(k):
+                        continue  # keep existing non-empty value
+                    inner[k] = v
+                merged[dim_key] = inner
             else:
                 merged[dim_key] = dim_val
 

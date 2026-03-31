@@ -27,6 +27,54 @@ PDF_UPLOAD_DIR = DOC_UPLOAD_DIR
 ALLOWED_DOC_EXTENSIONS = {".pdf", ".docx"}
 
 
+def _is_json_schema(value) -> bool:
+    """Detect if a value is a JSON Schema definition rather than actual data."""
+    if isinstance(value, dict) and "type" in value and "properties" in value:
+        return True
+    return False
+
+
+def _is_empty(value) -> bool:
+    """Check if a value is effectively empty."""
+    if value is None:
+        return True
+    if value == "" or value == [] or value == {}:
+        return True
+    return False
+
+
+def _deep_merge_card_data(existing: dict, new_data: dict) -> dict:
+    """Deep-merge new card_data into existing, preserving manually entered data.
+
+    Rules:
+    - Skip JSON Schema definitions (LLM artefacts with "type"+"properties")
+    - Skip empty values in new_data
+    - For dict dimensions: recursively merge, only overwrite with non-empty new values
+    - For list dimensions: replace only if new list is non-empty
+    - For scalar values: replace only if new value is non-empty
+    """
+    merged = dict(existing)
+    for key, new_val in new_data.items():
+        if _is_json_schema(new_val):
+            continue
+        if _is_empty(new_val):
+            continue
+        old_val = merged.get(key)
+        if isinstance(new_val, dict) and isinstance(old_val, dict):
+            # Recursive merge for nested dicts
+            inner = dict(old_val)
+            for k, v in new_val.items():
+                if _is_json_schema(v):
+                    continue
+                if _is_empty(v) and not _is_empty(inner.get(k)):
+                    continue  # keep existing non-empty value
+                inner[k] = v
+            merged[key] = inner
+        else:
+            merged[key] = new_val
+    return merged
+
+
 def _ensure_doc_upload_dir():
     os.makedirs(DOC_UPLOAD_DIR, exist_ok=True)
 
@@ -253,14 +301,10 @@ async def _process_docx_from_file_bg(entry_log_id: int):
         if extracted.get("department") and not talent.department:
             talent.department = extracted["department"]
 
-        # Merge card data
+        # Deep-merge card data — preserves manually entered data
         new_card_data = result.get("card_data", {})
         if isinstance(new_card_data, dict) and new_card_data:
-            merged_card = dict(talent.card_data or {})
-            for key, value in new_card_data.items():
-                if value and value != "" and value != [] and value != {}:
-                    merged_card[key] = value
-            talent.card_data = merged_card
+            talent.card_data = _deep_merge_card_data(talent.card_data or {}, new_card_data)
 
         if result.get("summary"):
             talent.summary = result["summary"]
@@ -412,14 +456,10 @@ async def _process_pdf_from_file_bg(entry_log_id: int):
         if extracted.get("department") and not talent.department:
             talent.department = extracted["department"]
 
-        # Merge card data — MUST create new dict for SQLAlchemy JSON mutation detection
+        # Deep-merge card data — preserves manually entered data
         new_card_data = result.get("card_data", {})
         if isinstance(new_card_data, dict) and new_card_data:
-            merged_card = dict(talent.card_data or {})  # new object
-            for key, value in new_card_data.items():
-                if value and value != "" and value != [] and value != {}:
-                    merged_card[key] = value
-            talent.card_data = merged_card
+            talent.card_data = _deep_merge_card_data(talent.card_data or {}, new_card_data)
 
         if result.get("summary"):
             talent.summary = result["summary"]
@@ -672,14 +712,10 @@ async def _process_image_entry_bg(entry_log_id: int, talent_id: int,
         if extracted.get("department") and not talent.department:
             talent.department = extracted["department"]
 
-        # Merge card data — MUST create new dict for SQLAlchemy JSON mutation detection
+        # Deep-merge card data — preserves manually entered data
         new_card_data = result.get("card_data", {})
         if isinstance(new_card_data, dict) and new_card_data:
-            merged_card = dict(talent.card_data or {})  # new object
-            for key, value in new_card_data.items():
-                if value and value != "" and value != [] and value != {}:
-                    merged_card[key] = value
-            talent.card_data = merged_card
+            talent.card_data = _deep_merge_card_data(talent.card_data or {}, new_card_data)
 
         if result.get("summary"):
             talent.summary = result["summary"]
@@ -912,6 +948,11 @@ class DirectInterviewFeedbackRequest(BaseModel):
     evaluation: str
 
 
+class ReparseEntriesRequest(BaseModel):
+    talent_id: int
+    entry_log_ids: list[int]
+
+
 async def _process_interview_evaluation_bg(entry_log_id: int, talent_id: int,
                                             interview_records: list[str],
                                             result_str: str, rating: str,
@@ -1105,3 +1146,125 @@ async def save_interview_evaluation_prompt(body: dict, _=Depends(require_auth)):
     instructions = body.get("instructions", "").strip()
     save_instruction("interview_evaluation", instructions)
     return {"ok": True}
+
+
+# --- Reparse selected entries ---
+
+async def _process_reparse_entries_bg(entry_log_id: int, talent_id: int,
+                                       combined_content: str, talent_name: str):
+    """Background task: re-parse selected entries and merge into talent card via LLM."""
+    db = SessionLocal()
+    try:
+        dimensions = _get_dimensions(db)
+        talent = db.query(Talent).filter(Talent.id == talent_id).first()
+        if not talent:
+            return
+
+        result = await update_talent_card(
+            user_input=combined_content,
+            existing_card_data=talent.card_data or {},
+            dimensions=dimensions,
+            talent_name=talent_name,
+        )
+
+        # Re-read talent to avoid stale data
+        talent = db.query(Talent).filter(Talent.id == talent_id).first()
+        if not talent:
+            return
+
+        # Apply new dimensions
+        new_dims = result.get("new_dimensions", [])
+        if isinstance(new_dims, list):
+            new_dims = [d for d in new_dims if isinstance(d, dict)]
+            _apply_new_dimensions(db, new_dims)
+
+        # Deep-merge card data
+        new_card_data = result.get("card_data", {})
+        if isinstance(new_card_data, dict) and new_card_data:
+            talent.card_data = _deep_merge_card_data(talent.card_data or {}, new_card_data)
+
+        if result.get("summary"):
+            talent.summary = result["summary"]
+
+        # Handle tags
+        suggested_tags = result.get("suggested_tags", [])
+        if isinstance(suggested_tags, list) and suggested_tags:
+            tag_ids = _ensure_tags(db, [t for t in suggested_tags if isinstance(t, str)])
+            existing_tag_ids = {tt.tag_id for tt in db.query(TalentTag).filter(
+                TalentTag.talent_id == talent.id
+            ).all()}
+            for tid in tag_ids:
+                if tid not in existing_tag_ids:
+                    db.add(TalentTag(talent_id=talent.id, tag_id=tid))
+
+        # Update tracking entry log
+        entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+        if entry_log:
+            entry_log.llm_response = json.dumps(result, ensure_ascii=False)
+            entry_log.status = "done"
+            entry_log.model_name = get_current_model_name()
+
+        db.commit()
+        logger.info(f"Reparse done for talent {talent_id}, entry {entry_log_id}")
+
+    except Exception as e:
+        logger.error(f"Background reparse failed for entry {entry_log_id}: {e}\n{traceback.format_exc()}")
+        try:
+            entry_log = db.query(EntryLog).filter(EntryLog.id == entry_log_id).first()
+            if entry_log:
+                entry_log.status = "failed"
+                entry_log.llm_response = json.dumps({"_error": str(e)}, ensure_ascii=False)
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+
+@router.post("/reparse-entries")
+async def reparse_entries_api(
+    body: ReparseEntriesRequest,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Re-parse selected entry logs and merge into talent card. Runs in background."""
+    if not body.entry_log_ids:
+        raise HTTPException(status_code=400, detail="请至少选择一条记录")
+
+    talent = db.query(Talent).filter(Talent.id == body.talent_id).first()
+    if not talent:
+        raise HTTPException(status_code=404, detail="人才不存在")
+
+    logs = db.query(EntryLog).filter(
+        EntryLog.id.in_(body.entry_log_ids),
+        EntryLog.talent_id == body.talent_id,
+    ).order_by(EntryLog.created_at.asc()).all()
+
+    if len(logs) != len(body.entry_log_ids):
+        raise HTTPException(status_code=400, detail="部分记录不存在或不属于该人才")
+
+    # Combine all selected entry contents
+    combined_content = "\n\n---\n\n".join(log.content for log in logs)
+
+    # Create a tracking entry log
+    entry_log = EntryLog(
+        talent_id=talent.id,
+        content=f"[重新解析] 合并 {len(logs)} 条记录重新解析",
+        source="manual",
+        status="processing",
+    )
+    db.add(entry_log)
+    db.commit()
+    db.refresh(entry_log)
+
+    asyncio.create_task(_process_reparse_entries_bg(
+        entry_log_id=entry_log.id,
+        talent_id=talent.id,
+        combined_content=combined_content,
+        talent_name=talent.name,
+    ))
+
+    return {
+        "entry_id": entry_log.id,
+        "status": "processing",
+    }

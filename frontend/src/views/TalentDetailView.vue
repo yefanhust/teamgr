@@ -311,7 +311,7 @@
             type="primary"
             icon="list-switch"
             @click="enterSelectMode"
-          >选择面试实录</van-button>
+          >批量选择</van-button>
           <van-button
             v-if="selectMode"
             size="small"
@@ -442,6 +442,7 @@
           <span class="text-sm text-gray-600">已选 <strong class="text-blue-600">{{ selectedLogIds.size }}</strong> 条</span>
           <div class="flex gap-2">
             <van-button size="small" plain @click="exitSelectMode">取消</van-button>
+            <van-button size="small" type="warning" :loading="reparseProcessing" loading-text="解析中..." @click="doReparseEntries">重新解析</van-button>
             <van-button size="small" type="primary" @click="showEvalDialog = true">生成面试评价</van-button>
           </div>
         </div>
@@ -650,6 +651,7 @@ const showEvalDialog = ref(false)
 const evalGenerating = ref(false)
 const evalResultText = ref('')
 const evalForm = ref({ rating: '' })
+const reparseProcessing = ref(false)
 const showDirectFeedbackDialog = ref(false)
 const directFeedbackSaving = ref(false)
 const directFeedbackForm = ref({ rating: '', evaluation: '' })
@@ -1281,6 +1283,47 @@ function startEvalPolling(entryId) {
   }, 3000)
 }
 
+// --- Reparse selected entries ---
+let reparsePollTimer = null
+
+async function doReparseEntries() {
+  reparseProcessing.value = true
+  try {
+    const res = await store.reparseEntries(
+      talent.value.id,
+      Array.from(selectedLogIds.value),
+    )
+    exitSelectMode()
+    showToast('重新解析中，请稍候...')
+    startReparsePoll(res.entry_id)
+  } catch (e) {
+    showToast('提交失败: ' + (e.response?.data?.detail || '未知错误'))
+  } finally {
+    reparseProcessing.value = false
+  }
+}
+
+function startReparsePoll(entryId) {
+  if (reparsePollTimer) clearInterval(reparsePollTimer)
+  reparsePollTimer = setInterval(async () => {
+    try {
+      const res = await api.get(`/api/entry/status/${entryId}`)
+      if (res.data.status === 'done') {
+        clearInterval(reparsePollTimer)
+        reparsePollTimer = null
+        showToast('重新解析完成')
+        refreshData()
+      } else if (res.data.status === 'failed') {
+        clearInterval(reparsePollTimer)
+        reparsePollTimer = null
+        showToast('重新解析失败')
+      }
+    } catch {
+      // ignore poll errors
+    }
+  }, 3000)
+}
+
 function copyEvaluation(text) {
   if (!text) return
   navigator.clipboard.writeText(text).then(() => {
@@ -1374,6 +1417,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling()
   if (evalPollTimer) clearInterval(evalPollTimer)
+  if (reparsePollTimer) clearInterval(reparsePollTimer)
 })
 </script>
 

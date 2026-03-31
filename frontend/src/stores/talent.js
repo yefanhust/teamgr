@@ -149,6 +149,14 @@ export const useTalentStore = defineStore('talent', () => {
     return res.data
   }
 
+  async function reparseEntries(talentId, entryLogIds) {
+    const res = await api.post('/api/entry/reparse-entries', {
+      talent_id: talentId,
+      entry_log_ids: entryLogIds,
+    }, { timeout: 120000 })
+    return res.data
+  }
+
   async function saveDirectInterviewFeedback(talentId, rating, evaluation) {
     const res = await api.post('/api/entry/interview-feedback-direct', {
       talent_id: talentId,
@@ -186,6 +194,7 @@ export const useTalentStore = defineStore('talent', () => {
     deleteTag,
     deleteInterviewFeedback,
     generateInterviewEvaluation,
+    reparseEntries,
     saveDirectInterviewFeedback,
   }
 })
