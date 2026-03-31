@@ -513,7 +513,7 @@
                         <div class="flex items-center gap-2 mb-1">
                           <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
                         </div>
-                        <p class="text-base text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+                        <div class="text-base text-gray-600 leading-snug update-record-content" v-html="renderMarkdown(upd.raw_input)"></div>
                         <div v-if="upd.parsed_data?.blockers" class="text-xs text-red-400 mt-1">阻碍: {{ upd.parsed_data.blockers }}</div>
                         <div v-if="upd.parsed_data?.next_steps" class="text-xs text-blue-400 mt-1">下一步: {{ upd.parsed_data.next_steps }}</div>
                         <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
@@ -546,7 +546,7 @@
                         </div>
                         <StatusPicker size="sm" :model-value="mp.project_status" @update:model-value="changePmStatus(mp.project_id, $event)" />
                       </div>
-                      <p v-if="mp.latest_update" class="text-sm text-gray-500">最新: {{ mp.latest_update.parsed_data?.progress || mp.latest_update.raw_input }}</p>
+                      <div v-if="mp.latest_update" class="text-sm text-gray-500 leading-snug"><span>最新: </span><span class="update-record-content" v-html="renderMarkdown(mp.latest_update.raw_input)"></span></div>
                       <a v-if="mp.latest_update?.file_name" :href="'/api/projects/updates/' + mp.latest_update.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700">
                         <van-icon name="description" size="12" />{{ mp.latest_update.file_name }}
                       </a>
@@ -2024,11 +2024,12 @@
                   @input="autoResizeTextarea($event.target)"
                 ></textarea>
               </div>
-              <p
+              <div
                 v-else
-                class="text-base text-gray-600 cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+                class="text-base text-gray-600 leading-snug cursor-pointer hover:bg-gray-50 rounded p-1 -m-1 update-record-content"
                 @dblclick="startEditUpdate(upd)"
-              >{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+                v-html="renderMarkdown(upd.raw_input)"
+              ></div>
               <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
                 <van-icon name="description" size="12" />{{ upd.file_name }}
               </a>
@@ -4454,8 +4455,10 @@ function renderMarkdown(text) {
     .replace(/^# (.+)$/gm, '<h3 class="font-bold text-gray-800 mt-1 mb-0">$1</h3>')
     .replace(/^- (.+)$/gm, '<li class="ml-3 list-disc">$1</li>')
     .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-3 list-decimal">$2</li>')
-    .replace(/\n{2,}/g, '<br>')
+    .replace(/(https?:\/\/[^\s<)]+)/g, '<a href="$1" target="_blank" class="text-blue-500 hover:text-blue-700 underline break-all">$1</a>')
     .replace(/\n/g, '<br>')
+    .replace(/(<\/h[34]>)(<br>)+/g, '$1')
+    .replace(/(<\/li>)(<br>)+/g, '$1')
 }
 
 function repeatLabel(item) {
@@ -4709,6 +4712,18 @@ function formatDateTime(isoStr) {
   line-height: 1.25;
 }
 .vibe-summary-content :deep(strong) {
+  color: #374151;
+}
+.update-record-content :deep(h3),
+.update-record-content :deep(h4) {
+  margin-top: 0.25rem;
+  margin-bottom: 0;
+}
+.update-record-content :deep(li) {
+  margin-left: 1rem;
+  padding-left: 0.25rem;
+}
+.update-record-content :deep(strong) {
   color: #374151;
 }
 :deep(.van-tag) {
