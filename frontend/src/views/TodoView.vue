@@ -177,7 +177,7 @@
                             {{ tag.name }}
                           </van-tag>
                           <span v-if="item.description" class="text-xs text-gray-400 truncate max-w-[120px]">{{ item.description }}</span>
-                          <span class="text-xs text-gray-400">{{ formatDateTime(item.created_at) }}</span>
+                          <span class="text-xs text-gray-400">{{ formatDateTime(item.started_at || item.created_at) }}</span>
                           <!-- Working time display -->
                           <span
                             v-if="item.work_status === 'in_progress'"
@@ -688,7 +688,7 @@
                         >
                           {{ tag.name }}
                         </van-tag>
-                        <span class="text-xs text-gray-400">{{ formatDateTime(item.created_at) }}</span>
+                        <span class="text-xs text-gray-400">{{ formatDateTime(item.started_at || item.created_at) }}</span>
                       </div>
                       <!-- Action buttons -->
                       <div class="flex items-center gap-2 mt-2">
@@ -898,7 +898,7 @@
                         >
                           {{ tag.name }}
                         </van-tag>
-                        <span class="text-xs text-gray-400">{{ formatDateTime(item.created_at) }}</span>
+                        <span class="text-xs text-gray-400">{{ formatDateTime(item.started_at || item.created_at) }}</span>
                       </div>
                       <div class="flex items-center gap-2 mt-2">
                         <van-button
@@ -1590,7 +1590,7 @@
               :value="editingStartedAtValue"
               class="text-xs border border-blue-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
               @change="saveStartedAt($event.target.value)"
-              @blur="editingStartedAt = false"
+              @blur="handleStartedAtBlur"
               @keydown.escape="editingStartedAt = false"
               ref="startedAtInput"
             />
@@ -4484,6 +4484,14 @@ function startEditStartedAt() {
   nextTick(() => {
     startedAtInput.value?.focus()
   })
+}
+
+function handleStartedAtBlur() {
+  // Delay hiding the input so @change can fire first
+  // Without this delay, v-if removes the element before @change triggers
+  setTimeout(() => {
+    editingStartedAt.value = false
+  }, 150)
 }
 
 async function saveStartedAt(localVal) {
