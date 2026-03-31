@@ -513,7 +513,7 @@
                         <div class="flex items-center gap-2 mb-1">
                           <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
                         </div>
-                        <p class="text-sm text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
+                        <p class="text-base text-gray-600">{{ upd.parsed_data?.progress || upd.raw_input }}</p>
                         <div v-if="upd.parsed_data?.blockers" class="text-xs text-red-400 mt-1">阻碍: {{ upd.parsed_data.blockers }}</div>
                         <div v-if="upd.parsed_data?.next_steps" class="text-xs text-blue-400 mt-1">下一步: {{ upd.parsed_data.next_steps }}</div>
                         <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
@@ -546,7 +546,7 @@
                         </div>
                         <StatusPicker size="sm" :model-value="mp.project_status" @update:model-value="changePmStatus(mp.project_id, $event)" />
                       </div>
-                      <p v-if="mp.latest_update" class="text-xs text-gray-500">最新: {{ mp.latest_update.parsed_data?.progress || mp.latest_update.raw_input }}</p>
+                      <p v-if="mp.latest_update" class="text-sm text-gray-500">最新: {{ mp.latest_update.parsed_data?.progress || mp.latest_update.raw_input }}</p>
                       <a v-if="mp.latest_update?.file_name" :href="'/api/projects/updates/' + mp.latest_update.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700">
                         <van-icon name="description" size="12" />{{ mp.latest_update.file_name }}
                       </a>
@@ -1638,10 +1638,13 @@
       v-model:show="showPmUpdatePopup"
       position="bottom"
       round
-      :style="{ maxHeight: '85vh' }"
+      :style="{ height: '95vh' }"
     >
-      <div class="p-4 space-y-4">
-        <h3 class="text-lg font-semibold text-gray-800">记录项目进展</h3>
+      <div class="p-5 pb-6 h-full flex flex-col">
+        <h3 class="text-lg font-semibold text-gray-800 mb-4">记录项目进展</h3>
+
+        <!-- Selectors (shrink section) -->
+        <div class="flex-shrink-0 space-y-4">
 
         <!-- Talent selector -->
         <div>
@@ -1747,8 +1750,10 @@
           </div>
         </div>
 
+        </div><!-- end selectors -->
+
         <!-- Content input -->
-        <div>
+        <div class="flex-1 flex flex-col mt-4 min-h-0">
           <div class="flex items-center justify-between mb-1">
             <div class="flex items-center gap-1">
               <label class="text-sm text-gray-500">进展内容</label>
@@ -1782,26 +1787,27 @@
             v-if="!pmPdfFile"
             v-model="pmUpdateContent"
             type="textarea"
-            rows="4"
+            rows="10"
             placeholder="描述该队员在该项目上的当前进展..."
             maxlength="2000"
             show-word-limit
+            class="pm-update-textarea !border !border-gray-300 !rounded-lg flex-1"
           />
         </div>
 
-        <!-- Submit -->
-        <van-button
-          type="primary"
-          block
-          :loading="pmSubmitting"
-          :disabled="!pmSelectedTalent || !pmSelectedProject || (!pmUpdateContent.trim() && !pmPdfFile)"
-          @click="submitPmUpdate"
-        >
-          {{ pmPdfFile ? '上传并解析 PDF' : '提交' }}
-        </van-button>
-
-        <!-- Hint -->
-        <p class="text-xs text-gray-400 text-center">{{ pmPdfFile ? '上传后 LLM 将自动提取内容并生成精炼总结' : '提交后 LLM 将在后台自动解析进展内容' }}</p>
+        <!-- Submit (pinned to bottom) -->
+        <div class="flex-shrink-0 pt-3">
+          <van-button
+            type="primary"
+            block
+            :loading="pmSubmitting"
+            :disabled="!pmSelectedTalent || !pmSelectedProject || (!pmUpdateContent.trim() && !pmPdfFile)"
+            @click="submitPmUpdate"
+          >
+            {{ pmPdfFile ? '上传并解析 PDF' : '提交' }}
+          </van-button>
+          <p class="text-xs text-gray-400 text-center mt-2">{{ pmPdfFile ? '上传后 LLM 将自动提取内容并生成精炼总结' : '提交后 LLM 将在后台自动解析进展内容' }}</p>
+        </div>
       </div>
     </van-popup>
 
@@ -2002,8 +2008,8 @@
         <!-- Update timeline -->
         <div v-if="pmInfoData.recent_updates?.length > 0">
           <h4 class="text-sm font-semibold text-gray-600 mb-2">更新记录</h4>
-          <div class="space-y-2">
-            <div v-for="upd in pmInfoData.recent_updates" :key="upd.id" class="border-l-2 border-blue-300 pl-3 py-1">
+          <div class="space-y-3">
+            <div v-for="upd in pmInfoData.recent_updates" :key="upd.id" class="border-l-2 border-blue-300 pl-4 py-2">
               <div class="flex items-center gap-2 mb-1">
                 <span class="text-xs text-gray-400">{{ formatDateTime(upd.created_at) }}</span>
                 <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
@@ -2020,7 +2026,7 @@
               </div>
               <p
                 v-else
-                class="text-sm text-gray-600 cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
+                class="text-base text-gray-600 cursor-pointer hover:bg-gray-50 rounded p-1 -m-1"
                 @dblclick="startEditUpdate(upd)"
               >{{ upd.parsed_data?.progress || upd.raw_input }}</p>
               <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
@@ -4521,6 +4527,19 @@ function formatDateTime(isoStr) {
 </script>
 
 <style scoped>
+.pm-update-textarea {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.pm-update-textarea :deep(.van-field__body) {
+  flex: 1;
+}
+.pm-update-textarea :deep(textarea) {
+  font-size: 16px !important;
+  line-height: 1.6 !important;
+  height: 100% !important;
+}
 .pm-delete-btn {
   opacity: 0.3;
   transition: opacity 0.2s;
