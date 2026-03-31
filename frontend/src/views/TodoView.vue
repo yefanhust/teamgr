@@ -2200,16 +2200,17 @@ const pmMembers = ref([])
 // Projects list
 const pmProjects = computed(() => pmStore.projects)
 const pmTopProjects = computed(() => {
-  const tops = pmProjects.value.filter(p => !p.parent_id && p.status !== 'completed')
-  // Server returns projects sorted by display_order already, just preserve that order
-  return tops
+  const tops = pmProjects.value.filter(p => !p.parent_id)
+  // Show all projects, but put completed ones at the end
+  const active = tops.filter(p => p.status !== 'completed')
+  const completed = tops.filter(p => p.status === 'completed')
+  return [...active, ...completed]
 })
 
-// Sort children: active first, suspended next; hide completed
+// Sort children: active first, suspended next, completed last
 function sortedChildren(children) {
-  const order = { active: 0, suspended: 1 }
+  const order = { active: 0, suspended: 1, completed: 2 }
   return [...children]
-    .filter(c => c.status !== 'completed')
     .sort((a, b) => {
       return (order[a.status] ?? 0) - (order[b.status] ?? 0)
     })
