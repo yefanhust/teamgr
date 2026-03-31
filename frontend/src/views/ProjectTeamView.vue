@@ -37,6 +37,14 @@
           <span class="member-count">{{ team.members.length }}人</span>
           <span v-if="team.projects.length === 0" class="no-project-hint">（无项目）</span>
           <span v-else class="project-count">{{ team.projects.length }}个项目</span>
+          <span
+            v-if="teamHasOffsets(team.id)"
+            class="reset-layout-btn"
+            @click.stop="resetTeamLayout(team.id)"
+            title="重新排列项目"
+          >
+            <van-icon name="replay" size="14" />
+          </span>
         </h3>
 
         <div v-show="!isCollapsed(team.id)" class="team-canvas">
@@ -324,6 +332,17 @@ function onTreePointerUp(e) {
   }
 }
 
+function teamHasOffsets(teamId) {
+  const prefix = `p-${teamId}-`
+  return Object.keys(dragOffsets).some(k => k.startsWith(prefix) && (dragOffsets[k].x !== 0 || dragOffsets[k].y !== 0))
+}
+
+function resetTeamLayout(teamId) {
+  const prefix = `p-${teamId}-`
+  Object.keys(dragOffsets).filter(k => k.startsWith(prefix)).forEach(k => delete dragOffsets[k])
+  saveOffsets()
+}
+
 async function onStatusChange(projectId, newStatus) {
   try {
     await store.updateProjectStatus(projectId, newStatus)
@@ -455,6 +474,22 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 400;
   color: #9ca3af;
+}
+
+.reset-layout-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.reset-layout-btn:hover {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .team-canvas {

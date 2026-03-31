@@ -232,7 +232,12 @@ async def board_members(
     db: Session = Depends(get_db),
     _=Depends(require_auth),
 ):
-    members = db.query(ProjectMember).all()
+    members = (
+        db.query(ProjectMember)
+        .join(Project, ProjectMember.project_id == Project.id)
+        .filter(Project.status != "completed")
+        .all()
+    )
 
     # Group by talent
     talent_map = {}

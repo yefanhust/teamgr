@@ -1682,13 +1682,14 @@
             clearable
             @focus="searchPmProjects"
             @update:model-value="searchPmProjects"
+            @keydown="handlePmProjectKeydown"
           />
-          <div v-if="pmShowProjectList && (pmFilteredProjectResults.length > 0 || pmProjectSearch.trim())" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
+          <div v-if="pmShowProjectList && (pmFilteredProjectResults.length > 0 || pmProjectSearch.trim())" ref="pmProjectListRef" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
             <div
-              v-for="p in pmFilteredProjectResults"
+              v-for="(p, idx) in pmFilteredProjectResults"
               :key="p.id"
               class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50"
-              :class="pmSelectedProject?.id === p.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
+              :class="idx === pmProjectHighlightIndex ? 'bg-blue-100 text-blue-600' : pmSelectedProject?.id === p.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'"
               @click="selectPmProject(p)"
             >
               {{ p.name }}
@@ -2150,6 +2151,8 @@ const pmSelectedTalent = ref(null)
 const pmProjectSearch = ref('')
 const pmShowProjectList = ref(false)
 const pmProjectResults = ref([])
+const pmProjectHighlightIndex = ref(-1)
+const pmProjectListRef = ref(null)
 const pmSelectedProject = ref(null)
 const pmUpdateContent = ref('')
 const pmPdfFile = ref(null)
@@ -4068,6 +4071,34 @@ function scrollTalentHighlightIntoView() {
   })
 }
 
+function handlePmProjectKeydown(e) {
+  if (!pmShowProjectList.value || pmFilteredProjectResults.value.length === 0) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    pmProjectHighlightIndex.value = Math.min(pmProjectHighlightIndex.value + 1, pmFilteredProjectResults.value.length - 1)
+    scrollProjectHighlightIntoView()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    pmProjectHighlightIndex.value = Math.max(pmProjectHighlightIndex.value - 1, 0)
+    scrollProjectHighlightIntoView()
+  } else if (e.key === 'Enter' && pmProjectHighlightIndex.value >= 0) {
+    e.preventDefault()
+    const p = pmFilteredProjectResults.value[pmProjectHighlightIndex.value]
+    selectPmProject(p)
+    pmProjectHighlightIndex.value = -1
+  }
+}
+
+function scrollProjectHighlightIntoView() {
+  nextTick(() => {
+    const container = pmProjectListRef.value
+    if (!container) return
+    const items = container.children
+    const target = items[pmProjectHighlightIndex.value]
+    if (target) target.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 function handlePmUpdateEsc(e) {
   if (e.key === 'Escape') {
     showPmUpdatePopup.value = false
@@ -4118,6 +4149,7 @@ async function searchPmProjects() {
     const res = await pmStore.searchProjects(pmProjectSearch.value)
     pmProjectResults.value = res
     pmShowProjectList.value = true
+    pmProjectHighlightIndex.value = -1
   } catch (e) { pmProjectResults.value = [] }
 }
 
