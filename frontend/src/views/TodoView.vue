@@ -1677,6 +1677,7 @@
         <div>
           <label class="text-sm text-gray-500 mb-1 block">{{ pmSelectedParentForCreate ? '子项目' : '项目' }}</label>
           <van-field
+            v-if="!pmSelectedProject"
             v-model="pmProjectSearch"
             :placeholder="pmSelectedParentForCreate ? '搜索或新建子项目' : '搜索项目或输入新项目名'"
             clearable
