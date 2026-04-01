@@ -31,6 +31,7 @@ class TodoUpdate(BaseModel):
     deadline: Optional[str] = None  # "YYYY-MM-DD", "" to clear, or null to skip
     deadline_time: Optional[str] = None  # "HH:MM", "" to clear, or null to skip
     started_at: Optional[str] = None  # ISO datetime string, "" to clear, or null to skip
+    completed_at: Optional[str] = None  # ISO datetime string, "" to clear, or null to skip
     repeat_rule: Optional[str] = None  # "daily"/"weekly"/"monthly"/"yearly", "" to clear
     repeat_interval: Optional[int] = None
     repeat_include_weekends: Optional[bool] = None
@@ -412,6 +413,11 @@ def update_todo(todo_id: int, body: TodoUpdate, db: Session = Depends(get_db)):
                 elif item.work_status == "in_progress" and item.paused_at:
                     # No accumulated segments (simple case) - shift paused_at
                     item.paused_at = item.paused_at + delta
+    if body.completed_at is not None:
+        if body.completed_at == "":
+            item.completed_at = None
+        else:
+            item.completed_at = datetime.fromisoformat(body.completed_at)
     if body.high_priority is not None:
         item.high_priority = body.high_priority
     # Repeat config

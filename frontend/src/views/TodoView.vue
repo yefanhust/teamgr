@@ -1605,7 +1605,22 @@
           <span v-if="detailItem.deadline">
             截止 {{ detailItem.deadline }}{{ detailItem.deadline_time ? ' ' + detailItem.deadline_time : '' }}
           </span>
-          <span v-if="detailItem.completed_at">
+          <span v-if="editingCompletedAt" class="inline-flex items-center gap-1">
+            完成于
+            <input
+              type="datetime-local"
+              v-model="editingCompletedAtValue"
+              class="text-xs border border-blue-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
+              @blur="handleCompletedAtBlur"
+              @keydown.escape="editingCompletedAt = false"
+              ref="completedAtInput"
+            />
+          </span>
+          <span
+            v-else-if="detailItem.completed_at"
+            class="cursor-pointer hover:text-blue-500"
+            @dblclick.stop="startEditCompletedAt"
+          >
             完成于 {{ formatDateTime(detailItem.completed_at) }}
           </span>
           <span v-if="detailItem.work_status === 'in_progress' || (detailItem.total_working_seconds || 0) > 0" class="text-green-500">
@@ -2343,6 +2358,10 @@ const detailRepeatIncludeWeekends = ref(false)
 const editingStartedAt = ref(false)
 const editingStartedAtValue = ref('')
 const startedAtInput = ref(null)
+const editingCompletedAt = ref(false)
+const editingCompletedAtValue = ref('')
+const editingCompletedAtOriginal = ref('')
+const completedAtInput = ref(null)
 
 // Calendar pickers
 const calendarMinDate = new Date()
@@ -4598,6 +4617,31 @@ async function saveStartedAt(localVal) {
   } catch (e) {
     showToast('保存失败')
   }
+}
+
+function startEditCompletedAt() {
+  if (!detailItem.value?.completed_at) return
+  const iso = detailItem.value.completed_at
+  const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
+  const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  editingCompletedAtValue.value = local
+  editingCompletedAtOriginal.value = local
+  editingCompletedAt.value = true
+  nextTick(() => {
+    completedAtInput.value?.focus()
+  })
+}
+
+function handleCompletedAtBlur() {
+  const val = editingCompletedAtValue.value
+  const orig = editingCompletedAtOriginal.value
+  editingCompletedAt.value = false
+  if (!detailItem.value || !val || val === orig) return
+  const localDate = new Date(val)
+  const utcIso = localDate.toISOString().replace('Z', '')
+  store.updateTodo(detailItem.value.id, { completed_at: utcIso })
+    .then(updated => { detailItem.value = { ...detailItem.value, ...updated } })
+    .catch(() => showToast('保存失败'))
 }
 
 function formatDate(d) {
