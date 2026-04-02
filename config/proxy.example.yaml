@@ -9,4 +9,5 @@ backend_ip: "10.2.0.16"
 backend_port: 6443
 
 # 代理监听端口（Machine B 对外暴露的 HTTPS 端口）
-listen_port: 443
+# Nginx 可在任意端口提供 HTTPS，Cloudflare Origin Rule 配置对应端口即可
+listen_port: 80

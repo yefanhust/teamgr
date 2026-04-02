@@ -550,7 +550,7 @@ vi config/proxy.yaml
 |--------|------|--------|
 | `backend_ip` | Machine A 内网 IP | `10.2.0.16` |
 | `backend_port` | Machine A Nginx 端口 | `6443` |
-| `listen_port` | Machine B 对外监听端口 | `443` |
+| `listen_port` | Machine B 对外监听端口 | `80` |
 
 ```bash
 # 3. 一键部署
@@ -591,14 +591,16 @@ docker-compose -f docker/docker-compose.yml restart nginx
 
 将 Cloudflare 指向 Machine B：
 
-1. **DNS A 记录**：IP 改为 Machine B 的公网 IP
-2. **Origin Rule**：端口重写为 `443`（或你配置的 `listen_port`）
+1. **DNS A 记录**：IP 改为 Machine B 的公网 IP，保持代理开启（橙色云朵）
+2. **Origin Rule**：端口重写为 `80`（或你配置的 `listen_port`）
 3. **SSL 模式**：保持 **Full** 不变
+
+> HTTPS 协议与端口号无关，Nginx 可在任意端口提供 HTTPS 服务。Cloudflare Full 模式下，Origin Rule 指定端口 80 后，Cloudflare 会以 HTTPS 协议连接 Machine B 的 80 端口。默认使用 80 端口是因为云厂商安全组通常默认放通 80，无需额外申请。
 
 ### 13.7 防火墙
 
 确保：
-- Machine B 安全组开放 `listen_port`（默认 443）对公网
+- Machine B 安全组开放 `listen_port`（默认 80）对公网
 - Machine A 安全组开放 `6443` 对 Machine B 内网 IP
 - Machine A 关闭 `6443` 对公网的访问（合规要求）
 

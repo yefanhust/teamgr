@@ -29,7 +29,7 @@ LISTEN_PORT=$(parse_yaml_value "listen_port")
 
 BACKEND_IP="${BACKEND_IP:-10.2.0.16}"
 BACKEND_PORT="${BACKEND_PORT:-6443}"
-LISTEN_PORT="${LISTEN_PORT:-443}"
+LISTEN_PORT="${LISTEN_PORT:-80}"
 
 echo "=== TeaMgr Proxy Deploy ==="
 echo "  Backend:  ${BACKEND_IP}:${BACKEND_PORT}"
@@ -47,6 +47,9 @@ chmod +x "$SCRIPT_DIR/entrypoint.sh"
 
 # --- Create ssl dir ---
 mkdir -p "$SCRIPT_DIR/ssl"
+
+# --- Stop old container (avoid recreate issues with docker-compose v1) ---
+docker-compose -f "$SCRIPT_DIR/docker-compose.yml" down 2>/dev/null || true
 
 # --- Start container ---
 export LISTEN_PORT
