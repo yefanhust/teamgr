@@ -10,6 +10,18 @@
     </div>
 
     <div class="max-w-3xl mx-auto w-full flex-1 flex flex-col px-4 py-4">
+      <!-- Draft restored banner -->
+      <div
+        v-if="draftRestored"
+        class="bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 mb-4 flex items-center justify-between"
+      >
+        <div class="flex items-center gap-2 text-sm text-amber-700">
+          <van-icon name="edit" size="16" />
+          <span>已恢复未提交的草稿<template v-if="draftTimeLabel">（保存于 {{ draftTimeLabel }}）</template></span>
+        </div>
+        <van-icon name="cross" size="16" class="text-amber-400 cursor-pointer" @click="dismissDraftBanner" />
+      </div>
+
       <!-- Candidate Selector -->
       <div class="bg-white rounded-xl shadow-sm p-4 mb-4">
         <label class="text-sm font-medium text-gray-600 mb-2 block">选择候选人</label>
@@ -309,6 +321,8 @@ const promptCache = ref({}) // { 'pdf-parse': { instructions, default }, 'image-
 // --- Draft auto-save ---
 const DRAFT_KEY = 'teamgr_entry_draft'
 let draftTimer = null
+const draftRestored = ref(false)
+const draftSavedAt = ref(null)
 
 function saveDraft() {
   if (draftTimer) clearTimeout(draftTimer)
@@ -346,6 +360,8 @@ function loadDraft() {
       }
     }
 
+    draftRestored.value = true
+    draftSavedAt.value = draft.savedAt ? new Date(draft.savedAt) : null
     showToast('已恢复上次未提交的草稿')
   } catch (e) {
     // ignore
@@ -355,6 +371,26 @@ function loadDraft() {
 function clearDraft() {
   if (draftTimer) clearTimeout(draftTimer)
   localStorage.removeItem(DRAFT_KEY)
+  draftRestored.value = false
+  draftSavedAt.value = null
+}
+
+const draftTimeLabel = computed(() => {
+  if (!draftSavedAt.value) return ''
+  const d = draftSavedAt.value
+  const pad = n => String(n).padStart(2, '0')
+  const now = new Date()
+  const isToday = d.toDateString() === now.toDateString()
+  const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  if (isToday) return `今天 ${time}`
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return `昨天 ${time}`
+  return `${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${time}`
+})
+
+function dismissDraftBanner() {
+  draftRestored.value = false
 }
 
 const canSubmit = computed(() => {
