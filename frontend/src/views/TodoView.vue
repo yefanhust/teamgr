@@ -1587,9 +1587,8 @@
             开始于
             <input
               type="datetime-local"
-              :value="editingStartedAtValue"
+              v-model="editingStartedAtValue"
               class="text-xs border border-blue-300 rounded px-1 py-0.5 focus:outline-none focus:border-blue-500"
-              @change="saveStartedAt($event.target.value)"
               @blur="handleStartedAtBlur"
               @keydown.escape="editingStartedAt = false"
               ref="startedAtInput"
@@ -2357,6 +2356,7 @@ const detailRepeatInterval = ref(1)
 const detailRepeatIncludeWeekends = ref(false)
 const editingStartedAt = ref(false)
 const editingStartedAtValue = ref('')
+const editingStartedAtOriginal = ref('')
 const startedAtInput = ref(null)
 const editingCompletedAt = ref(false)
 const editingCompletedAtValue = ref('')
@@ -4591,6 +4591,7 @@ function startEditStartedAt() {
   const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
   const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
   editingStartedAtValue.value = local
+  editingStartedAtOriginal.value = local
   editingStartedAt.value = true
   nextTick(() => {
     startedAtInput.value?.focus()
@@ -4598,25 +4599,15 @@ function startEditStartedAt() {
 }
 
 function handleStartedAtBlur() {
-  // Delay hiding the input so @change can fire first
-  // Without this delay, v-if removes the element before @change triggers
-  setTimeout(() => {
-    editingStartedAt.value = false
-  }, 150)
-}
-
-async function saveStartedAt(localVal) {
+  const val = editingStartedAtValue.value
+  const orig = editingStartedAtOriginal.value
   editingStartedAt.value = false
-  if (!detailItem.value || !localVal) return
-  // Convert local datetime to UTC ISO string
-  const localDate = new Date(localVal)
+  if (!detailItem.value || !val || val === orig) return
+  const localDate = new Date(val)
   const utcIso = localDate.toISOString().replace('Z', '')
-  try {
-    const updated = await store.updateTodo(detailItem.value.id, { started_at: utcIso })
-    detailItem.value = { ...detailItem.value, ...updated }
-  } catch (e) {
-    showToast('保存失败')
-  }
+  store.updateTodo(detailItem.value.id, { started_at: utcIso })
+    .then(updated => { detailItem.value = { ...detailItem.value, ...updated } })
+    .catch(() => showToast('保存失败'))
 }
 
 function startEditCompletedAt() {
