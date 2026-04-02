@@ -417,20 +417,12 @@ def update_todo(todo_id: int, body: TodoUpdate, db: Session = Depends(get_db)):
         if body.completed_at == "":
             item.completed_at = None
         else:
-            old_completed_at = item.completed_at
             new_completed_at = datetime.fromisoformat(body.completed_at)
             item.completed_at = new_completed_at
-            # Recalculate working time when completed_at changes
-            old_total = item.total_working_seconds or 0
-            if old_completed_at and old_total > 0:
-                delta_seconds = int((new_completed_at - old_completed_at).total_seconds())
-                new_total = max(0, old_total + delta_seconds)
-                # Cap at max possible elapsed time (completed_at - started_at)
-                ref_time = item.started_at or item.created_at
-                if ref_time:
-                    max_seconds = max(0, int((new_completed_at - ref_time).total_seconds()))
-                    new_total = min(new_total, max_seconds)
-                item.total_working_seconds = new_total
+            # Recalculate working time: completed_at - started_at
+            ref_time = item.started_at or item.created_at
+            if ref_time:
+                item.total_working_seconds = max(0, int((new_completed_at - ref_time).total_seconds()))
     if body.high_priority is not None:
         item.high_priority = body.high_priority
     # Repeat config
