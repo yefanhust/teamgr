@@ -3472,7 +3472,7 @@ function onChartBarClick(tagName) {
   const cutoff = windowDays ? new Date(Date.now() - windowDays * 86400000) : null
   const tasks = store.completed.filter(t => {
     if (t.vibe_status) return false
-    if (cutoff && new Date(t.completed_at) < cutoff) return false
+    if (cutoff && new Date(t.completed_at + 'Z') < cutoff) return false
     const tNames = (t.tags || []).map(tag => tag.name)
     if (tagName === '无标签') return tNames.length === 0
     return tNames.includes(tagName)
