@@ -306,6 +306,57 @@ const promptTab = ref('pdf-parse')
 const promptEditorText = ref('')
 const promptCache = ref({}) // { 'pdf-parse': { instructions, default }, 'image-parse': ... }
 
+// --- Draft auto-save ---
+const DRAFT_KEY = 'teamgr_entry_draft'
+let draftTimer = null
+
+function saveDraft() {
+  if (draftTimer) clearTimeout(draftTimer)
+  draftTimer = setTimeout(() => {
+    const text = inputText.value
+    if (text.trim()) {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        talentId: selectedTalent.value?.id || null,
+        talentName: selectedTalent.value?.name || '',
+        text,
+        savedAt: Date.now(),
+      }))
+    } else {
+      localStorage.removeItem(DRAFT_KEY)
+    }
+  }, 500)
+}
+
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY)
+    if (!raw) return
+    const draft = JSON.parse(raw)
+    if (!draft.text?.trim()) return
+
+    // Restore draft text
+    inputText.value = draft.text
+
+    // Try to restore talent selection if not already set
+    if (draft.talentId && !selectedTalent.value) {
+      const talent = store.talents.find(t => t.id === draft.talentId)
+      if (talent) {
+        selectedTalent.value = talent
+        candidateSearch.value = talent.name
+      }
+    }
+
+    showToast('已恢复上次未提交的草稿')
+  } catch (e) {
+    // ignore
+  }
+}
+
+function clearDraft() {
+  if (draftTimer) clearTimeout(draftTimer)
+  localStorage.removeItem(DRAFT_KEY)
+}
+
 const canSubmit = computed(() => {
   return selectedTalent.value && inputText.value.trim()
 })
@@ -352,6 +403,9 @@ async function onModelSelect(action) {
 // Prevent browser default: opening dropped files as a new page
 function preventDragDefault(e) { e.preventDefault() }
 
+// Auto-save draft on input change
+watch(inputText, saveDraft)
+
 onMounted(async () => {
   document.addEventListener('dragover', preventDragDefault)
   document.addEventListener('drop', preventDragDefault)
@@ -368,6 +422,9 @@ onMounted(async () => {
     }
   }
 
+  // Restore draft if available (after talents are loaded)
+  loadDraft()
+
   // Attach keydown listener directly on the native <textarea> DOM element
   // This bypasses all Vue/Vant component layers
   await nextTick()
@@ -379,6 +436,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  if (draftTimer) clearTimeout(draftTimer)
   document.removeEventListener('dragover', preventDragDefault)
   document.removeEventListener('drop', preventDragDefault)
   const textarea = inputWrapper.value?.querySelector('textarea')
@@ -487,6 +545,7 @@ function clearSelection() {
   messages.value = []
   pendingEntries.value.clear()
   stopPolling()
+  clearDraft()
 }
 
 // Attached directly to native <textarea> element via addEventListener in onMounted
@@ -508,6 +567,7 @@ async function submitEntry() {
 
   const content = inputText.value.trim()
   inputText.value = ''
+  clearDraft()
 
   // Add user message
   messages.value.push({ role: 'user', content })
@@ -768,6 +828,7 @@ async function createAndSelect() {
     showNewTalent.value = false
     messages.value = []
     inputText.value = ''
+    clearDraft()
     pendingEntries.value.clear()
     stopPolling()
     selectedTalent.value = created

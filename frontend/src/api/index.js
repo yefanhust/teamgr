@@ -45,6 +45,30 @@ async function tryRefreshToken() {
   }
 }
 
+// --- Re-login modal handler (set by App.vue) ---
+let reLoginHandler = null
+let reLoginPromise = null
+
+export function setReLoginHandler(handler) {
+  reLoginHandler = handler
+}
+
+async function requestReLogin() {
+  if (!reLoginHandler) {
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+    return null
+  }
+  // Deduplicate: reuse the same promise if modal is already open
+  if (!reLoginPromise) {
+    reLoginPromise = reLoginHandler().finally(() => {
+      reLoginPromise = null
+    })
+  }
+  return reLoginPromise
+}
+
 // Response interceptor - handle auth errors with auto-refresh
 api.interceptors.response.use(
   (response) => response,
@@ -85,12 +109,19 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${newToken}`
         return api(originalRequest)
       } else {
-        // Refresh failed — go to login
+        // Refresh failed — show re-login modal instead of redirecting
         localStorage.removeItem('teamgr_token')
-        refreshSubscribers = []
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login'
+        try {
+          const reLoginToken = await requestReLogin()
+          if (reLoginToken) {
+            onTokenRefreshed(reLoginToken)
+            originalRequest.headers.Authorization = `Bearer ${reLoginToken}`
+            return api(originalRequest)
+          }
+        } catch (e) {
+          // User dismissed modal or login failed
         }
+        refreshSubscribers = []
         return Promise.reject(error)
       }
     } finally {
