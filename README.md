@@ -224,6 +224,11 @@ teamgr/
 │       ├── views/       # 页面组件
 │       ├── stores/      # Pinia状态管理
 │       └── api/         # API封装
+├── proxy/               # 反向代理部署（Machine B 公网代理机）
+│   ├── nginx.conf.template  # Nginx 配置模板
+│   ├── docker-compose.yml   # 代理容器编排
+│   ├── deploy.sh            # 一键部署脚本
+│   └── entrypoint.sh        # 证书生成 + 启动
 ├── data/                # 运行时数据（SQLite、队列文件、日志）
 │   ├── teamgr.db        # SQLite数据库
 │   ├── vibe-queue/      # Vibe Watcher 信号队列
@@ -506,3 +511,103 @@ python scripts/restore_from_cos.py ... --legacy
 ```
 
 > **重要**：请在安全的地方（如密码管理器）记录以下三个信息：COS SecretId、COS SecretKey、备份加密密码。加密密码遗忘后加密备份将无法恢复。
+
+## 13. 反向代理部署（双机模式）
+
+当 Machine A（运行 TeaMgr 的主机）因合规要求不能暴露公网时，可在同地域的 Machine B（有公网 IP）上部署反向代理，通过内网转发所有请求。
+
+### 13.1 架构
+
+```
+用户 → HTTPS (443) → Machine B (Nginx 反向代理, 公网) → HTTPS 内网 → Machine A (6443, TeaMgr)
+```
+
+| 机器 | 角色 | 网络 |
+|------|------|------|
+| Machine A | TeaMgr 主服务 | 仅内网 |
+| Machine B | 反向代理 | 公网 + 内网 |
+
+### 13.2 前置要求
+
+- Machine B 安装 Docker 和 docker-compose
+- Machine B 与 Machine A 内网互通
+- Machine A 的 TeaMgr 已正常运行
+
+### 13.3 Machine B 部署
+
+```bash
+# 1. 克隆项目
+git clone <repo-url> teamgr && cd teamgr
+
+# 2. 创建代理配置
+cp config/proxy.example.yaml config/proxy.yaml
+vi config/proxy.yaml
+```
+
+**config/proxy.yaml 配置项：**
+
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| `backend_ip` | Machine A 内网 IP | `10.2.0.16` |
+| `backend_port` | Machine A Nginx 端口 | `6443` |
+| `listen_port` | Machine B 对外监听端口 | `443` |
+
+```bash
+# 3. 一键部署
+bash proxy/deploy.sh
+```
+
+部署脚本会自动：读取配置 → 从模板生成 nginx.conf → 生成自签名证书（首次） → 启动容器。
+
+### 13.4 日常运维
+
+```bash
+# 查看日志
+docker-compose -f proxy/docker-compose.yml logs -f
+
+# 停止代理
+docker-compose -f proxy/docker-compose.yml down
+
+# 修改配置后重新部署
+vi config/proxy.yaml
+bash proxy/deploy.sh
+
+# 重建容器（Dockerfile 或 docker-compose.yml 变更后）
+docker-compose -f proxy/docker-compose.yml down
+bash proxy/deploy.sh --build
+```
+
+### 13.5 Machine A 侧配置
+
+Machine A 的 Nginx 已预配置信任 RFC 1918 内网地址段的 `X-Forwarded-For` 头，无需额外修改。这确保 Machine A 的安全中间件（IP 限流、渐进式封禁）使用的是用户真实 IP 而非 Machine B 的内网 IP。
+
+如果是全新部署，只需正常按第 3 节启动 TeaMgr 即可。如果是已有部署升级，重启 Nginx 容器使配置生效：
+
+```bash
+docker-compose -f docker/docker-compose.yml restart nginx
+```
+
+### 13.6 Cloudflare 域名配置（如使用）
+
+将 Cloudflare 指向 Machine B：
+
+1. **DNS A 记录**：IP 改为 Machine B 的公网 IP
+2. **Origin Rule**：端口重写为 `443`（或你配置的 `listen_port`）
+3. **SSL 模式**：保持 **Full** 不变
+
+### 13.7 防火墙
+
+确保：
+- Machine B 安全组开放 `listen_port`（默认 443）对公网
+- Machine A 安全组开放 `6443` 对 Machine B 内网 IP
+- Machine A 关闭 `6443` 对公网的访问（合规要求）
+
+### 13.8 配置文件说明
+
+| 文件 | 是否提交 Git | 是否参与备份 |
+|------|-------------|-------------|
+| `config/proxy.example.yaml` | 是 | - |
+| `config/proxy.yaml` | 否（.gitignore） | 是（每日加密备份） |
+| `proxy/nginx.conf.template` | 是 | - |
+| `proxy/nginx.conf`（生成） | 否（.gitignore） | - |
+| `proxy/ssl/`（证书） | 否（.gitignore） | - |

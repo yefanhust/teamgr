@@ -1,0 +1,12 @@
+# TeaMgr 反向代理配置示例
+# 复制此文件为 proxy.yaml 并填入真实配置
+# 用于 Machine B（公网代理机）部署，将请求转发到内网的 Machine A
+
+# 后端地址（Machine A 内网 IP）
+backend_ip: "10.2.0.16"
+
+# 后端端口（Machine A 的 Nginx HTTPS 端口）
+backend_port: 6443
+
+# 代理监听端口（Machine B 对外暴露的 HTTPS 端口）
+listen_port: 443

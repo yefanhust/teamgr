@@ -1,7 +1,10 @@
 config/config.yaml
+config/proxy.yaml
 config/trusted_devices.json
 data/
 ssl/
+proxy/nginx.conf
+proxy/ssl/
 __pycache__/
 *.pyc
 .env

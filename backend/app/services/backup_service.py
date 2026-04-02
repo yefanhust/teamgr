@@ -120,6 +120,10 @@ def _collect_backup_files(tmp_dir: str) -> str:
         if trusted_devices.exists():
             tar.add(str(trusted_devices), arcname="config/trusted_devices.json")
 
+        proxy_yaml = _CONFIG_DIR / "proxy.yaml"
+        if proxy_yaml.exists():
+            tar.add(str(proxy_yaml), arcname="config/proxy.yaml")
+
         # 3. Scholar data
         scholar_conv = _DATA_DIR / "scholar-conversations.json"
         if scholar_conv.exists():
