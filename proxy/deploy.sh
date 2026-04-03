@@ -29,7 +29,7 @@ LISTEN_PORT=$(parse_yaml_value "listen_port")
 
 BACKEND_IP="${BACKEND_IP:-10.2.0.16}"
 BACKEND_PORT="${BACKEND_PORT:-6443}"
-LISTEN_PORT="${LISTEN_PORT:-80}"
+LISTEN_PORT="${LISTEN_PORT:-6443}"
 
 echo "=== TeaMgr Proxy Deploy ==="
 echo "  Backend:  ${BACKEND_IP}:${BACKEND_PORT}"
