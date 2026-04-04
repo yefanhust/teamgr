@@ -609,10 +609,16 @@ async def get_project_info(
         raise HTTPException(status_code=404, detail="项目不存在")
 
     # Check if summary needs refresh (no summary or new updates since last generation)
+    latest_update_at = project.last_update_at
+    # For parent projects, also consider child project updates
+    if project.children:
+        for child in project.children:
+            if child.last_update_at and (latest_update_at is None or child.last_update_at > latest_update_at):
+                latest_update_at = child.last_update_at
     needs_refresh = (
         not project.llm_summary
         or not project.llm_summary_updated_at
-        or (project.last_update_at and project.llm_summary_updated_at < project.last_update_at)
+        or (latest_update_at and project.llm_summary_updated_at < latest_update_at)
     )
 
     if needs_refresh:
@@ -821,26 +827,114 @@ async def _generate_project_summary(project: Project, db: Session) -> str:
     """Use LLM to generate a project summary from all updates and members."""
     from app.services.llm_service import _call_model_text, _strip_think_tags
 
-    # Gather data
-    members_info = []
-    for m in project.members:
-        name = m.talent.name if m.talent else "未知"
-        members_info.append(f"- {name}（角色：{m.role or '未指定'}）")
+    is_parent = bool(project.children)
 
-    updates_info = []
-    sorted_updates = sorted(project.updates, key=lambda x: x.created_at or datetime.min)
-    for u in sorted_updates[-30:]:  # Last 30 updates
-        talent_name = u.talent.name if u.talent else "未知"
-        date_str = u.created_at.strftime("%Y-%m-%d") if u.created_at else "未知"
-        parsed = u.parsed_data or {}
-        progress = parsed.get("progress", u.raw_input)
-        updates_info.append(f"- [{date_str}] {talent_name}: {progress}")
+    if is_parent:
+        # Aggregate data from all child projects
+        all_members = {}  # talent_id -> (name, roles)
+        all_updates = []
+        earliest_start = None
+        child_summaries = []
 
-    days_active = 0
-    if project.started_at:
-        days_active = (datetime.utcnow() - project.started_at).days
+        for child in project.children:
+            # Collect child overview
+            child_status_label = {"active": "进行中", "completed": "已完成", "archived": "已归档"}.get(child.status, child.status)
+            child_member_count = len(child.members)
+            child_update_count = len(child.updates)
+            child_summaries.append(f"- **{child.name}**（{child_status_label}，{child_member_count} 人，{child_update_count} 条进展）：{child.description or '无描述'}")
 
-    prompt = f"""根据以下项目信息，生成一份简洁的项目概览（使用Markdown格式）。
+            # Aggregate members (deduplicate by talent_id)
+            for m in child.members:
+                tid = m.talent_id
+                name = m.talent.name if m.talent else "未知"
+                if tid not in all_members:
+                    all_members[tid] = (name, [])
+                all_members[tid][1].append(f"{child.name}/{m.role or '未指定'}")
+
+            # Aggregate updates
+            for u in child.updates:
+                all_updates.append((u, child.name))
+
+            # Track earliest start date
+            if child.started_at:
+                if earliest_start is None or child.started_at < earliest_start:
+                    earliest_start = child.started_at
+
+        # Also include parent's own members/updates if any
+        for m in project.members:
+            tid = m.talent_id
+            name = m.talent.name if m.talent else "未知"
+            if tid not in all_members:
+                all_members[tid] = (name, [])
+            all_members[tid][1].append(f"{project.name}/{m.role or '未指定'}")
+        for u in project.updates:
+            all_updates.append((u, project.name))
+
+        effective_start = project.started_at or earliest_start
+        days_active = (datetime.utcnow() - effective_start).days if effective_start else 0
+
+        members_info = []
+        for tid, (name, roles) in all_members.items():
+            members_info.append(f"- {name}（{', '.join(roles)}）")
+
+        sorted_updates = sorted(all_updates, key=lambda x: x[0].created_at or datetime.min)
+        updates_info = []
+        for u, child_name in sorted_updates[-40:]:
+            talent_name = u.talent.name if u.talent else "未知"
+            date_str = u.created_at.strftime("%Y-%m-%d") if u.created_at else "未知"
+            parsed = u.parsed_data or {}
+            progress = parsed.get("progress", u.raw_input)
+            updates_info.append(f"- [{date_str}] [{child_name}] {talent_name}: {progress}")
+
+        prompt = f"""根据以下父项目及其子项目的信息，生成一份综合的项目概览（使用Markdown格式）。
+
+父项目名称：{project.name}
+项目描述：{project.description or '无'}
+开始日期：{effective_start.strftime('%Y-%m-%d') if effective_start else '未开始'}
+已进行：{days_active} 天
+状态：{project.status}
+子项目数量：{len(project.children)} 个
+参与总人数：{len(all_members)} 人
+
+子项目概况：
+{chr(10).join(child_summaries)}
+
+参与成员（汇总）：
+{chr(10).join(members_info) if members_info else '暂无成员'}
+
+进展记录（各子项目汇总，按时间排序）：
+{chr(10).join(updates_info) if updates_info else '暂无进展记录'}
+
+请生成包含以下内容的项目概览：
+1. 项目总体概况（一句话总结整个项目群的当前状态）
+2. 子项目进展一览（每个子项目的关键进展）
+3. 团队分工
+4. 关键里程碑（从进展记录中提取）
+5. 潜在风险或待解决问题（如有）
+
+直接输出Markdown内容，不要包裹在代码块中。"""
+
+    else:
+        # Single project (no children) — original logic
+        members_info = []
+        for m in project.members:
+            name = m.talent.name if m.talent else "未知"
+            members_info.append(f"- {name}（角色：{m.role or '未指定'}）")
+
+        updates_info = []
+        sorted_updates = sorted(project.updates, key=lambda x: x.created_at or datetime.min)
+        for u in sorted_updates[-30:]:  # Last 30 updates
+            talent_name = u.talent.name if u.talent else "未知"
+            date_str = u.created_at.strftime("%Y-%m-%d") if u.created_at else "未知"
+            parsed = u.parsed_data or {}
+            progress = parsed.get("progress", u.raw_input)
+            updates_info.append(f"- [{date_str}] {talent_name}: {progress}")
+
+        days_active = 0
+        if project.started_at:
+            days_active = (datetime.utcnow() - project.started_at).days
+
+        prompt = f"""根据以下项目信息，生成一份简洁的项目概览（使用Markdown格式）。
 
 项目名称：{project.name}
 项目描述：{project.description or '无'}

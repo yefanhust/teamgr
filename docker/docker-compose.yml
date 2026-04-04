@@ -20,7 +20,7 @@ services:
       - PYTHONPATH=/app
 
   sglang:
-    image: lmsysorg/sglang:latest
+    image: lmsysorg/sglang:dev-gemma4
     container_name: teamgr-sglang
     restart: unless-stopped
     ipc: host
