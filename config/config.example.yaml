@@ -16,10 +16,11 @@ gemini:
     - "gemini-2.5-flash-lite"
     - "gemini-3-flash-preview"
 
-# 本地模型配置 (通过 TACO-X 部署的 OpenAI 兼容服务)
+# 本地模型配置 (通过 SGLang 部署的 OpenAI 兼容服务)
 local_models:
-  - name: "Qwen3-30B-A3B"
-    api_base: "http://tacox:18080/v1"   # docker-compose 内部服务名
+  - name: "Gemma-4-26B-A4B"
+    api_base: "http://sglang:18080/v1"  # docker-compose 内部服务名
+    model_id: "Gemma-4-26B-A4B"         # 与 sglang --served-model-name 一致
     # api_key: ""                           # 如需 API key 可在此配置
 
 # 腾讯云 COS 备份配置

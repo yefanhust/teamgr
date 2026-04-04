@@ -19,9 +19,9 @@ services:
       - TEAMGR_DATA_DIR=/app/data
       - PYTHONPATH=/app
 
-  tacox:
-    image: taco-0.tencentcloudcr.com/taco/taco_x_prod:v0.0.1-260302-default
-    container_name: teamgr-tacox
+  sglang:
+    image: lmsysorg/sglang:latest
+    container_name: teamgr-sglang
     restart: unless-stopped
     ipc: host
     ulimits:
@@ -35,20 +35,18 @@ services:
               count: 2
               capabilities: [gpu]
     volumes:
-      - ~/.cache/huggingface/hub/models--Qwen--Qwen3-30B-A3B-Instruct-2507:/models/Qwen3-30B-A3B
-      - ../local_llm/qwen3_moe_30b_taco_x_config:/workspace/qwen3_moe_30b_taco_x_config:ro
+      - ~/.cache/huggingface:/root/.cache/huggingface
     expose:
       - "18080"
     entrypoint: >
-      bash -c "python3 -m taco_x.api_server
-      --model_dir /models/Qwen3-30B-A3B/snapshots/0d7cf23991f47feeb3a57ecb4c9cee8ea4a17bfe
-      --model_type qwen3_moe_30b
-      --config_dir /workspace/qwen3_moe_30b_taco_x_config
-      --port 18080
+      bash -c "python3 -m sglang.launch_server
+      --model-path google/gemma-4-26B-A4B-it
+      --served-model-name Gemma-4-26B-A4B
       --tp 2
-      --opt-level 3"
+      --port 18080
+      --host 0.0.0.0"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,json; urllib.request.urlopen(urllib.request.Request('http://localhost:18080/v1/chat/completions',data=json.dumps({'messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(),headers={'Content-Type':'application/json'}))"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:18080/health')"]
       interval: 30s
       timeout: 30s
       retries: 10

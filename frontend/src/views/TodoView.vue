@@ -1668,8 +1668,9 @@
             placeholder="搜索队员（支持拼音首字母）"
             clearable
             @focus="searchPmTalents"
-            @update:model-value="searchPmTalents"
+            @update:model-value="debouncedSearchPmTalents"
             @keydown="handlePmTalentKeydown"
+            @input="(e) => debouncedSearchPmTalents(e.target?.value)"
           />
           <div v-if="pmShowTalentList && pmTalentResults.length > 0" ref="pmTalentListRef" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
             <div
@@ -1696,8 +1697,9 @@
             :placeholder="pmSelectedParentForCreate ? '搜索或新建子项目' : '搜索项目或输入新项目名'"
             clearable
             @focus="searchPmProjects"
-            @update:model-value="searchPmProjects"
+            @update:model-value="debouncedSearchPmProjects"
             @keydown="handlePmProjectKeydown"
+            @input="(e) => debouncedSearchPmProjects(e.target?.value)"
           />
           <div v-if="pmShowProjectList && (pmFilteredProjectResults.length > 0 || pmProjectSearch.trim())" ref="pmProjectListRef" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
             <div
@@ -1741,8 +1743,9 @@
             placeholder="搜索父项目..."
             clearable
             @focus="searchPmParentProjects"
-            @update:model-value="searchPmParentProjects"
+            @update:model-value="debouncedSearchPmParentProjects"
             @keydown="handlePmParentProjectKeydown"
+            @input="(e) => debouncedSearchPmParentProjects(e.target?.value)"
           />
           <div v-if="pmShowParentProjectList && (pmParentProjectResults.length > 0 || pmParentProjectSearch.trim())" ref="pmParentProjectListRef" class="border border-gray-200 rounded-lg mt-1 max-h-40 overflow-y-auto bg-white shadow">
             <div
@@ -2024,7 +2027,39 @@
 
         <!-- Update timeline -->
         <div v-if="pmInfoData.recent_updates?.length > 0">
-          <h4 class="text-sm font-semibold text-gray-600 mb-2">更新记录</h4>
+          <div class="flex items-center justify-between mb-2">
+            <h4 class="text-sm font-semibold text-gray-600">更新记录</h4>
+            <van-button
+              size="small"
+              type="primary"
+              plain
+              :loading="dailyReportStatus === 'running'"
+              @click="triggerDailyReport(pmInfoData.id)"
+            >生成日报</van-button>
+          </div>
+
+          <!-- Daily Report: streaming / result -->
+          <div v-if="dailyReportStatus || dailyReportContent" class="mb-4">
+            <!-- Streaming status -->
+            <div v-if="dailyReportStatus" class="bg-gray-50 rounded-lg p-3 text-sm mb-2">
+              <div class="flex items-center gap-2 mb-1">
+                <van-loading v-if="dailyReportStatus === 'running'" size="14" />
+                <van-icon v-else-if="dailyReportStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
+                <span class="text-gray-600">{{ dailyReportStatusText }}</span>
+              </div>
+              <pre v-if="dailyReportThinking" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed mb-2">{{ dailyReportThinking }}</pre>
+              <div v-if="dailyReportStream" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(dailyReportStream)"></div>
+            </div>
+            <!-- Final rendered result -->
+            <div v-if="dailyReportContent && !dailyReportStatus" class="bg-green-50 border border-green-200 rounded-lg p-3">
+              <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-semibold text-green-700">日报</span>
+                <van-icon name="cross" size="14" class="text-gray-400 cursor-pointer" @click="dailyReportContent = ''" />
+              </div>
+              <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(dailyReportContent)"></div>
+            </div>
+          </div>
+
           <div class="space-y-3">
             <div v-for="upd in pmInfoData.recent_updates" :key="upd.id" class="border-l-2 border-blue-300 pl-4 py-2">
               <div class="flex items-center gap-2 mb-1">
@@ -2402,6 +2437,14 @@ const projectAnalysisStream = ref('')
 const projectAnalysisThinking = ref('')
 const projectAnalysisThinkingPre = ref(null)
 const projectAnalysisStreamEl = ref(null)
+
+// Daily Report (per-project)
+const dailyReportStream = ref('')
+const dailyReportThinking = ref('')
+const dailyReportStatus = ref('')   // '' | 'running' | 'error'
+const dailyReportStatusText = ref('')
+const dailyReportContent = ref('')  // final rendered content after done
+
 let durationChartInstance = null
 
 // Tag filter state (TODO scope)
@@ -3712,6 +3755,84 @@ async function triggerProjectAnalysis() {
   }
 }
 
+// --- Daily Report (per-project) ---
+async function triggerDailyReport(projectId) {
+  dailyReportStream.value = ''
+  dailyReportThinking.value = ''
+  dailyReportContent.value = ''
+  dailyReportStatus.value = 'running'
+  dailyReportStatusText.value = '正在生成日报...'
+
+  let receivedDone = false
+  try {
+    const token = localStorage.getItem('teamgr_token')
+    const res = await fetch(`/api/projects/${projectId}/daily-report`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop()
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          if (data.type === 'thinking' || data.type === 'thinking_chunk') {
+            dailyReportStatusText.value = `模型正在思考中... ${data.elapsed ? '(' + data.elapsed + 's)' : ''}`
+            if (data.content) dailyReportThinking.value += data.content
+          } else if (data.type === 'thinking_done') {
+            dailyReportStatusText.value = `思考完成 (${data.elapsed}s)，正在生成日报...`
+          } else if (data.type === 'chunk') {
+            if (!dailyReportStatusText.value.includes('思考')) {
+              dailyReportStatusText.value = '正在生成日报...'
+            }
+            dailyReportStream.value += data.content
+          } else if (data.type === 'done') {
+            receivedDone = true
+            dailyReportContent.value = dailyReportStream.value || data.content
+            dailyReportStatus.value = ''
+            dailyReportStatusText.value = ''
+            dailyReportStream.value = ''
+            dailyReportThinking.value = ''
+          } else if (data.type === 'error') {
+            receivedDone = true
+            dailyReportContent.value = ''
+            dailyReportStatus.value = 'error'
+            dailyReportStatusText.value = data.content
+            setTimeout(() => { dailyReportStatus.value = ''; dailyReportStatusText.value = '' }, 5000)
+          }
+        } catch (e) { /* skip malformed */ }
+      }
+    }
+  } catch (e) {
+    if (!receivedDone) {
+      dailyReportStatus.value = 'error'
+      dailyReportStatusText.value = `生成失败：${e.message}`
+      setTimeout(() => { dailyReportStatus.value = ''; dailyReportStatusText.value = '' }, 5000)
+    }
+  } finally {
+    if (!receivedDone && dailyReportStatus.value === 'running') {
+      // Stream ended without done — use whatever we got
+      if (dailyReportStream.value) {
+        dailyReportContent.value = dailyReportStream.value
+      }
+      dailyReportStatus.value = ''
+      dailyReportStatusText.value = ''
+      dailyReportStream.value = ''
+      dailyReportThinking.value = ''
+    }
+  }
+}
+
 // --- Requirement creation ---
 const newReqTitle = ref('')
 const newReqHighPriority = ref(false)
@@ -4059,13 +4180,24 @@ async function loadPmMembers() {
   } catch (e) { console.error('Failed to load member board', e) }
 }
 
-async function searchPmTalents() {
+let _talentSearchVer = 0
+let _talentSearchTimer = null
+
+async function searchPmTalents(overrideQuery) {
+  const ver = ++_talentSearchVer
   try {
-    const res = await api.get('/api/talents/search', { params: { q: pmTalentSearch.value } })
+    const q = typeof overrideQuery === 'string' ? overrideQuery : pmTalentSearch.value
+    const res = await api.get('/api/talents/search', { params: { q } })
+    if (ver !== _talentSearchVer) return
     pmTalentResults.value = res.data
     pmTalentHighlightIndex.value = -1
     pmShowTalentList.value = true
-  } catch (e) { pmTalentResults.value = [] }
+  } catch (e) { if (ver === _talentSearchVer) pmTalentResults.value = [] }
+}
+
+function debouncedSearchPmTalents(overrideQuery) {
+  clearTimeout(_talentSearchTimer)
+  _talentSearchTimer = setTimeout(() => searchPmTalents(overrideQuery), 120)
 }
 
 function handlePmTalentKeydown(e) {
@@ -4146,14 +4278,25 @@ watch(showPmUpdatePopup, (val) => {
   }
 })
 
-async function searchPmParentProjects() {
+let _parentProjSearchVer = 0
+let _parentProjSearchTimer = null
+
+async function searchPmParentProjects(overrideQuery) {
+  const ver = ++_parentProjSearchVer
   try {
-    const res = await pmStore.searchProjects(pmParentProjectSearch.value)
+    const q = typeof overrideQuery === 'string' ? overrideQuery : pmParentProjectSearch.value
+    const res = await pmStore.searchProjects(q)
+    if (ver !== _parentProjSearchVer) return
     // Only show top-level projects as potential parents
     pmParentProjectResults.value = res.filter(p => !p.parent_id)
     pmShowParentProjectList.value = true
     pmParentProjectHighlightIndex.value = -1
-  } catch (e) { pmParentProjectResults.value = [] }
+  } catch (e) { if (ver === _parentProjSearchVer) pmParentProjectResults.value = [] }
+}
+
+function debouncedSearchPmParentProjects(overrideQuery) {
+  clearTimeout(_parentProjSearchTimer)
+  _parentProjSearchTimer = setTimeout(() => searchPmParentProjects(overrideQuery), 120)
 }
 
 function selectPmParentProject(p) {
@@ -4214,13 +4357,24 @@ function onParentSelected(parent) {
   searchPmProjects()
 }
 
-async function searchPmProjects() {
+let _projSearchVer = 0
+let _projSearchTimer = null
+
+async function searchPmProjects(overrideQuery) {
+  const ver = ++_projSearchVer
   try {
-    const res = await pmStore.searchProjects(pmProjectSearch.value)
+    const q = typeof overrideQuery === 'string' ? overrideQuery : pmProjectSearch.value
+    const res = await pmStore.searchProjects(q)
+    if (ver !== _projSearchVer) return
     pmProjectResults.value = res
     pmShowProjectList.value = true
     pmProjectHighlightIndex.value = -1
-  } catch (e) { pmProjectResults.value = [] }
+  } catch (e) { if (ver === _projSearchVer) pmProjectResults.value = [] }
+}
+
+function debouncedSearchPmProjects(overrideQuery) {
+  clearTimeout(_projSearchTimer)
+  _projSearchTimer = setTimeout(() => searchPmProjects(overrideQuery), 120)
 }
 
 function selectPmProject(proj) {
@@ -4352,6 +4506,11 @@ async function openProjectInfo(id) {
   pmEditingDesc.value = false
   pmEditingSummary.value = false
   pmEditingUpdateId.value = null
+  dailyReportStream.value = ''
+  dailyReportThinking.value = ''
+  dailyReportStatus.value = ''
+  dailyReportStatusText.value = ''
+  dailyReportContent.value = ''
   try {
     pmInfoData.value = await pmStore.getProjectInfo(id)
   } catch (e) {
@@ -4652,14 +4811,23 @@ function formatDateTime(isoStr) {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+.pm-update-textarea :deep(.van-cell__value) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .pm-update-textarea :deep(.van-field__body) {
   flex: 1;
+  min-height: 0;
 }
 .pm-update-textarea :deep(textarea) {
   font-size: 16px !important;
   line-height: 1.6 !important;
   height: 100% !important;
+  flex: 1;
 }
 .pm-delete-btn {
   opacity: 0.3;

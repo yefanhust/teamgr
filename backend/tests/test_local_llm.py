@@ -1,7 +1,7 @@
-"""Tests for local LLM deployment (TACO-X + Qwen3-32B).
+"""Tests for local LLM deployment (SGLang + Gemma-4-26B-A4B).
 
-These are integration tests that require the tacox container to be running.
-Run from within the teamgr-app container or any host that can reach tacox:18080.
+These are integration tests that require the sglang container to be running.
+Run from within the teamgr-app container or any host that can reach sglang:18080.
 
 Usage:
     docker exec teamgr-app python -m pytest tests/test_local_llm.py -v
@@ -17,8 +17,8 @@ import pytest
 # ---------------------------------------------------------------------------
 # Configuration — adjust if your setup differs
 # ---------------------------------------------------------------------------
-TACOX_BASE_URL = "http://tacox:18080/v1"
-CHAT_URL = f"{TACOX_BASE_URL}/chat/completions"
+SGLANG_BASE_URL = "http://sglang:18080/v1"
+CHAT_URL = f"{SGLANG_BASE_URL}/chat/completions"
 TIMEOUT = 120.0
 
 
@@ -60,7 +60,7 @@ def _chat_text(prompt: str, **kwargs) -> str:
 # 1. Basic connectivity
 # ===========================================================================
 class TestConnectivity:
-    """Verify the TACO-X service is reachable and responds correctly."""
+    """Verify the SGLang service is reachable and responds correctly."""
 
     def test_health_check(self):
         """A minimal inference request should return 200."""
@@ -71,10 +71,13 @@ class TestConnectivity:
         )
         assert resp.status_code == 200
 
-    def test_models_endpoint_returns_404(self):
-        """/v1/models is NOT implemented by TACO-X — confirm it returns 404."""
-        resp = httpx.get(f"{TACOX_BASE_URL}/models", timeout=10)
-        assert resp.status_code == 404
+    def test_models_endpoint(self):
+        """/v1/models should return the served model."""
+        resp = httpx.get(f"{SGLANG_BASE_URL}/models", timeout=10)
+        assert resp.status_code == 200
+        data = resp.json()
+        model_ids = [m["id"] for m in data["data"]]
+        assert "Gemma-4-26B-A4B" in model_ids
 
     def test_response_structure(self):
         """Response should follow OpenAI chat completions format."""
@@ -98,43 +101,27 @@ class TestConnectivity:
 
 
 # ===========================================================================
-# 2. Model field behavior (TACO-X specific pitfall)
+# 2. Model field behavior
 # ===========================================================================
 class TestModelField:
-    """TACO-X rejects model names that don't match model_dir."""
+    """SGLang accepts the served model name in the model field."""
 
-    def test_no_model_field_ok(self):
-        """Omitting the model field should work."""
+    def test_correct_model_field_ok(self):
+        """Passing the served model name should work."""
         payload = {
             "messages": [{"role": "user", "content": "hi"}],
             "max_tokens": 1,
+            "model": "Gemma-4-26B-A4B",
         }
         resp = httpx.post(CHAT_URL, json=payload, timeout=TIMEOUT)
         assert resp.status_code == 200
-
-    def test_wrong_model_field_rejected(self):
-        """Passing a wrong model name should fail."""
-        payload = {
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 1,
-            "model": "Qwen3-32B",  # This does NOT match model_dir
-        }
-        resp = httpx.post(CHAT_URL, json=payload, timeout=TIMEOUT)
-        # TACO-X returns 200 but with an error in the response, or a non-200 status
-        if resp.status_code == 200:
-            data = resp.json()
-            content = data["choices"][0]["message"]["content"]
-            # The response should contain an error message about model mismatch
-            assert "mismatch" in content.lower() or "error" in content.lower()
-        else:
-            assert resp.status_code >= 400
 
 
 # ===========================================================================
 # 3. Think tag handling
 # ===========================================================================
 class TestThinkTags:
-    """Qwen3-32B has thinking mode that wraps output in <think> tags."""
+    """Test think tag stripping (for models that use thinking mode)."""
 
     def test_raw_response_may_contain_think_tags(self):
         """Without system prompt suppression, response may contain <think> tags."""

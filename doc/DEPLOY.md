@@ -43,10 +43,10 @@ docker-compose -f docker/docker-compose.yml up -d --build
 | 容器 | 作用 |
 |------|------|
 | `teamgr-app` | 后端运行环境，等待通过 exec 启动 uvicorn |
-| `teamgr-tacox` | 本地 LLM 推理服务（Qwen3-32B，需要 GPU） |
+| `teamgr-sglang` | 本地 LLM 推理服务（Gemma-4-26B-A4B，需要 GPU） |
 | `teamgr-nginx` | HTTPS 反向代理（端口 6443），首次启动自动生成自签名证书 |
 
-> 如果没有 GPU，`tacox` 容器会启动失败但不影响其他服务，Gemini 云端模型仍可正常使用。
+> 如果没有 GPU，`sglang` 容器会启动失败但不影响其他服务，Gemini 云端模型仍可正常使用。
 
 ## 4. 启动 Web 服务
 
@@ -125,24 +125,26 @@ docker-compose -f docker/docker-compose.yml down
 
 确保服务器安全组/防火墙开放 **6443** 端口。
 
-## 8. 本地 LLM 部署（TACO-X + Qwen3-32B）
+## 8. 本地 LLM 部署（SGLang + Gemma-4-26B-A4B）
 
-系统支持通过 TACO-X 在本地部署 LLM，减少对 Gemini API 的依赖。当前预配置了 Qwen3-32B 模型，使用 2 张 L20 GPU（TP2）进行推理。
+系统支持通过 SGLang 在本地部署 LLM，减少对 Gemini API 的依赖。当前预配置了 Google Gemma-4-26B-A4B-it 模型（MoE 架构，26B 总参数 / 4B 激活参数），使用 2 张 L20 GPU（TP2）进行推理。
 
 ### 8.1 前置要求
 
-- 2 张 NVIDIA GPU（如 L20）
+- 2 张 NVIDIA GPU（如 L20，每张 ≥ 24GB 显存）
 - NVIDIA 驱动 + nvidia-container-toolkit
-- 预下载的 Qwen3-32B 模型权重
+- 预下载的 Gemma-4-26B-A4B-it 模型权重
 
 ### 8.2 模型准备
 
-模型需预先下载到 `~/.cache/huggingface/hub/models--Qwen--Qwen3-32B/` 目录。可通过 `huggingface-cli` 下载：
+模型需预先下载到 `~/.cache/huggingface/` 目录。可通过 `huggingface-cli` 下载：
 
 ```bash
 pip install huggingface_hub
-huggingface-cli download Qwen/Qwen3-32B
+huggingface-cli download google/gemma-4-26B-A4B-it
 ```
+
+> Gemma 模型需要先在 HuggingFace 上同意许可协议，并通过 `huggingface-cli login` 登录。
 
 ### 8.3 配置
 
@@ -150,28 +152,32 @@ huggingface-cli download Qwen/Qwen3-32B
 
 ```yaml
 local_models:
-  - name: "Qwen3-32B"
-    api_base: "http://tacox:18080/v1"
+  - name: "Gemma-4-26B-A4B"
+    api_base: "http://sglang:18080/v1"
+    model_id: "Gemma-4-26B-A4B"
 ```
 
 ### 8.4 使用
 
-`docker-compose up -d` 后，`tacox` 容器会自动启动推理服务（首次加载模型约需 2 分钟）。
+`docker-compose up -d` 后，`sglang` 容器会自动启动推理服务（首次加载模型约需 2-3 分钟）。
 
-在页面的模型选择器中，可以看到带"本地"标签的 Qwen3-32B 选项。选择后所有文本生成类 LLM 调用（人才查询、信息录入、语义搜索）会路由到本地模型。PDF/图片解析等多模态功能仍使用 Gemini。
+在页面的模型选择器中，可以看到带"本地"标签的 Gemma-4-26B-A4B 选项。选择后所有文本生成类 LLM 调用（人才查询、信息录入、语义搜索）会路由到本地模型。PDF/图片解析等多模态功能仍使用 Gemini。
 
 ### 8.5 检查服务状态
 
 ```bash
-# 查看 tacox 容器状态
-docker ps | grep tacox
+# 查看 sglang 容器状态
+docker ps | grep sglang
+
+# 检查健康状态
+curl -f http://localhost:18080/health
 
 # 测试 API 是否就绪
-docker exec teamgr-tacox python3 -c "
+docker exec teamgr-sglang python3 -c "
 import urllib.request, json
 req = urllib.request.Request(
     'http://localhost:18080/v1/chat/completions',
-    data=json.dumps({'messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(),
+    data=json.dumps({'model':'Gemma-4-26B-A4B','messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(),
     headers={'Content-Type':'application/json'}
 )
 print(urllib.request.urlopen(req).read().decode())

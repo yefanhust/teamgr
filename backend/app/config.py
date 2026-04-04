@@ -373,6 +373,7 @@ LLM_CALL_TYPES = {
     "project-update-parse": "项目进展解析",
     "project-update-pdf": "项目进展PDF总结",
     "project-analysis": "项目效率分析",
+    "project-daily-report": "项目日报生成",
     "diary-auto-tag": "手记自动打标",
     "diary-comment": "手记每日评论",
     "interview-evaluation": "面试评价生成",

@@ -134,12 +134,12 @@ def _get_model_for_override(model_name: str):
 
 _LOCAL_CALL_TIMEOUT = 300.0
 
-# Regex to strip <think>...</think> blocks from model output
+# Regex to strip <think>...</think> blocks from model output (e.g. Qwen thinking mode)
 _THINK_TAG_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.DOTALL)
 
 
 def _strip_think_tags(text: str) -> str:
-    """Remove <think>...</think> blocks (Qwen3 thinking mode output).
+    """Remove <think>...</think> blocks from model output.
     Also handles unclosed <think> tags (truncated responses).
     """
     text = _THINK_TAG_RE.sub("", text)

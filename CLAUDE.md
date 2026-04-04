@@ -7,7 +7,7 @@
 - **后端**: Python 3.11 / FastAPI / SQLite（`backend/app/`）
 - **前端**: Vue 3 / Vite / Pinia（`frontend/src/`）
 - **部署**: Docker + docker-compose，Nginx HTTPS 反向代理（端口 6443）
-- **LLM**: Gemini API（云端）/ TACO-X + Qwen3-32B（本地可选）
+- **LLM**: Gemini API（云端）/ SGLang + Gemma-4-26B-A4B（本地可选）
 - **自动化**: AutoVibe（Vibe Coding）+ Scholar（龙图阁），均通过 Claude Code CLI 驱动
 
 ## 关键目录

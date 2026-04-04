@@ -1317,3 +1317,373 @@ def run_daily_project_analysis_sync():
             loop.run_until_complete(run_daily_project_analysis())
     except RuntimeError:
         asyncio.run(run_daily_project_analysis())
+
+
+# ============================================================
+# Per-project daily report (SSE streaming)
+# ============================================================
+
+# Background state keyed by project_id
+_daily_report_bg: dict[int, dict] = {}
+
+
+def _get_daily_report_state(project_id: int) -> dict:
+    if project_id not in _daily_report_bg:
+        _daily_report_bg[project_id] = {
+            "status": "idle",
+            "subscribers": [],
+            "full_text": "",
+            "thinking_text": "",
+            "task": None,
+            "error": None,
+        }
+    return _daily_report_bg[project_id]
+
+
+def _broadcast_daily_report(project_id: int, event: dict):
+    state = _get_daily_report_state(project_id)
+    dead = []
+    for q in state["subscribers"]:
+        try:
+            q.put_nowait(event)
+        except Exception:
+            dead.append(q)
+    for q in dead:
+        try:
+            state["subscribers"].remove(q)
+        except ValueError:
+            pass
+
+
+def _build_daily_report_prompt(project: Project, db: Session) -> str | None:
+    """Build a prompt for a single project's daily report using today's updates (Asia/Shanghai)."""
+    from zoneinfo import ZoneInfo
+
+    tz_shanghai = ZoneInfo("Asia/Shanghai")
+    now_shanghai = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai)
+    today_start = now_shanghai.replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_utc = today_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+
+    # Filter today's updates
+    today_updates = [
+        u for u in project.updates
+        if u.created_at and u.created_at >= today_start_utc
+    ]
+    if not today_updates:
+        return None
+
+    today_updates.sort(key=lambda x: x.created_at or datetime.min)
+
+    # Project basic info
+    days_active = (datetime.utcnow() - project.started_at).days if project.started_at else 0
+
+    members_info = []
+    for m in project.members:
+        name = m.talent.name if m.talent else "未知"
+        role = m.role or "未指定"
+        members_info.append(f"- {name}（{role}）")
+
+    updates_info = []
+    for u in today_updates:
+        talent_name = u.talent.name if u.talent else "未知"
+        time_str = u.created_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai).strftime("%H:%M") if u.created_at else ""
+        parsed = u.parsed_data or {}
+        progress = parsed.get("progress", u.raw_input)
+        blockers = parsed.get("blockers", "")
+        next_steps = parsed.get("next_steps", "")
+        completion_pct = parsed.get("completion_pct")
+        line = f"- [{time_str}] {talent_name}: {progress}"
+        if blockers:
+            line += f"\n  阻碍：{blockers}"
+        if next_steps:
+            line += f"\n  下一步：{next_steps}"
+        if completion_pct is not None:
+            line += f" (完成度: {completion_pct}%)"
+        updates_info.append(line)
+
+    date_str = now_shanghai.strftime("%Y-%m-%d")
+
+    prompt = f"""你是一位资深项目管理专家。请根据以下项目信息和今日团队更新记录，生成一份面向上级领导的项目日报。
+
+**重要**：不要按人员逐一列举工作内容，而是将所有人的工作综合起来，从项目整体视角呈现。
+
+项目名称：{project.name}
+项目描述：{project.description or '无'}
+状态：{project.status}
+已进行：{days_active} 天
+参与人数：{len(project.members)} 人
+
+团队成员：
+{chr(10).join(members_info) if members_info else '暂无成员'}
+
+今日更新记录（{date_str}）：
+{chr(10).join(updates_info)}
+
+请严格按照以下格式输出：
+
+## {project.name} — 项目日报（{date_str}）
+
+### 今日整体进展
+- 综合描述项目今日推进了哪些方面，取得了什么成果
+
+### 风险与卡点
+- 当前存在的技术风险、依赖风险、人员风险等
+- 如有阻塞项，说明阻塞原因和影响范围
+- 如无风险则注明"当前无明显风险"
+
+### 上线预期
+- 当前进度是否符合预期
+- 预计上线时间节点（如有信息支撑）
+- 可能影响上线的因素
+
+### 需要的支持
+- 需要领导/其他团队协调的事项
+- 资源或决策上的需求
+- 如无则注明"暂无"
+
+### 应对方案
+- 针对上述风险和卡点的应对策略或计划
+- 如无则注明"暂无"
+
+语言风格：简洁专业，适合管理层快速阅读。每个小节 2-5 个 bullet points 即可。"""
+
+    return prompt
+
+
+async def _run_daily_report_bg(project_id: int, prompt: str):
+    """Background coroutine: runs LLM for daily report, broadcasts SSE events."""
+    import asyncio
+    import time
+    import threading
+    from app.services.llm_service import _record_llm_usage, _get_local_model_config, get_current_model_name
+    from app.config import get_gemini_config, get_model_defaults
+
+    state = _get_daily_report_state(project_id)
+    my_task = asyncio.current_task()
+    full_text = ""
+    usage = None
+    t0 = time.monotonic()
+
+    model_name = get_model_defaults().get("project-daily-report") or get_current_model_name()
+    local_cfg = _get_local_model_config(model_name)
+
+    try:
+        if local_cfg:
+            import httpx
+            api_base = local_cfg["api_base"].rstrip("/")
+            api_key = local_cfg.get("api_key", "")
+            headers = {"Content-Type": "application/json"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            payload = {
+                "messages": [
+                    {"role": "system", "content": "请直接回答，不要输出思考过程。"},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.7,
+                "max_tokens": 4096,
+                "stream": True,
+            }
+            if local_cfg.get("model_id"):
+                payload["model"] = local_cfg["model_id"]
+
+            async with httpx.AsyncClient(timeout=300.0) as client:
+                async with client.stream("POST", f"{api_base}/chat/completions", json=payload, headers=headers) as resp:
+                    resp.raise_for_status()
+                    isl, osl = 0, 0
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str.strip() == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                            delta = chunk.get("choices", [{}])[0].get("delta", {})
+                            text = delta.get("content", "")
+                            if text:
+                                full_text += text
+                                state["full_text"] = full_text
+                                _broadcast_daily_report(project_id, {"type": "chunk", "content": text})
+                            u = chunk.get("usage")
+                            if u:
+                                isl = u.get("prompt_tokens", isl)
+                                osl = u.get("completion_tokens", osl)
+                        except (json.JSONDecodeError, IndexError, KeyError):
+                            pass
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            _record_llm_usage(model_name, "project-daily-report", duration_ms, isl, osl)
+        else:
+            from google import genai
+            from google.genai import types as genai_types
+
+            cfg = get_gemini_config()
+            api_key = cfg.get("api_key", "")
+            if not api_key or api_key == "your-gemini-api-key-here":
+                _broadcast_daily_report(project_id, {"type": "error", "content": "LLM模型不可用"})
+                state["status"] = "error"
+                state["error"] = "LLM模型不可用"
+                return
+
+            client = genai.Client(api_key=api_key)
+            queue = asyncio.Queue()
+            loop = asyncio.get_event_loop()
+            stream_error = [None]
+
+            def produce():
+                try:
+                    response = client.models.generate_content_stream(
+                        model=model_name,
+                        contents=prompt,
+                        config=genai_types.GenerateContentConfig(
+                            thinking_config=genai_types.ThinkingConfig(
+                                include_thoughts=True,
+                            ),
+                        ),
+                    )
+                    last_usage = None
+                    for chunk in response:
+                        parts = []
+                        try:
+                            for part in chunk.candidates[0].content.parts:
+                                is_thought = getattr(part, 'thought', False)
+                                text = getattr(part, 'text', '') or ''
+                                if text:
+                                    parts.append(('thought' if is_thought else 'text', text))
+                        except (IndexError, AttributeError):
+                            pass
+                        if parts:
+                            loop.call_soon_threadsafe(queue.put_nowait, ('_parts', parts))
+                        last_usage = getattr(chunk, 'usage_metadata', None) or last_usage
+                    loop.call_soon_threadsafe(queue.put_nowait, ('_meta', last_usage))
+                except Exception as e:
+                    stream_error[0] = e
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+
+            threading.Thread(target=produce, daemon=True).start()
+
+            in_thinking = False
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    elapsed = int(time.monotonic() - t0)
+                    _broadcast_daily_report(project_id, {"type": "thinking", "elapsed": elapsed})
+                    continue
+                if item is None:
+                    break
+                if isinstance(item, tuple) and item[0] == '_meta':
+                    usage = item[1]
+                    continue
+                if isinstance(item, tuple) and item[0] == '_parts':
+                    for kind, text in item[1]:
+                        if kind == 'thought':
+                            if not in_thinking:
+                                in_thinking = True
+                            state["thinking_text"] += text
+                            _broadcast_daily_report(project_id, {"type": "thinking_chunk", "content": text})
+                        else:
+                            if in_thinking:
+                                in_thinking = False
+                                elapsed = int(time.monotonic() - t0)
+                                _broadcast_daily_report(project_id, {"type": "thinking_done", "elapsed": elapsed})
+                            full_text += text
+                            state["full_text"] = full_text
+                            _broadcast_daily_report(project_id, {"type": "chunk", "content": text})
+
+            if stream_error[0]:
+                raise stream_error[0]
+
+            duration_ms = int((time.monotonic() - t0) * 1000)
+            isl = getattr(usage, 'prompt_token_count', 0) or getattr(usage, 'input_tokens', 0) if usage else 0
+            osl = getattr(usage, 'candidates_token_count', 0) or getattr(usage, 'output_tokens', 0) if usage else 0
+            _record_llm_usage(model_name, "project-daily-report", duration_ms, isl, osl)
+
+        state["status"] = "done"
+        logger.info(f"Daily report for project {project_id} completed, text length={len(full_text)}")
+        _broadcast_daily_report(project_id, {"type": "done", "content": full_text.strip()})
+
+    except Exception as e:
+        logger.error(f"Daily report for project {project_id} failed: {e}")
+        state["status"] = "error"
+        state["error"] = str(e)
+        _broadcast_daily_report(project_id, {"type": "error", "content": str(e)})
+
+    finally:
+        await asyncio.sleep(5)
+        if state["task"] is my_task:
+            state["status"] = "idle"
+            state["subscribers"].clear()
+            state["full_text"] = ""
+            state["thinking_text"] = ""
+            state["error"] = None
+            state["task"] = None
+
+
+@router.post("/{project_id}/daily-report")
+async def trigger_daily_report_stream(
+    project_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    """Generate a daily report for a single project via SSE streaming."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    state = _get_daily_report_state(project_id)
+
+    if state["status"] != "running":
+        prompt = _build_daily_report_prompt(project, db)
+        if not prompt:
+            async def no_updates_stream():
+                yield f"data: {json.dumps({'type': 'error', 'content': '今日暂无更新记录'}, ensure_ascii=False)}\n\n"
+            return StreamingResponse(no_updates_stream(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        state["status"] = "running"
+        state["subscribers"] = []
+        state["full_text"] = ""
+        state["thinking_text"] = ""
+        state["error"] = None
+        state["task"] = asyncio.create_task(_run_daily_report_bg(project_id, prompt))
+
+    sub_queue = asyncio.Queue()
+    state["subscribers"].append(sub_queue)
+
+    async def event_stream():
+        try:
+            if state["thinking_text"]:
+                yield f"data: {json.dumps({'type': 'thinking_chunk', 'content': state['thinking_text']}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'thinking_done', 'elapsed': 0}, ensure_ascii=False)}\n\n"
+            if state["full_text"]:
+                yield f"data: {json.dumps({'type': 'chunk', 'content': state['full_text']}, ensure_ascii=False)}\n\n"
+
+            if state["status"] == "done":
+                yield f"data: {json.dumps({'type': 'done', 'content': state['full_text']}, ensure_ascii=False)}\n\n"
+                return
+            elif state["status"] == "error":
+                yield f"data: {json.dumps({'type': 'error', 'content': state.get('error', 'Unknown error')}, ensure_ascii=False)}\n\n"
+                return
+
+            while True:
+                try:
+                    event = await asyncio.wait_for(sub_queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    yield f"data: {json.dumps({'type': 'thinking', 'elapsed': 0}, ensure_ascii=False)}\n\n"
+                    continue
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                if event.get("type") in ("done", "error"):
+                    break
+        finally:
+            try:
+                state["subscribers"].remove(sub_queue)
+            except ValueError:
+                pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
