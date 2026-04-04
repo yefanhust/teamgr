@@ -337,6 +337,20 @@ async def update_project_update(
     return _update_to_dict(update)
 
 
+@router.delete("/updates/{update_id}")
+async def delete_project_update(
+    update_id: int,
+    db: Session = Depends(get_db),
+    _=Depends(require_auth),
+):
+    update = db.query(ProjectUpdate).filter(ProjectUpdate.id == update_id).first()
+    if not update:
+        raise HTTPException(status_code=404, detail="更新记录不存在")
+    db.delete(update)
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("/{project_id}")
 async def get_project(
     project_id: int,
@@ -1355,44 +1369,37 @@ def _broadcast_daily_report(project_id: int, event: dict):
             pass
 
 
-def _build_daily_report_prompt(project: Project, db: Session) -> str | None:
-    """Build a prompt for a single project's daily report using today's updates (Asia/Shanghai)."""
+def _build_daily_report_prompt(project: Project, update_ids: list[int], db: Session) -> str | None:
+    """Build a prompt for a single project's daily report using selected updates."""
     from zoneinfo import ZoneInfo
 
     tz_shanghai = ZoneInfo("Asia/Shanghai")
     now_shanghai = datetime.utcnow().replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai)
-    today_start = now_shanghai.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_start_utc = today_start.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
 
-    # Filter today's updates
-    today_updates = [
-        u for u in project.updates
-        if u.created_at and u.created_at >= today_start_utc
-    ]
-    if not today_updates:
+    # Fetch selected updates by ID
+    selected_updates = (
+        db.query(ProjectUpdate)
+        .filter(ProjectUpdate.id.in_(update_ids), ProjectUpdate.project_id == project.id)
+        .all()
+    )
+    if not selected_updates:
         return None
 
-    today_updates.sort(key=lambda x: x.created_at or datetime.min)
+    selected_updates.sort(key=lambda x: x.created_at or datetime.min)
 
     # Project basic info
     days_active = (datetime.utcnow() - project.started_at).days if project.started_at else 0
 
-    members_info = []
-    for m in project.members:
-        name = m.talent.name if m.talent else "未知"
-        role = m.role or "未指定"
-        members_info.append(f"- {name}（{role}）")
-
     updates_info = []
-    for u in today_updates:
+    for u in selected_updates:
         talent_name = u.talent.name if u.talent else "未知"
-        time_str = u.created_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai).strftime("%H:%M") if u.created_at else ""
+        date_str = u.created_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai).strftime("%m-%d %H:%M") if u.created_at else ""
         parsed = u.parsed_data or {}
         progress = parsed.get("progress", u.raw_input)
         blockers = parsed.get("blockers", "")
         next_steps = parsed.get("next_steps", "")
         completion_pct = parsed.get("completion_pct")
-        line = f"- [{time_str}] {talent_name}: {progress}"
+        line = f"- [{date_str}] {talent_name}: {progress}"
         if blockers:
             line += f"\n  阻碍：{blockers}"
         if next_steps:
@@ -1401,51 +1408,37 @@ def _build_daily_report_prompt(project: Project, db: Session) -> str | None:
             line += f" (完成度: {completion_pct}%)"
         updates_info.append(line)
 
-    date_str = now_shanghai.strftime("%Y-%m-%d")
+    report_date = now_shanghai.strftime("%Y-%m-%d")
 
-    prompt = f"""你是一位资深项目管理专家。请根据以下项目信息和今日团队更新记录，生成一份面向上级领导的项目日报。
+    prompt = f"""你是项目管理专家。根据以下项目更新记录，生成一份**精炼的**项目日报，供上级领导快速了解项目状态。
 
-**重要**：不要按人员逐一列举工作内容，而是将所有人的工作综合起来，从项目整体视角呈现。
+核心原则：
+- 综合所有人的工作，从项目整体视角呈现，不按人员拆分
+- 每个要点一句话讲清楚，不要展开描述
+- 只写有实质内容的部分，没有的就写"无"
 
-项目名称：{project.name}
-项目描述：{project.description or '无'}
-状态：{project.status}
-已进行：{days_active} 天
-参与人数：{len(project.members)} 人
+项目：{project.name}
+描述：{project.description or '无'}
+状态：{project.status} | 已进行 {days_active} 天 | {len(project.members)} 人参与
 
-团队成员：
-{chr(10).join(members_info) if members_info else '暂无成员'}
-
-今日更新记录（{date_str}）：
+更新记录（共 {len(selected_updates)} 条）：
 {chr(10).join(updates_info)}
 
-请严格按照以下格式输出：
+严格按以下格式输出（每节 1-3 个要点，用 bullet，总篇幅控制在 200 字以内）：
 
-## {project.name} — 项目日报（{date_str}）
+## {project.name} — 项目简报（{report_date}）
 
-### 今日整体进展
-- 综合描述项目今日推进了哪些方面，取得了什么成果
+### 进展
+- （今日/近期推进了什么，关键成果）
 
 ### 风险与卡点
-- 当前存在的技术风险、依赖风险、人员风险等
-- 如有阻塞项，说明阻塞原因和影响范围
-- 如无风险则注明"当前无明显风险"
+- （阻塞项、技术/依赖/资源风险，无则写"无"）
 
 ### 上线预期
-- 当前进度是否符合预期
-- 预计上线时间节点（如有信息支撑）
-- 可能影响上线的因素
+- （进度是否符合预期，影响上线的因素，无明确信息则写"待评估"）
 
-### 需要的支持
-- 需要领导/其他团队协调的事项
-- 资源或决策上的需求
-- 如无则注明"暂无"
-
-### 应对方案
-- 针对上述风险和卡点的应对策略或计划
-- 如无则注明"暂无"
-
-语言风格：简洁专业，适合管理层快速阅读。每个小节 2-5 个 bullet points 即可。"""
+### 需要支持
+- （需协调的事项、资源需求，无则写"无"）"""
 
     return prompt
 
@@ -1600,9 +1593,35 @@ async def _run_daily_report_bg(project_id: int, prompt: str):
             osl = getattr(usage, 'candidates_token_count', 0) or getattr(usage, 'output_tokens', 0) if usage else 0
             _record_llm_usage(model_name, "project-daily-report", duration_ms, isl, osl)
 
+        # Save daily report as a ProjectUpdate record
+        saved_id = None
+        if full_text.strip():
+            from app.database import SessionLocal
+            save_db = SessionLocal()
+            try:
+                upd = ProjectUpdate(
+                    project_id=project_id,
+                    talent_id=None,
+                    raw_input=full_text.strip(),
+                    parsed_data={"type": "daily_report"},
+                )
+                save_db.add(upd)
+                save_db.commit()
+                saved_id = upd.id
+                # Update project last_update_at
+                proj = save_db.query(Project).filter(Project.id == project_id).first()
+                if proj:
+                    proj.last_update_at = datetime.utcnow()
+                    save_db.commit()
+                logger.info(f"Daily report saved as update id={saved_id}")
+            except Exception as save_err:
+                logger.warning(f"Failed to save daily report: {save_err}")
+            finally:
+                save_db.close()
+
         state["status"] = "done"
         logger.info(f"Daily report for project {project_id} completed, text length={len(full_text)}")
-        _broadcast_daily_report(project_id, {"type": "done", "content": full_text.strip()})
+        _broadcast_daily_report(project_id, {"type": "done", "content": full_text.strip(), "saved_id": saved_id})
 
     except Exception as e:
         logger.error(f"Daily report for project {project_id} failed: {e}")
@@ -1621,9 +1640,14 @@ async def _run_daily_report_bg(project_id: int, prompt: str):
             state["task"] = None
 
 
+class DailyReportRequest(BaseModel):
+    update_ids: list[int]
+
+
 @router.post("/{project_id}/daily-report")
 async def trigger_daily_report_stream(
     project_id: int,
+    body: DailyReportRequest,
     db: Session = Depends(get_db),
     _=Depends(require_auth),
 ):
@@ -1632,13 +1656,19 @@ async def trigger_daily_report_stream(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    if not body.update_ids:
+        async def no_selection_stream():
+            yield f"data: {json.dumps({'type': 'error', 'content': '请先选择更新记录'}, ensure_ascii=False)}\n\n"
+        return StreamingResponse(no_selection_stream(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     state = _get_daily_report_state(project_id)
 
     if state["status"] != "running":
-        prompt = _build_daily_report_prompt(project, db)
+        prompt = _build_daily_report_prompt(project, body.update_ids, db)
         if not prompt:
             async def no_updates_stream():
-                yield f"data: {json.dumps({'type': 'error', 'content': '今日暂无更新记录'}, ensure_ascii=False)}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'content': '所选记录不存在'}, ensure_ascii=False)}\n\n"
             return StreamingResponse(no_updates_stream(), media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

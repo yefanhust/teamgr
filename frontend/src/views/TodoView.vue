@@ -2030,18 +2030,24 @@
           <div class="flex items-center justify-between mb-2">
             <h4 class="text-sm font-semibold text-gray-600">更新记录</h4>
             <van-button
+              v-if="!dailyReportSelectMode"
               size="small"
-              type="primary"
               plain
-              :loading="dailyReportStatus === 'running'"
-              @click="triggerDailyReport(pmInfoData.id)"
-            >生成日报</van-button>
+              type="primary"
+              icon="list-switch"
+              @click="enterDailyReportSelectMode"
+            >批量选择</van-button>
+            <van-button
+              v-if="dailyReportSelectMode"
+              size="small"
+              plain
+              @click="exitDailyReportSelectMode"
+            >取消选择</van-button>
           </div>
 
-          <!-- Daily Report: streaming / result -->
-          <div v-if="dailyReportStatus || dailyReportContent" class="mb-4">
-            <!-- Streaming status -->
-            <div v-if="dailyReportStatus" class="bg-gray-50 rounded-lg p-3 text-sm mb-2">
+          <!-- Daily Report: streaming in-progress -->
+          <div v-if="dailyReportStatus" class="mb-4">
+            <div class="bg-gray-50 rounded-lg p-3 text-sm">
               <div class="flex items-center gap-2 mb-1">
                 <van-loading v-if="dailyReportStatus === 'running'" size="14" />
                 <van-icon v-else-if="dailyReportStatus === 'error'" name="warning-o" color="#EF4444" size="14" />
@@ -2050,42 +2056,86 @@
               <pre v-if="dailyReportThinking" class="text-xs text-gray-400 whitespace-pre-wrap max-h-32 overflow-y-auto font-mono leading-relaxed mb-2">{{ dailyReportThinking }}</pre>
               <div v-if="dailyReportStream" class="analysis-content text-sm text-gray-700 leading-relaxed max-h-96 overflow-y-auto" v-html="renderMarkdown(dailyReportStream)"></div>
             </div>
-            <!-- Final rendered result -->
-            <div v-if="dailyReportContent && !dailyReportStatus" class="bg-green-50 border border-green-200 rounded-lg p-3">
-              <div class="flex items-center justify-between mb-2">
-                <span class="text-xs font-semibold text-green-700">日报</span>
-                <van-icon name="cross" size="14" class="text-gray-400 cursor-pointer" @click="dailyReportContent = ''" />
-              </div>
-              <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(dailyReportContent)"></div>
-            </div>
           </div>
 
-          <div class="space-y-3">
-            <div v-for="upd in pmInfoData.recent_updates" :key="upd.id" class="border-l-2 border-blue-300 pl-4 py-2">
-              <div class="flex items-center gap-2 mb-1">
-                <span class="text-xs text-gray-400">{{ formatDateTime(upd.created_at) }}</span>
-                <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
-              </div>
-              <div v-if="pmEditingUpdateId === upd.id">
-                <textarea
-                  v-model="pmEditUpdateText"
-                  ref="pmUpdateInput"
-                  class="w-full text-base border border-blue-300 rounded-lg p-3 outline-none resize-y min-h-[48px]"
-                  @blur="saveUpdateRecord(upd)"
-                  @keydown.escape="pmEditingUpdateId = null"
-                  @input="autoResizeTextarea($event.target)"
-                ></textarea>
-              </div>
-              <div
-                v-else
-                class="text-base text-gray-600 leading-snug cursor-pointer hover:bg-gray-50 rounded p-1 -m-1 update-record-content"
-                @dblclick="startEditUpdate(upd)"
-                v-html="renderMarkdown(upd.raw_input)"
-              ></div>
-              <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
-                <van-icon name="description" size="12" />{{ upd.file_name }}
-              </a>
-              <p v-if="upd.parsed_data?.completion_pct != null" class="text-xs text-blue-500 mt-1">完成度: {{ upd.parsed_data.completion_pct }}%</p>
+          <div class="space-y-3" :class="dailyReportSelectMode ? 'select-none' : ''">
+            <div
+              v-for="upd in pmInfoData.recent_updates"
+              :key="upd.id"
+              :data-upd-id="upd.id"
+              class="pl-3 py-2 rounded-lg transition-all duration-150"
+              :class="[
+                upd.parsed_data?.type === 'daily_report'
+                  ? 'border-l-4 border-amber-400 bg-amber-50/60'
+                  : dailyReportSelectedIds.has(upd.id)
+                    ? 'border-l-4 border-blue-500 bg-blue-50/50'
+                    : 'border-l-2 border-gray-200',
+                dailyReportSelectMode && upd.parsed_data?.type !== 'daily_report' ? 'cursor-pointer' : '',
+              ]"
+              @pointerdown="onUpdPointerDown($event, upd.id)"
+              @pointerenter="onUpdPointerEnter(upd.id)"
+            >
+              <!-- Daily report record -->
+              <template v-if="upd.parsed_data?.type === 'daily_report'">
+                <div class="flex items-center justify-between mb-1">
+                  <div class="flex items-center gap-2">
+                    <van-tag size="small" type="warning" plain>AI 日报</van-tag>
+                    <span class="text-xs text-gray-400">{{ formatDateTime(upd.created_at) }}</span>
+                  </div>
+                  <van-icon name="delete-o" size="16" color="#ee0a24" class="cursor-pointer" @click="deleteDailyReport(upd.id)" />
+                </div>
+                <div class="analysis-content text-sm text-gray-700 leading-relaxed" v-html="renderMarkdown(upd.raw_input)"></div>
+              </template>
+
+              <!-- Normal update record -->
+              <template v-else>
+                <div class="flex items-center gap-2 mb-1">
+                  <van-checkbox
+                    v-if="dailyReportSelectMode"
+                    :model-value="dailyReportSelectedIds.has(upd.id)"
+                    @update:model-value="toggleUpdateSelection(upd.id)"
+                    shape="square"
+                    icon-size="16px"
+                    @click.stop
+                  />
+                  <span class="text-xs text-gray-400">{{ formatDateTime(upd.created_at) }}</span>
+                  <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
+                </div>
+                <div v-if="pmEditingUpdateId === upd.id">
+                  <textarea
+                    v-model="pmEditUpdateText"
+                    ref="pmUpdateInput"
+                    class="w-full text-base border border-blue-300 rounded-lg p-3 outline-none resize-y min-h-[48px]"
+                    @blur="saveUpdateRecord(upd)"
+                    @keydown.escape="pmEditingUpdateId = null"
+                    @input="autoResizeTextarea($event.target)"
+                  ></textarea>
+                </div>
+                <div
+                  v-else
+                  class="text-base text-gray-600 leading-snug cursor-pointer hover:bg-gray-50 rounded p-1 -m-1 update-record-content"
+                  @dblclick="startEditUpdate(upd)"
+                  v-html="renderMarkdown(upd.raw_input)"
+                ></div>
+                <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
+                  <van-icon name="description" size="12" />{{ upd.file_name }}
+                </a>
+                <p v-if="upd.parsed_data?.completion_pct != null" class="text-xs text-blue-500 mt-1">完成度: {{ upd.parsed_data.completion_pct }}%</p>
+              </template>
+            </div>
+          </div>
+        </div>
+
+        <!-- Floating Selection Toolbar for Daily Report -->
+        <div
+          v-if="dailyReportSelectMode && dailyReportSelectedIds.size > 0"
+          class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-30 px-4 py-3"
+        >
+          <div class="max-w-3xl mx-auto flex items-center justify-between">
+            <span class="text-sm text-gray-600">已选 <strong class="text-blue-600">{{ dailyReportSelectedIds.size }}</strong> 条</span>
+            <div class="flex gap-2">
+              <van-button size="small" plain @click="exitDailyReportSelectMode">取消</van-button>
+              <van-button size="small" type="primary" :loading="dailyReportStatus === 'running'" @click="triggerDailyReport(pmInfoData.id)">生成日报</van-button>
             </div>
           </div>
         </div>
@@ -2439,11 +2489,12 @@ const projectAnalysisThinkingPre = ref(null)
 const projectAnalysisStreamEl = ref(null)
 
 // Daily Report (per-project)
+const dailyReportSelectMode = ref(false)
+const dailyReportSelectedIds = ref(new Set())
 const dailyReportStream = ref('')
 const dailyReportThinking = ref('')
 const dailyReportStatus = ref('')   // '' | 'running' | 'error'
 const dailyReportStatusText = ref('')
-const dailyReportContent = ref('')  // final rendered content after done
 
 let durationChartInstance = null
 
@@ -3756,10 +3807,83 @@ async function triggerProjectAnalysis() {
 }
 
 // --- Daily Report (per-project) ---
+let updDragStartIdx = -1
+let updDragPreSelected = new Set()
+
+function enterDailyReportSelectMode() {
+  dailyReportSelectMode.value = true
+  dailyReportSelectedIds.value = new Set()
+}
+
+function exitDailyReportSelectMode() {
+  dailyReportSelectMode.value = false
+  dailyReportSelectedIds.value = new Set()
+  updDragStartIdx = -1
+}
+
+function toggleUpdateSelection(id) {
+  const s = new Set(dailyReportSelectedIds.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  dailyReportSelectedIds.value = s
+}
+
+function getUpdIndexById(id) {
+  return pmInfoData.value?.recent_updates?.findIndex(u => u.id === id) ?? -1
+}
+
+function selectUpdRange(fromIdx, toIdx) {
+  const lo = Math.min(fromIdx, toIdx)
+  const hi = Math.max(fromIdx, toIdx)
+  const s = new Set(updDragPreSelected)
+  const updates = pmInfoData.value?.recent_updates || []
+  for (let i = lo; i <= hi; i++) {
+    if (updates[i].parsed_data?.type === 'daily_report') continue
+    s.add(updates[i].id)
+  }
+  dailyReportSelectedIds.value = s
+}
+
+function onUpdPointerDown(event, id) {
+  if (!dailyReportSelectMode.value) return
+  // Skip daily report records
+  const upd = pmInfoData.value?.recent_updates?.find(u => u.id === id)
+  if (upd?.parsed_data?.type === 'daily_report') return
+  if (event.target.closest('.van-checkbox')) return
+  event.preventDefault()
+  updDragStartIdx = getUpdIndexById(id)
+  updDragPreSelected = new Set(dailyReportSelectedIds.value)
+  if (updDragPreSelected.has(id)) updDragPreSelected.delete(id)
+  selectUpdRange(updDragStartIdx, updDragStartIdx)
+
+  const onMove = (e) => {
+    const el = document.elementFromPoint(e.clientX, e.clientY)
+    if (!el) return
+    const updEl = el.closest('[data-upd-id]')
+    if (!updEl) return
+    const hoveredIdx = getUpdIndexById(Number(updEl.dataset.updId))
+    if (hoveredIdx >= 0) selectUpdRange(updDragStartIdx, hoveredIdx)
+  }
+  const onUp = () => {
+    updDragStartIdx = -1
+    document.removeEventListener('pointermove', onMove)
+    document.removeEventListener('pointerup', onUp)
+  }
+  document.addEventListener('pointermove', onMove)
+  document.addEventListener('pointerup', onUp)
+}
+
+function onUpdPointerEnter(_id) {
+  // drag handled via document pointermove
+}
+
 async function triggerDailyReport(projectId) {
+  if (dailyReportSelectedIds.value.size === 0) return
+  // Capture the selected IDs before clearing
+  const selectedIds = [...dailyReportSelectedIds.value]
+  exitDailyReportSelectMode()
   dailyReportStream.value = ''
   dailyReportThinking.value = ''
-  dailyReportContent.value = ''
   dailyReportStatus.value = 'running'
   dailyReportStatusText.value = '正在生成日报...'
 
@@ -3768,7 +3892,8 @@ async function triggerDailyReport(projectId) {
     const token = localStorage.getItem('teamgr_token')
     const res = await fetch(`/api/projects/${projectId}/daily-report`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ update_ids: selectedIds }),
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
 
@@ -3798,14 +3923,14 @@ async function triggerDailyReport(projectId) {
             dailyReportStream.value += data.content
           } else if (data.type === 'done') {
             receivedDone = true
-            dailyReportContent.value = dailyReportStream.value || data.content
             dailyReportStatus.value = ''
             dailyReportStatusText.value = ''
             dailyReportStream.value = ''
             dailyReportThinking.value = ''
+            // Refresh project info to show the saved daily report
+            pmInfoData.value = await pmStore.getProjectInfo(projectId)
           } else if (data.type === 'error') {
             receivedDone = true
-            dailyReportContent.value = ''
             dailyReportStatus.value = 'error'
             dailyReportStatusText.value = data.content
             setTimeout(() => { dailyReportStatus.value = ''; dailyReportStatusText.value = '' }, 5000)
@@ -3821,15 +3946,23 @@ async function triggerDailyReport(projectId) {
     }
   } finally {
     if (!receivedDone && dailyReportStatus.value === 'running') {
-      // Stream ended without done — use whatever we got
-      if (dailyReportStream.value) {
-        dailyReportContent.value = dailyReportStream.value
-      }
       dailyReportStatus.value = ''
       dailyReportStatusText.value = ''
       dailyReportStream.value = ''
       dailyReportThinking.value = ''
     }
+  }
+}
+
+async function deleteDailyReport(updateId) {
+  try {
+    await api.delete(`/api/projects/updates/${updateId}`)
+    // Remove from local list
+    if (pmInfoData.value?.recent_updates) {
+      pmInfoData.value.recent_updates = pmInfoData.value.recent_updates.filter(u => u.id !== updateId)
+    }
+  } catch (e) {
+    showToast('删除失败')
   }
 }
 
@@ -4506,11 +4639,12 @@ async function openProjectInfo(id) {
   pmEditingDesc.value = false
   pmEditingSummary.value = false
   pmEditingUpdateId.value = null
+  dailyReportSelectMode.value = false
+  dailyReportSelectedIds.value = new Set()
   dailyReportStream.value = ''
   dailyReportThinking.value = ''
   dailyReportStatus.value = ''
   dailyReportStatusText.value = ''
-  dailyReportContent.value = ''
   try {
     pmInfoData.value = await pmStore.getProjectInfo(id)
   } catch (e) {

@@ -54,7 +54,7 @@ do_rebuild() {
 
 do_full() {
     echo "[ops] 完整重建所有容器..."
-    $DC down
+    $DC down --remove-orphans
     $DC up -d --build
     sleep 2
     $DC exec -T teamgr /workspace/scripts/start_web.sh
