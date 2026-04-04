@@ -156,9 +156,7 @@ has_code_changes() {
 
 rebuild_service() {
     log_head "Rebuilding service"
-    cd "$REPO_DIR"
-    local dc="docker-compose -f docker/docker-compose.yml"
-    if $dc rm -sf teamgr && $dc up -d --build teamgr && sleep 2 && $dc exec -T teamgr /workspace/scripts/start_web.sh; then
+    if bash "$REPO_DIR/ops.sh" rebuild; then
         log_ok "Service rebuilt successfully"
     else
         log_err "Service rebuild failed"
