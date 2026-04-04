@@ -169,20 +169,16 @@ local_models:
 # 查看 sglang 容器状态
 docker ps | grep sglang
 
-# 检查健康状态
-curl -f http://localhost:18080/health
+# 健康检查（sglang 端口未映射到宿主机，需通过容器 IP 访问）
+curl -f http://$(docker inspect teamgr-sglang -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'):18080/health
 
-# 测试 API 是否就绪
-docker exec teamgr-sglang python3 -c "
-import urllib.request, json
-req = urllib.request.Request(
-    'http://localhost:18080/v1/chat/completions',
-    data=json.dumps({'model':'Gemma-4-26B-A4B','messages':[{'role':'user','content':'hi'}],'max_tokens':1}).encode(),
-    headers={'Content-Type':'application/json'}
-)
-print(urllib.request.urlopen(req).read().decode())
-"
+# 测试推理
+curl http://$(docker inspect teamgr-sglang -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'):18080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"Gemma-4-26B-A4B","messages":[{"role":"user","content":"你好"}],"max_tokens":32}'
 ```
+
+> 也可以从 `teamgr-app` 容器内通过 Docker 服务名访问：`curl http://sglang:18080/health`
 
 ## 9. 反向代理部署（双机模式）
 
