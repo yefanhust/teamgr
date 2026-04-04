@@ -3,7 +3,7 @@ set -uo pipefail
 # NOTE: intentionally NOT using set -e — this is a long-running daemon,
 # individual handler errors should not kill the watcher
 
-REPO_DIR="/home/ubuntu/workspace/teamgr"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 QUEUE_DIR="$REPO_DIR/data/scholar-queue"
 STREAM_DIR="$REPO_DIR/data/scholar-stream"
 SESSIONS_DIR="$REPO_DIR/data/scholar-sessions"

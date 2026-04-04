@@ -8,8 +8,8 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DC="docker-compose -f $SCRIPT_DIR/docker/docker-compose.yml"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+DC="docker-compose -f $REPO_DIR/docker/docker-compose.yml"
 CONTAINER="teamgr-app"
 
 usage() {
@@ -27,16 +27,16 @@ EOF
 
 do_frontend() {
     echo "[ops] 构建前端..."
-    docker run --rm -v "$SCRIPT_DIR/frontend:/build" -w /build node:20-alpine \
+    docker run --rm -v "$REPO_DIR/frontend:/build" -w /build node:20-alpine \
         sh -c "npm install && npm run build"
     echo "[ops] 复制到容器..."
-    docker cp "$SCRIPT_DIR/frontend/dist/." "$CONTAINER:/app/frontend/dist/"
+    docker cp "$REPO_DIR/frontend/dist/." "$CONTAINER:/app/frontend/dist/"
     echo "[ops] 前端更新完成，刷新浏览器即可"
 }
 
 do_backend() {
     echo "[ops] 复制后端代码到容器..."
-    docker cp "$SCRIPT_DIR/backend/." "$CONTAINER:/app/"
+    docker cp "$REPO_DIR/backend/." "$CONTAINER:/app/"
     echo "[ops] 重启 uvicorn..."
     docker exec "$CONTAINER" pkill -f uvicorn || true
     $DC exec -T teamgr /workspace/scripts/start_web.sh

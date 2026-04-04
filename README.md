@@ -18,7 +18,7 @@
 
 ## 2. 部署与运维
 
-详见 [DEPLOY.md](DEPLOY.md)，包含：配置、构建启动、日常运维（`ops.sh`）、域名访问、本地 LLM 部署、反向代理双机部署、灾难恢复。
+详见 [DEPLOY.md](doc/DEPLOY.md)，包含：配置、构建启动、日常运维（`scripts/ops.sh`）、域名访问、本地 LLM 部署、反向代理双机部署、灾难恢复。
 
 ## 3. 配置说明
 
@@ -67,7 +67,9 @@
 
 ```
 teamgr/
-├── ops.sh               # 日常运维脚本（frontend/backend/rebuild/full）
+├── doc/                 # 项目文档
+│   ├── DEPLOY.md        # 部署与运维指南
+│   └── SECURITY.md      # 安全方案
 ├── config/              # 配置文件
 ├── docker/              # Docker相关
 │   ├── Dockerfile
@@ -75,6 +77,7 @@ teamgr/
 │   ├── nginx.conf
 │   └── nginx-entrypoint.sh
 ├── scripts/             # 脚本
+│   ├── ops.sh           # 日常运维脚本（frontend/backend/rebuild/full）
 │   ├── start_web.sh     # 启动 uvicorn（容器内）
 │   └── restart_web.sh   # 重启 uvicorn（容器内）
 ├── autovibe/            # AutoVibe + Scholar 自动化
@@ -298,4 +301,4 @@ notification:
 
 ### 9.5 灾难恢复
 
-详见 [DEPLOY.md § 10](DEPLOY.md#10-灾难恢复)。
+详见 [DEPLOY.md § 10](doc/DEPLOY.md#10-灾难恢复)。

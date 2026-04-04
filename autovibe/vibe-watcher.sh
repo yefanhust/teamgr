@@ -3,7 +3,7 @@ set -uo pipefail
 # NOTE: intentionally NOT using set -e — this is a long-running daemon,
 # individual handler errors should not kill the watcher
 
-REPO_DIR="/home/ubuntu/workspace/teamgr"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 QUEUE_DIR="$REPO_DIR/data/vibe-queue"
 SESSIONS_DIR="$REPO_DIR/data/vibe-sessions"
 API="https://localhost:6443/api/todos"
@@ -156,7 +156,7 @@ has_code_changes() {
 
 rebuild_service() {
     log_head "Rebuilding service"
-    if bash "$REPO_DIR/ops.sh" rebuild; then
+    if bash "$REPO_DIR/scripts/ops.sh" rebuild; then
         log_ok "Service rebuilt successfully"
     else
         log_err "Service rebuild failed"

@@ -29,7 +29,7 @@ gemini:
   current_model: "gemini-2.5-flash"   # 当前使用的模型
 ```
 
-完整配置项说明见 [README.md 配置说明](README.md#4-配置说明)。
+完整配置项说明见 [README.md 配置说明](../README.md#3-配置说明)。
 
 ## 3. 构建并启动
 
@@ -66,10 +66,10 @@ docker-compose -f docker/docker-compose.yml exec teamgr /workspace/scripts/resta
 
 ## 6. 日常运维
 
-提供 `ops.sh` 脚本统一管理各场景的更新操作：
+提供 `scripts/ops.sh` 脚本统一管理各场景的更新操作：
 
 ```bash
-bash ops.sh <command>
+bash scripts/ops.sh <command>
 ```
 
 | 命令 | 场景 | 说明 |
