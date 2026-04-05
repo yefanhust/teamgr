@@ -357,7 +357,7 @@ function goToTalent(talentId) {
 
 function goToProject(projectId) {
   // Navigate to Studio with project focus query param
-  localStorage.setItem('todoActiveTab', '1')
+  sessionStorage.setItem('todoActiveTab', '1')
   router.push(`/?pmFocus=${projectId}`)
 }
 

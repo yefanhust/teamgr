@@ -2246,11 +2246,11 @@ const pmStore = useProjectsStore()
 const _route = useRoute()
 const _router = useRouter()
 
-// Tab state — restore from localStorage so refresh keeps the user on the same tab
-const activeTab = ref(parseInt(localStorage.getItem('todoActiveTab')) || 0)
-const vibeTab = ref(parseInt(localStorage.getItem('todoVibeTab')) || 0)
-const pmSubTab = ref(parseInt(localStorage.getItem('todoPmSubTab')) || 0)
-const analysisSubTab = ref(parseInt(localStorage.getItem('todoAnalysisSubTab')) || 0)
+// Tab state — restore from sessionStorage so each browser tab remembers its own position
+const activeTab = ref(parseInt(sessionStorage.getItem('todoActiveTab')) || 0)
+const vibeTab = ref(parseInt(sessionStorage.getItem('todoVibeTab')) || 0)
+const pmSubTab = ref(parseInt(sessionStorage.getItem('todoPmSubTab')) || 0)
+const analysisSubTab = ref(parseInt(sessionStorage.getItem('todoAnalysisSubTab')) || 0)
 
 // ---- Project Management state ----
 const showPmUpdatePopup = ref(false)
@@ -2724,7 +2724,7 @@ watch(() => _route.query.pmFocus, (pid) => {
 
 // Auto-refresh duration stats when switching to 效率分析 tab (index 2)
 watch(activeTab, async (tab) => {
-  localStorage.setItem('todoActiveTab', tab)
+  sessionStorage.setItem('todoActiveTab', tab)
   if (tab === 1) {
     loadPmProjects()
     loadPmTimeline()
@@ -2739,9 +2739,9 @@ watch(activeTab, async (tab) => {
   }
 }, { immediate: true })
 
-watch(vibeTab, (tab) => localStorage.setItem('todoVibeTab', tab))
-watch(pmSubTab, (tab) => localStorage.setItem('todoPmSubTab', tab))
-watch(analysisSubTab, (tab) => localStorage.setItem('todoAnalysisSubTab', tab))
+watch(vibeTab, (tab) => sessionStorage.setItem('todoVibeTab', tab))
+watch(pmSubTab, (tab) => sessionStorage.setItem('todoPmSubTab', tab))
+watch(analysisSubTab, (tab) => sessionStorage.setItem('todoAnalysisSubTab', tab))
 
 // Poll for status changes when there are implementing tasks
 let vibePollingTimer = null
