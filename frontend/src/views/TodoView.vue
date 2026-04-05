@@ -1777,8 +1777,8 @@
           <div class="flex items-center justify-between mb-1">
             <div class="flex items-center gap-1">
               <label class="text-sm text-gray-500">进展内容</label>
-              <VoiceInputButton v-if="!pmPdfFile" v-model="pmUpdateContent" :size="14" />
-              <!-- PDF upload trigger - inline with label for visibility -->
+              <VoiceInputButton v-if="!pmPdfFile" v-model="pmVoiceText" :size="14" />
+              <!-- PDF upload trigger -->
               <label v-if="!pmPdfFile" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 text-xs cursor-pointer hover:bg-orange-100 transition border border-orange-200 ml-1">
                 <van-icon name="upgrade" size="13" />
                 <span>PDF</span>
@@ -1802,17 +1802,25 @@
             </div>
             <van-icon name="cross" size="18" class="text-gray-400 cursor-pointer flex-shrink-0" @click="pmPdfFile = null" />
           </div>
-          <!-- Text input (hidden when PDF selected) -->
-          <van-field
-            v-if="!pmPdfFile"
-            v-model="pmUpdateContent"
-            type="textarea"
-            rows="10"
-            placeholder="描述该队员在该项目上的当前进展..."
-            maxlength="2000"
-            show-word-limit
-            class="pm-update-textarea !border !border-gray-300 !rounded-lg flex-1"
-          />
+          <!-- Rich text input with image support (hidden when PDF selected) -->
+          <div v-if="!pmPdfFile" class="flex-1 flex flex-col min-h-0 relative">
+            <div
+              ref="pmRichInputRef"
+              contenteditable="true"
+              class="pm-rich-input flex-1 border border-gray-300 rounded-lg p-3 text-base text-gray-700 leading-relaxed overflow-y-auto outline-none focus:border-blue-400 transition"
+              :class="{ 'pm-rich-input--empty': pmRichInputEmpty, 'pm-rich-input--dragover': pmDragOver }"
+              data-placeholder="描述该队员在该项目上的当前进展... 支持拖拽或粘贴图片"
+              @input="onRichInputChange"
+              @paste="onRichInputPaste"
+              @keydown="onRichInputKeydown"
+              @dragover.prevent="onRichInputDragOver"
+              @dragleave="onRichInputDragLeave"
+              @drop.prevent="onRichInputDrop"
+            ></div>
+            <div class="flex justify-end mt-1">
+              <span class="text-xs" :class="pmRichInputCharCount > 2000 ? 'text-red-500' : 'text-gray-400'">{{ pmRichInputCharCount }} / 2000</span>
+            </div>
+          </div>
         </div>
 
         <!-- Submit (pinned to bottom) -->
@@ -1821,7 +1829,7 @@
             type="primary"
             block
             :loading="pmSubmitting"
-            :disabled="!pmSelectedTalent || !pmSelectedProject || (!pmUpdateContent.trim() && !pmPdfFile)"
+            :disabled="!pmSelectedTalent || !pmSelectedProject || (!pmRichInputHasContent && !pmPdfFile)"
             @click="submitPmUpdate"
           >
             {{ pmPdfFile ? '上传并解析 PDF' : '提交' }}
@@ -2209,6 +2217,13 @@
         </div>
       </div>
     </van-popup>
+
+    <!-- Image lightbox overlay -->
+    <Teleport to="body">
+      <div v-if="lightboxSrc" class="pm-lightbox" @click="lightboxSrc = ''">
+        <img :src="lightboxSrc" class="pm-lightbox-img" @click.stop />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -2257,6 +2272,14 @@ const pmProjectListRef = ref(null)
 const pmSelectedProject = ref(null)
 const pmUpdateContent = ref('')
 const pmPdfFile = ref(null)
+const pmRichInputRef = ref(null)
+const pmRichInputEmpty = ref(true)
+const pmRichInputCharCount = ref(0)
+const pmRichInputHasContent = ref(false)
+const pmVoiceText = ref('')
+const pmImageUploading = ref(false)
+const pmDragOver = ref(false)
+const lightboxSrc = ref('')
 const pmSubmitting = ref(false)
 const pmLastResult = ref(null)
 const showPmModelPicker = ref(false)
@@ -2657,7 +2680,13 @@ const vibeCommitted = computed(() =>
   [...store.pending, ...store.completed].filter(t => t.vibe_status === 'committed')
 )
 
+function onImgClick(e) {
+  const img = e.target.closest('img.pm-rendered-img')
+  if (img) lightboxSrc.value = img.src
+}
+
 onMounted(async () => {
+  document.addEventListener('click', onImgClick)
   loading.value = true
   try {
     await Promise.all([store.fetchAll(), store.fetchTags(), store.fetchReqTags(), loadAnalyses(), loadDurationStats(), loadProjectAnalyses(), loadPmProjects(), loadPmTimeline(), loadPmMembers(), fetchPmModelSettings()])
@@ -2744,6 +2773,7 @@ watch(() => store.pending, (items) => {
 }, { immediate: true, deep: true })
 
 onUnmounted(() => {
+  document.removeEventListener('click', onImgClick)
   if (vibePollingTimer) {
     clearInterval(vibePollingTimer)
     vibePollingTimer = null
@@ -4589,9 +4619,199 @@ function onPmPdfSelect(e) {
   e.target.value = ''
 }
 
+// ---- Rich input helpers ----
+
+function onRichInputChange() {
+  const el = pmRichInputRef.value
+  if (!el) return
+  const text = el.innerText || ''
+  pmRichInputCharCount.value = text.replace(/\n$/,'').length
+  pmRichInputEmpty.value = !text.trim() && !el.querySelector('img')
+  pmRichInputHasContent.value = !!(text.trim() || el.querySelector('img'))
+}
+
+function onRichInputKeydown(e) {
+  // Prevent exceeding max length (allow delete/backspace/arrows/select-all)
+  const allowedKeys = ['Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End']
+  if (allowedKeys.includes(e.key) || e.metaKey || e.ctrlKey) return
+  const el = pmRichInputRef.value
+  if (el && (el.innerText || '').replace(/\n$/,'').length >= 2000 && !window.getSelection()?.toString()) {
+    e.preventDefault()
+  }
+}
+
+async function onRichInputPaste(e) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  // Check for image in clipboard
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault()
+      const file = item.getAsFile()
+      if (file) await insertImageFromFile(file)
+      return
+    }
+  }
+  // For text paste, force plain text
+  e.preventDefault()
+  const text = e.clipboardData.getData('text/plain')
+  if (text) document.execCommand('insertText', false, text)
+}
+
+function onRichInputDragOver(e) {
+  if (e.dataTransfer?.types?.includes('Files')) {
+    pmDragOver.value = true
+  }
+}
+
+function onRichInputDragLeave() {
+  pmDragOver.value = false
+}
+
+async function onRichInputDrop(e) {
+  pmDragOver.value = false
+  const files = e.dataTransfer?.files
+  if (!files?.length) return
+  // Place cursor at drop position
+  const el = pmRichInputRef.value
+  if (el) {
+    let range
+    if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(e.clientX, e.clientY)
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(e.clientX, e.clientY)
+      if (pos) {
+        range = document.createRange()
+        range.setStart(pos.offsetNode, pos.offset)
+        range.collapse(true)
+      }
+    }
+    if (range) {
+      const sel = window.getSelection()
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+  }
+  // Insert all image files
+  for (const file of files) {
+    if (file.type.startsWith('image/')) {
+      await insertImageFromFile(file)
+    }
+  }
+}
+
+async function insertImageFromFile(file) {
+  if (file.size > 10 * 1024 * 1024) {
+    showToast('图片大小不能超过 10MB')
+    return
+  }
+  const validTypes = ['image/jpeg','image/png','image/webp','image/gif','image/bmp']
+  if (!validTypes.includes(file.type)) {
+    showToast('不支持的图片格式')
+    return
+  }
+  // Save cursor position
+  const sel = window.getSelection()
+  const savedRange = sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null
+
+  // Insert loading placeholder
+  const placeholder = document.createElement('span')
+  placeholder.className = 'pm-img-placeholder'
+  placeholder.textContent = '图片上传中...'
+  placeholder.contentEditable = 'false'
+  if (savedRange) {
+    savedRange.deleteContents()
+    savedRange.insertNode(placeholder)
+    savedRange.setStartAfter(placeholder)
+    savedRange.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(savedRange)
+  } else {
+    pmRichInputRef.value?.appendChild(placeholder)
+  }
+
+  try {
+    pmImageUploading.value = true
+    const url = await pmStore.uploadProgressImage(file)
+    const img = document.createElement('img')
+    img.src = url
+    img.className = 'pm-rich-img'
+    img.setAttribute('contenteditable', 'false')
+    placeholder.replaceWith(img)
+    // Place cursor after image
+    const range = document.createRange()
+    range.setStartAfter(img)
+    range.collapse(true)
+    sel.removeAllRanges()
+    sel.addRange(range)
+    // Ensure there's a text node after the image for continued typing
+    if (!img.nextSibling || (img.nextSibling.nodeType !== 3)) {
+      const space = document.createTextNode('\u200B')
+      img.parentNode.insertBefore(space, img.nextSibling)
+      range.setStart(space, 1)
+      range.collapse(true)
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+  } catch (err) {
+    placeholder.remove()
+    showToast('图片上传失败')
+  } finally {
+    pmImageUploading.value = false
+    onRichInputChange()
+  }
+}
+
+function serializeRichInput(el) {
+  if (!el) return ''
+  let result = ''
+  function walk(node) {
+    if (node.nodeType === 3) {
+      // Text node — keep content but strip zero-width spaces
+      result += node.textContent.replace(/\u200B/g, '')
+      return
+    }
+    if (node.nodeType !== 1) return
+    const tag = node.tagName
+    if (tag === 'IMG') {
+      const src = node.getAttribute('src') || ''
+      result += `![图片](${src})`
+      return
+    }
+    if (tag === 'BR') {
+      result += '\n'
+      return
+    }
+    // Block elements like DIV, P add a newline before (if not first child)
+    const isBlock = ['DIV','P','BLOCKQUOTE','LI','H1','H2','H3','H4','H5','H6'].includes(tag)
+    if (isBlock && result.length > 0 && !result.endsWith('\n')) {
+      result += '\n'
+    }
+    // Skip placeholder spans
+    if (node.classList?.contains('pm-img-placeholder')) return
+    for (const child of node.childNodes) walk(child)
+  }
+  for (const child of el.childNodes) walk(child)
+  return result.trim()
+}
+
+// Watch voice input and append to rich input
+watch(pmVoiceText, (val) => {
+  if (!val || !pmRichInputRef.value) return
+  const el = pmRichInputRef.value
+  // Append the voice text
+  if (el.innerText.trim() || el.querySelector('img')) {
+    el.appendChild(document.createTextNode(val.slice(el.innerText.replace(/\u200B/g,'').length)))
+  } else {
+    el.textContent = val
+  }
+  onRichInputChange()
+})
+
 async function submitPmUpdate() {
   if (!pmSelectedTalent.value || !pmSelectedProject.value) return
-  if (!pmPdfFile.value && !pmUpdateContent.value.trim()) return
+  const content = pmPdfFile.value ? '' : serializeRichInput(pmRichInputRef.value)
+  if (!pmPdfFile.value && !content) return
   pmSubmitting.value = true
   const wasPdf = !!pmPdfFile.value
   try {
@@ -4606,7 +4826,7 @@ async function submitPmUpdate() {
       await pmStore.submitUpdate(
         pmSelectedProject.value.id,
         pmSelectedTalent.value.id,
-        pmUpdateContent.value.trim(),
+        content,
         pmCurrentModel.value || null
       )
     }
@@ -4617,6 +4837,11 @@ async function submitPmUpdate() {
     pmTalentResults.value = []
     pmUpdateContent.value = ''
     pmPdfFile.value = null
+    pmVoiceText.value = ''
+    if (pmRichInputRef.value) {
+      pmRichInputRef.value.innerHTML = ''
+      onRichInputChange()
+    }
     showToast(wasPdf ? 'PDF 已上传，后台正在解析' : '已提交，LLM 正在后台处理')
     // Refresh boards in background
     loadPmTimeline()
@@ -4843,6 +5068,7 @@ function renderMarkdown(text) {
   if (!text) return ''
   return text
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="pm-rendered-img" />')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-gray-800 mt-1 mb-0">$1</h4>')
@@ -4963,6 +5189,58 @@ function formatDateTime(isoStr) {
   height: 100% !important;
   flex: 1;
 }
+
+/* Rich input for project progress */
+.pm-rich-input {
+  min-height: 120px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pm-rich-input:focus {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+.pm-rich-input--dragover {
+  border-color: #3b82f6 !important;
+  background: #eff6ff;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+.pm-rich-input--empty:not(:focus)::before {
+  content: attr(data-placeholder);
+  color: #c0c4cc;
+  pointer-events: none;
+  position: absolute;
+}
+.pm-rich-input img.pm-rich-img {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
+  margin: 6px 0;
+  display: block;
+  object-fit: contain;
+}
+.pm-img-placeholder {
+  display: inline-block;
+  padding: 4px 12px;
+  margin: 4px 0;
+  background: #f0f9ff;
+  border: 1px dashed #93c5fd;
+  border-radius: 6px;
+  color: #3b82f6;
+  font-size: 13px;
+}
+
+/* Rendered images in update display */
+.update-record-content :deep(.pm-rendered-img),
+.analysis-content :deep(.pm-rendered-img) {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: 8px;
+  margin: 6px 0;
+  display: block;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+
 .pm-delete-btn {
   opacity: 0.3;
   transition: opacity 0.2s;
@@ -5159,6 +5437,30 @@ function formatDateTime(isoStr) {
 }
 
 /* Drag ghost panel */
+/* Image lightbox (Teleport to body, must be unscoped) */
+.pm-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: pm-lightbox-in 0.15s ease;
+}
+.pm-lightbox-img {
+  max-width: 92vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+@keyframes pm-lightbox-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .pm-drag-ghost {
   position: fixed;
   pointer-events: none;

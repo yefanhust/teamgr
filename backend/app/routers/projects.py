@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Form, UploadFile, File
@@ -16,7 +17,14 @@ from app.models.talent import Talent
 from app.services.pinyin_service import get_pinyin_data, match_pinyin
 
 PROJECT_DOC_DIR = os.path.join(os.environ.get("TEAMGR_DATA_DIR", "data"), "project-doc-uploads")
+PROJECT_IMG_DIR = os.path.join(os.environ.get("TEAMGR_DATA_DIR", "data"), "project-update-images")
 MAX_PDF_SIZE = 20 * 1024 * 1024  # 20MB
+ALLOWED_IMG_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+MAX_IMG_SIZE = 10 * 1024 * 1024  # 10MB
+IMG_MIME_MAP = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
+}
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -575,6 +583,44 @@ def get_update_file(
         filename=update.file_name,
         content_disposition_type="inline",
     )
+
+
+@router.post("/updates/images")
+async def upload_update_image(
+    file: UploadFile = File(...),
+    _=Depends(require_auth),
+):
+    """Upload an image for embedding in project update content."""
+    filename = file.filename or ""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_IMG_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"不支持的图片格式: {ext}")
+
+    file_bytes = await file.read()
+    if len(file_bytes) > MAX_IMG_SIZE:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 10MB")
+
+    save_name = f"{uuid.uuid4().hex}{ext}"
+    os.makedirs(PROJECT_IMG_DIR, exist_ok=True)
+    save_path = os.path.join(PROJECT_IMG_DIR, save_name)
+    with open(save_path, "wb") as f:
+        f.write(file_bytes)
+
+    url = f"/api/projects/updates/images/{save_name}"
+    logger.info(f"[ProjectImg] Saved {filename} ({len(file_bytes)} bytes) as {save_name}")
+    return {"url": url}
+
+
+@router.get("/updates/images/{filename}")
+async def get_update_image(filename: str):
+    """Serve an uploaded project-update image."""
+    # Sanitise filename to prevent path traversal
+    safe = os.path.basename(filename)
+    ext = os.path.splitext(safe)[1].lower()
+    file_path = os.path.join(PROJECT_IMG_DIR, safe)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="图片不存在")
+    return FileResponse(file_path, media_type=IMG_MIME_MAP.get(ext, "application/octet-stream"))
 
 
 @router.get("/{project_id}/updates")

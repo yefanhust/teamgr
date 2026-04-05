@@ -100,6 +100,15 @@ export const useProjectsStore = defineStore('projects', () => {
     return res.data
   }
 
+  async function uploadProgressImage(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await api.post('/api/projects/updates/images', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    return res.data.url
+  }
+
   async function submitUpdatePdf(projectId, talentId, file, model = null) {
     const formData = new FormData()
     formData.append('project_id', projectId)
@@ -132,6 +141,7 @@ export const useProjectsStore = defineStore('projects', () => {
     searchProjects,
     updateMemberRole,
     updateProjectUpdate,
+    uploadProgressImage,
     submitUpdatePdf,
   }
 })
