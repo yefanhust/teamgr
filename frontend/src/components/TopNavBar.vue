@@ -12,6 +12,7 @@
           <van-icon :name="item.icon" size="18" :color="isActive(item.route) ? 'white' : item.color" />
           <span class="text-xs font-medium whitespace-nowrap" :class="{ 'font-bold': isActive(item.route) }">{{ item.label }}</span>
         </div>
+        <van-icon name="chart-trending-o" size="20" class="text-gray-400 cursor-pointer flex-shrink-0 ml-1" @click="router.push('/stats')" />
         <van-icon name="setting-o" size="20" class="text-gray-400 cursor-pointer flex-shrink-0 ml-1" @click="router.push('/settings')" />
         <div class="relative flex-shrink-0 cursor-pointer ml-0.5" @click="router.push('/backup-logs')">
           <van-icon name="shield-o" size="20" :class="backupHealthy ? 'text-gray-400' : 'text-red-500'" />
@@ -66,12 +67,12 @@ const navItems = [
     inactiveClass: 'bg-purple-50 text-purple-700',
   },
   {
-    label: '统计',
-    route: '/stats',
-    icon: 'chart-trending-o',
-    color: '#10B981',
-    activeClass: 'bg-emerald-500 text-white shadow-md',
-    inactiveClass: 'bg-emerald-50 text-emerald-700',
+    label: '御膳房',
+    route: '/kitchen',
+    icon: 'shop-o',
+    color: '#EF4444',
+    activeClass: 'bg-red-500 text-white shadow-md',
+    inactiveClass: 'bg-red-50 text-red-700',
   },
 ]
 

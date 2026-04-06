@@ -54,6 +54,11 @@ const routes = [
     redirect: '/',
   },
   {
+    path: '/kitchen',
+    name: 'Kitchen',
+    component: () => import('../views/KitchenView.vue'),
+  },
+  {
     path: '/stats',
     name: 'Stats',
     component: () => import('../views/StatsView.vue'),
