@@ -76,9 +76,36 @@ async def send_wecom_webhook(webhook_url: str, title: str, content: str):
             await _send_wecom_single(client, webhook_url, md_body)
 
 
+async def send_bark_push(server_url: str, device_key: str, title: str, body: str, group: str = ""):
+    """Send a push notification via Bark.
+
+    Bark API: POST {server_url}/{device_key}
+    Body: {"title": "...", "body": "...", "group": "..."}
+    """
+    url = f"{server_url.rstrip('/')}/{device_key}"
+    payload = {"title": title, "body": body}
+    if group:
+        payload["group"] = group
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") != 200:
+            logger.warning(f"Bark push error: {data}")
+        else:
+            logger.info(f"Bark push sent: {title}")
+
+
 async def send_to_bot(bot: dict, title: str, content: str):
     """Send a message to a specific bot."""
     channel = bot.get("channel", "wecom")
+    if channel == "bark":
+        server_url = bot.get("bark_server", "https://api.day.app")
+        device_key = bot.get("bark_device_key", "")
+        if device_key:
+            await send_bark_push(server_url, device_key, title, content, group=bot.get("name", ""))
+        return
     webhook_url = bot.get("webhook_url", "")
     if not webhook_url:
         return
@@ -273,6 +300,8 @@ def generate_trigger_content(trigger_name: str) -> tuple[str, str] | None:
         return _fetch_latest_project_analysis()
     elif trigger_name == "scholar_scheduled":
         return _fetch_latest_scholar_scheduled()
+    elif trigger_name == "daily_menu":
+        return _fetch_latest_daily_menu()
     return None
 
 
@@ -400,5 +429,27 @@ def _fetch_latest_project_analysis() -> tuple[str, str] | None:
         if not analysis:
             return None
         return "项目效率分析", analysis.content
+    finally:
+        db.close()
+
+
+def _fetch_latest_daily_menu() -> tuple[str, str] | None:
+    """Fetch the latest daily menu (for tomorrow or today)."""
+    from app.database import SessionLocal
+    from app.models.kitchen import DailyMenu
+    from app.routers.kitchen import _menu_to_bark_text
+
+    db = SessionLocal()
+    try:
+        menu = (
+            db.query(DailyMenu)
+            .order_by(DailyMenu.date.desc())
+            .first()
+        )
+        if not menu:
+            return None
+        title = f"每日食谱 - {menu.date.strftime('%m月%d日')}"
+        body = _menu_to_bark_text(menu)
+        return title, body
     finally:
         db.close()

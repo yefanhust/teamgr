@@ -5193,6 +5193,7 @@ function formatDateTime(isoStr) {
 /* Rich input for project progress */
 .pm-rich-input {
   min-height: 120px;
+  height: 0;
   white-space: pre-wrap;
   word-break: break-word;
 }

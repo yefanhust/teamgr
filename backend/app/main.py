@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from app.config import load_config, get_auth_password, get_gemini_config, get_cors_origins
 from app.middleware.auth_middleware import require_auth
 from app.database import init_db, SessionLocal
-from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification, scholar, backup, projects, diary, teams
+from app.routers import auth, talents, entry, stats, chat, ideas, todos, notification, scholar, backup, projects, diary, teams, kitchen
 from app.services.backup_service import setup_backup_scheduler
 
 # ANSI color codes
@@ -254,6 +254,18 @@ async def lifespan(app: FastAPI):
         )
         logger.info(f"Diary comment job registered: daily at {dc.get('cron_hour', 23):02d}:{dc.get('cron_minute', 0):02d}")
 
+        # Daily menu generation job (御膳房 — 每日食谱)
+        from app.routers.kitchen import run_daily_menu_generation_sync
+        km = sc.get("daily_menu_generation", {})
+        _scheduler.add_job(
+            run_daily_menu_generation_sync,
+            "cron",
+            hour=km.get("cron_hour", 20),
+            minute=km.get("cron_minute", 0),
+            id="daily_menu_generation",
+        )
+        logger.info(f"Daily menu generation job registered: daily at {km.get('cron_hour', 20):02d}:{km.get('cron_minute', 0):02d}")
+
         # Scholar scheduled questions — one job per enabled question
         from app.services.scholar_scheduled_service import seed_default_scheduled_questions, refresh_scholar_jobs, check_missed_executions
         seed_default_scheduled_questions()
@@ -304,6 +316,7 @@ app.include_router(backup.router)
 app.include_router(projects.router)
 app.include_router(diary.router)
 app.include_router(teams.router)
+app.include_router(kitchen.router)
 
 
 # Settings API for model switching

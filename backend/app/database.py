@@ -53,6 +53,7 @@ def init_db():
     from app.models.team import Team, TeamMember  # noqa
     from app.models.scholar import ScholarScheduledQuestion, ScholarScheduledResult  # noqa
     from app.models.backup import BackupLog  # noqa
+    from app.models.kitchen import DailyMenu  # noqa
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
     _seed_default_dimensions()

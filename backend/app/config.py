@@ -118,6 +118,7 @@ SCHEDULER_TYPES = {
     "daily_tag_organize": "人才卡标签自动整理",
     "daily_todo_tag_organize": "TODO标签自动整理",
     "daily_diary_comment": "手记每日评论",
+    "daily_menu_generation": "每日食谱生成",
 }
 
 SCHEDULER_DESCRIPTIONS = {
@@ -131,6 +132,7 @@ SCHEDULER_DESCRIPTIONS = {
     "daily_tag_organize": "每日自动执行人才卡标签一键整理（合并同义标签、建立层级分类）",
     "daily_todo_tag_organize": "每日自动执行TODO标签整理（精简、编辑、合并同义标签、建立层级分类）",
     "daily_diary_comment": "每晚对当天手记进行 AI 分析，针对问题、困惑或想法提供评论建议和情绪支持（仅使用本地模型）",
+    "daily_menu_generation": "每晚自动生成次日菜谱（通过 AI 生成应季、不重复、清淡的家庭菜谱）",
 }
 
 _SCHEDULER_DEFAULTS = {
@@ -144,6 +146,7 @@ _SCHEDULER_DEFAULTS = {
     "daily_tag_organize": {"cron_hour": 22, "cron_minute": 0},
     "daily_todo_tag_organize": {"cron_hour": 22, "cron_minute": 30},
     "daily_diary_comment": {"cron_hour": 23, "cron_minute": 0},
+    "daily_menu_generation": {"cron_hour": 20, "cron_minute": 0},
 }
 
 
@@ -212,6 +215,7 @@ _DEFAULT_TRIGGER_TIMES = {
     "todo_daily_list": (8, 5),
     "scholar_scheduled": (6, 30),
     "project_analysis": (4, 10),
+    "daily_menu": (20, 5),
 }
 
 # All available trigger types with display labels
@@ -223,6 +227,7 @@ TRIGGER_TYPES = {
     "todo_deadline": "任务截止提醒",
     "todo_daily_list": "每日任务清单",
     "scholar_scheduled": "龙图阁定时报告",
+    "daily_menu": "每日食谱推送",
 }
 
 
@@ -379,6 +384,7 @@ LLM_CALL_TYPES = {
     "interview-evaluation": "面试评价生成",
     "req-auto-tag": "需求自动打标",
     "req-organize-tags": "需求标签整理",
+    "kitchen-menu": "每日食谱生成",
 }
 
 
@@ -406,6 +412,28 @@ def set_model_defaults(defaults: dict):
             with open(actual_path, "r", encoding="utf-8") as f:
                 file_cfg = yaml.safe_load(f) or {}
             file_cfg["model_defaults"] = defaults
+            with open(actual_path, "w", encoding="utf-8") as f:
+                yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
+        except OSError:
+            pass
+
+
+def get_kitchen_config() -> dict:
+    cfg = get_config()
+    return cfg.get("kitchen", {"adult_count": 1})
+
+
+def save_kitchen_config(kitchen_cfg: dict):
+    """Save kitchen config to memory and persist to file."""
+    cfg = get_config()
+    cfg["kitchen"] = kitchen_cfg
+
+    actual_path = _get_config_file_path()
+    if actual_path:
+        try:
+            with open(actual_path, "r", encoding="utf-8") as f:
+                file_cfg = yaml.safe_load(f) or {}
+            file_cfg["kitchen"] = kitchen_cfg
             with open(actual_path, "w", encoding="utf-8") as f:
                 yaml.dump(file_cfg, f, allow_unicode=True, default_flow_style=False)
         except OSError:

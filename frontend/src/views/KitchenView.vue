@@ -1,16 +1,35 @@
 <template>
   <div class="min-h-screen bg-gray-100">
     <TopNavBar />
-    <div class="max-w-3xl mx-auto px-4 py-1">
-      <h1 class="text-sm font-bold text-gray-500">御膳房</h1>
-    </div>
-
-    <div class="max-w-3xl mx-auto px-4 py-4">
-      <van-empty description="御膳房正在筹备中..." />
-    </div>
+    <van-tabs v-model:active="activeTab" sticky offset-top="52" class="kitchen-tabs">
+      <van-tab title="每日食谱" name="menu">
+        <DailyMenuTab />
+      </van-tab>
+    </van-tabs>
   </div>
 </template>
 
 <script setup>
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import TopNavBar from '../components/TopNavBar.vue'
+import DailyMenuTab from '../components/DailyMenuTab.vue'
+
+const route = useRoute()
+const router = useRouter()
+
+const validTabs = ['menu']
+const initial = validTabs.includes(route.query.tab) ? route.query.tab : 'menu'
+const activeTab = ref(initial)
+
+watch(activeTab, (tab) => {
+  const q = tab === 'menu' ? undefined : tab
+  router.replace({ query: { ...route.query, tab: q } })
+})
 </script>
+
+<style scoped>
+.kitchen-tabs :deep(.van-tabs__nav) {
+  background: #fff;
+}
+</style>

@@ -297,7 +297,7 @@ const SCHEDULER_GROUPS = [
     page: '灵感',
     color: '#F97316',
     children: [
-      { page: '灵感', color: '#F97316', types: ['daily_idea_aggregation'] },
+      { page: '灵感洞见', color: '#F97316', types: ['daily_idea_aggregation'] },
       { page: '流光剪影', color: '#EC4899', types: ['daily_diary_comment'] },
     ],
   },
@@ -305,6 +305,11 @@ const SCHEDULER_GROUPS = [
     page: '人才',
     color: '#3B82F6',
     types: ['daily_scheduled_queries', 'daily_tag_organize'],
+  },
+  {
+    page: '御膳房',
+    color: '#F59E0B',
+    types: ['daily_menu_generation'],
   },
   {
     page: '系统',
@@ -328,7 +333,7 @@ const PAGE_GROUPS = [
     page: '灵感',
     color: '#F97316',
     children: [
-      { page: '灵感', color: '#F97316', types: ['idea-classify', 'idea-insight'] },
+      { page: '灵感洞见', color: '#F97316', types: ['idea-classify', 'idea-insight'] },
       { page: '流光剪影', color: '#EC4899', types: ['diary-auto-tag', 'diary-comment'] },
     ],
   },
@@ -341,6 +346,11 @@ const PAGE_GROUPS = [
     page: '龙图阁',
     color: '#8B5CF6',
     types: ['scholar-categorize'],
+  },
+  {
+    page: '御膳房',
+    color: '#F59E0B',
+    types: ['kitchen-menu'],
   },
 ]
 

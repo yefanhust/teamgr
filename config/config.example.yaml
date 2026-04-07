@@ -80,6 +80,25 @@ notification:
           cron_hour: 8
           cron_minute: 5
         # 备份失败告警无需订阅，会自动推送到所有已启用的机器人
+    # Bark 推送机器人示例（iOS 推送通知）
+    # - id: "bark-kitchen"
+    #   name: "每日食谱推送"
+    #   channel: "bark"
+    #   bark_server: "https://api.day.app"    # Bark 服务器地址（默认官方服务器）
+    #   bark_device_key: "YOUR_DEVICE_KEY"    # 打开 Bark App 获取
+    #   enabled: false
+    #   functions:
+    #     - trigger: "daily_menu"             # 每日食谱推送
+    #       cron_hour: 20
+    #       cron_minute: 5
+
+# 御膳房配置
+kitchen:
+  adult_count: 1                  # 大人数量（默认1个）
+  bark:                           # Bark 推送配置（独立于通知系统的 Bark bot）
+    enabled: false
+    server_url: "https://api.day.app"   # Bark 服务器地址
+    device_key: ""                      # Bark 设备密钥（打开 Bark App 获取）
 
 # 定时任务调度配置
 schedulers:
@@ -100,6 +119,9 @@ schedulers:
     cron_minute: 0
   repeat_todo_check:           # 周期任务自动创建（检查重复规则的已完成任务，自动创建下一周期待办）
     interval_hours: 1
+  daily_menu_generation:       # 每日食谱生成（每晚自动生成次日菜谱）
+    cron_hour: 20
+    cron_minute: 0
 
 # 备份调度
 backup:
