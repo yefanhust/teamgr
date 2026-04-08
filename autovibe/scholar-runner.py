@@ -33,6 +33,7 @@ def main():
     args = sys.argv[1:]
     stream_file = None
     session_file = None
+    prompt_file = None
 
     if "--stream-file" in args:
         idx = args.index("--stream-file")
@@ -44,13 +45,26 @@ def main():
         session_file = args[idx + 1]
         args = args[:idx] + args[idx + 2:]
 
+    if "--prompt-file" in args:
+        idx = args.index("--prompt-file")
+        prompt_file = args[idx + 1]
+        args = args[:idx] + args[idx + 2:]
+
     if "--" in args:
         args.remove("--")
 
     if not args or not stream_file:
-        print("Usage: scholar-runner.py --stream-file FILE [--session-file FILE] [--] CLAUDE_ARGS...",
+        print("Usage: scholar-runner.py --stream-file FILE [--session-file FILE] [--prompt-file FILE] [--] CLAUDE_ARGS...",
               file=sys.stderr)
         sys.exit(1)
+
+    # Read prompt from file if provided (avoids execve ARG_MAX limits).
+    # Claude CLI reads the prompt from stdin when piped with -p flag.
+    prompt_data = None
+    if prompt_file:
+        with open(prompt_file, "rb") as pf:
+            raw = pf.read()
+        prompt_data = raw.decode("utf-8", errors="replace")
 
     # Create pty pair
     master_fd, slave_fd = pty.openpty()
@@ -62,11 +76,17 @@ def main():
 
     proc = subprocess.Popen(
         args,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE if prompt_data else subprocess.DEVNULL,
         stdout=slave_fd,
         stderr=slave_fd,
         close_fds=True,
     )
+
+    # Pipe prompt via stdin to avoid argument length limits
+    if prompt_data and proc.stdin:
+        proc.stdin.write(prompt_data.encode("utf-8"))
+        proc.stdin.close()
+
     os.close(slave_fd)
 
     line_buffer = b""

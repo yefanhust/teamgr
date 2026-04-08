@@ -136,14 +136,18 @@ $context
     # Run Claude via scholar-runner.py
     # scholar-runner.py creates a PTY (to prevent buffering), writes raw stream-json
     # lines to --stream-file, and extracts session ID to --session-file.
-    local session_sidecar
+    # Prompt is passed via temp file to avoid shell ARG_MAX limits on large prompts.
+    local session_sidecar prompt_file
     session_sidecar=$(mktemp)
+    prompt_file=$(mktemp)
+    printf '%s' "$full_prompt" > "$prompt_file"
 
     local rc=0
     python3 "$REPO_DIR/autovibe/scholar-runner.py" \
         --stream-file "$stream_file" \
         --session-file "$session_sidecar" \
-        -- $CLAUDE $flags -p "$full_prompt" 2>>"$LOG" || rc=$?
+        --prompt-file "$prompt_file" \
+        -- $CLAUDE $flags -p 2>>"$LOG" || rc=$?
 
     if [ $rc -ne 0 ] && [ -n "$session_id" ]; then
         log_warn "Resume failed (rc=$rc), trying new session"
@@ -151,19 +155,20 @@ $context
         python3 "$REPO_DIR/autovibe/scholar-runner.py" \
             --stream-file "$stream_file" \
             --session-file "$session_sidecar" \
-            -- $CLAUDE $flags -p "$full_prompt" 2>>"$LOG" || rc=$?
+            --prompt-file "$prompt_file" \
+            -- $CLAUDE $flags -p 2>>"$LOG" || rc=$?
         if [ $rc -ne 0 ]; then
             log_err "Claude CLI failed for query $qid (rc=$rc)"
             echo "{\"type\":\"result\",\"result\":\"Claude 调用失败，请重试\"}" >> "$stream_file"
             touch "$done_file"
-            rm -f "$session_sidecar"
+            rm -f "$session_sidecar" "$prompt_file"
             return 1
         fi
     elif [ $rc -ne 0 ]; then
         log_err "Claude CLI failed for query $qid (rc=$rc)"
         echo "{\"type\":\"result\",\"result\":\"Claude 调用失败，请重试\"}" >> "$stream_file"
         touch "$done_file"
-        rm -f "$session_sidecar"
+        rm -f "$session_sidecar" "$prompt_file"
         return 1
     fi
 
@@ -185,7 +190,7 @@ $context
         fi
     fi
 
-    rm -f "$session_sidecar"
+    rm -f "$session_sidecar" "$prompt_file"
 
     # Write done marker
     touch "$done_file"

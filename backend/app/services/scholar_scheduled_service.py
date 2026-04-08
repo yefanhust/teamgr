@@ -15,6 +15,17 @@ _STREAM_DIR = os.path.join(_DATA_DIR, "scholar-stream")
 
 _CN_TZ = timezone(timedelta(hours=8))
 
+# Error markers from watcher-side failures (scholar-watcher.sh writes these)
+_FAILURE_MARKERS = ["调用失败", "执行超时", "未获取到回答"]
+
+
+def _is_failed_answer(answer: str) -> bool:
+    """Check if the answer indicates a failure (backend or watcher-side errors)."""
+    if answer.startswith("["):
+        return True
+    return any(m in answer for m in _FAILURE_MARKERS)
+
+
 # Ensure dirs exist
 for _d in (_QUEUE_DIR, _STREAM_DIR):
     os.makedirs(_d, exist_ok=True)
@@ -352,24 +363,25 @@ def check_missed_executions(scheduler):
 
         recovery_count = 0
         for q in questions:
-            # Only recover daily questions (weekly/monthly are less time-sensitive)
-            if q.schedule_type != "daily":
-                continue
-
-            # Check both today and yesterday for missing results
+            # Build list of period labels to check
             periods_to_check = []
-            today_label = now.strftime("%Y-%m-%d")
-            yesterday_label = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
-            # Yesterday should always have a result (its scheduled time has long passed)
-            periods_to_check.append(yesterday_label)
-
-            # Today only if scheduled time has already passed
-            scheduled_time = now.replace(
-                hour=q.cron_hour, minute=q.cron_minute, second=0, microsecond=0
-            )
-            if now >= scheduled_time:
-                periods_to_check.append(today_label)
+            if q.schedule_type == "daily":
+                today_label = now.strftime("%Y-%m-%d")
+                yesterday_label = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                periods_to_check.append(yesterday_label)
+                scheduled_time = now.replace(
+                    hour=q.cron_hour, minute=q.cron_minute, second=0, microsecond=0
+                )
+                if now >= scheduled_time:
+                    periods_to_check.append(today_label)
+            elif q.schedule_type == "weekly":
+                # Check current week
+                iso = now.isocalendar()
+                periods_to_check.append(f"{iso[0]}-W{iso[1]:02d}")
+            elif q.schedule_type == "monthly":
+                # Check current month
+                periods_to_check.append(now.strftime("%Y-%m"))
 
             for period_label in periods_to_check:
                 existing = (
@@ -462,7 +474,7 @@ def _run_single_question_cron(question_id: int):
                     rendered_prompt = context + "\n\n---\n\n" + rendered_prompt
 
             answer, duration = run_single_scholar_query(rendered_prompt, question_id=question_id)
-            status = "success" if not answer.startswith("[") else "failed"
+            status = "failed" if _is_failed_answer(answer) else "success"
 
             # Remove old results for this period (cron always gets latest)
             old_count = (
@@ -545,7 +557,7 @@ def run_scholar_scheduled_job(schedule_type: str):
 
                 # Execute
                 answer, duration = run_single_scholar_query(rendered_prompt)
-                status = "success" if not answer.startswith("[") else "failed"
+                status = "failed" if _is_failed_answer(answer) else "success"
 
                 # Remove old results for this period (cron always gets latest)
                 old_count = (
@@ -648,7 +660,7 @@ def run_single_question_now(question_id: int, force: bool = False) -> dict:
                 rendered_prompt = context + "\n\n---\n\n" + rendered_prompt
 
         answer, duration = run_single_scholar_query(rendered_prompt, question_id=question_id)
-        status = "success" if not answer.startswith("[") else "failed"
+        status = "failed" if _is_failed_answer(answer) else "success"
 
         # If forcing, delete old result for same period
         if force:
