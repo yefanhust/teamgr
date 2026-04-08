@@ -1816,7 +1816,59 @@
               @dragover.prevent="onRichInputDragOver"
               @dragleave="onRichInputDragLeave"
               @drop.prevent="onRichInputDrop"
+              @blur="pmAtMenuVisible = false; pmDatePickerVisible = false"
+              @click="onRichInputClick"
             ></div>
+            <!-- @ mention autocomplete popup -->
+            <div
+              v-if="pmAtMenuVisible"
+              ref="pmAtMenuRef"
+              class="pm-at-menu"
+              :style="{ top: pmAtMenuPos.top + 'px', left: pmAtMenuPos.left + 'px' }"
+            >
+              <div
+                class="pm-at-menu-item"
+                :class="{ 'pm-at-menu-item--active': pmAtMenuIndex === 0 }"
+                @mousedown.prevent="insertAtDate"
+                @mouseenter="pmAtMenuIndex = 0"
+              >
+                <van-icon name="calendar-o" size="16" />
+                <span>今天的日期</span>
+                <span class="pm-at-menu-hint">{{ todayDateStr }}</span>
+              </div>
+            </div>
+            <!-- Date chip calendar picker -->
+            <div
+              v-if="pmDatePickerVisible"
+              class="pm-date-picker"
+              :style="{ top: pmDatePickerPos.top + 'px', left: pmDatePickerPos.left + 'px' }"
+              @mousedown.prevent
+            >
+              <div class="pm-dp-header">
+                <span class="pm-dp-arrow" @click="pmDatePickerPrevMonth">&lsaquo;</span>
+                <span class="pm-dp-title">{{ pmDatePickerMonthLabel }}</span>
+                <span class="pm-dp-arrow" @click="pmDatePickerNextMonth">&rsaquo;</span>
+              </div>
+              <div class="pm-dp-weekdays">
+                <span v-for="w in ['日','一','二','三','四','五','六']" :key="w">{{ w }}</span>
+              </div>
+              <div v-for="(row, ri) in pmDatePickerDays" :key="ri" class="pm-dp-row">
+                <span
+                  v-for="(day, di) in row"
+                  :key="di"
+                  class="pm-dp-cell"
+                  :class="{
+                    'pm-dp-cell--empty': !day,
+                    'pm-dp-cell--selected': pmDatePickerIsSelected(day),
+                    'pm-dp-cell--today': pmDatePickerIsToday(day)
+                  }"
+                  @click="pmDatePickerSelectDay(day)"
+                >{{ day || '' }}</span>
+              </div>
+              <div class="pm-dp-footer">
+                <span class="pm-dp-today-btn" @click="pmDatePickerSelectToday">今天</span>
+              </div>
+            </div>
             <div class="flex justify-end mt-1">
               <span class="text-xs" :class="pmRichInputCharCount > 2000 ? 'text-red-500' : 'text-gray-400'">{{ pmRichInputCharCount }} / 2000</span>
             </div>
@@ -2279,12 +2331,86 @@ const pmRichInputHasContent = ref(false)
 const pmVoiceText = ref('')
 const pmImageUploading = ref(false)
 const pmDragOver = ref(false)
+const pmAtMenuVisible = ref(false)
+const pmAtMenuPos = ref({ top: 0, left: 0 })
+const pmAtMenuIndex = ref(0)
+const pmAtMenuRef = ref(null)
+const pmDatePickerVisible = ref(false)
+const pmDatePickerPos = ref({ top: 0, left: 0 })
+const pmDatePickerTarget = ref(null)
+const pmDatePickerDate = ref(new Date())
+const pmDatePickerMonth = ref(new Date())
 const lightboxSrc = ref('')
 const pmSubmitting = ref(false)
 const pmLastResult = ref(null)
 const showPmModelPicker = ref(false)
 const pmCurrentModel = ref('')
 const pmAvailableModels = ref([])
+
+// @ mention date helper
+const weekDays = ['日', '一', '二', '三', '四', '五', '六']
+function formatDateChip(d) {
+  const now = new Date()
+  if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) {
+    return 'Today'
+  }
+  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 周${weekDays[d.getDay()]}`
+}
+const todayDateStr = computed(() => formatDateChip(new Date()))
+
+// Date picker calendar helpers
+const pmDatePickerDays = computed(() => {
+  const m = pmDatePickerMonth.value
+  const year = m.getFullYear(), month = m.getMonth()
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const rows = []
+  let row = new Array(firstDay).fill(null)
+  for (let d = 1; d <= daysInMonth; d++) {
+    row.push(d)
+    if (row.length === 7) { rows.push(row); row = [] }
+  }
+  if (row.length) { while (row.length < 7) row.push(null); rows.push(row) }
+  return rows
+})
+const pmDatePickerMonthLabel = computed(() => {
+  const m = pmDatePickerMonth.value
+  return `${m.getFullYear()}年${m.getMonth() + 1}月`
+})
+function pmDatePickerPrevMonth() {
+  const m = pmDatePickerMonth.value
+  pmDatePickerMonth.value = new Date(m.getFullYear(), m.getMonth() - 1, 1)
+}
+function pmDatePickerNextMonth() {
+  const m = pmDatePickerMonth.value
+  pmDatePickerMonth.value = new Date(m.getFullYear(), m.getMonth() + 1, 1)
+}
+function pmDatePickerSelectDay(day) {
+  if (!day) return
+  const m = pmDatePickerMonth.value
+  const selected = new Date(m.getFullYear(), m.getMonth(), day)
+  pmDatePickerDate.value = selected
+  // Update the target chip
+  const chip = pmDatePickerTarget.value
+  if (chip) {
+    chip.textContent = '@' + formatDateChip(selected)
+    chip.dataset.date = selected.toISOString().slice(0, 10)
+  }
+  pmDatePickerVisible.value = false
+  onRichInputChange()
+}
+function pmDatePickerIsSelected(day) {
+  if (!day) return false
+  const m = pmDatePickerMonth.value
+  const sel = pmDatePickerDate.value
+  return sel && sel.getFullYear() === m.getFullYear() && sel.getMonth() === m.getMonth() && sel.getDate() === day
+}
+function pmDatePickerIsToday(day) {
+  if (!day) return false
+  const m = pmDatePickerMonth.value
+  const today = new Date()
+  return today.getFullYear() === m.getFullYear() && today.getMonth() === m.getMonth() && today.getDate() === day
+}
 
 // Create form
 const pmNewName = ref('')
@@ -4628,9 +4754,111 @@ function onRichInputChange() {
   pmRichInputCharCount.value = text.replace(/\n$/,'').length
   pmRichInputEmpty.value = !text.trim() && !el.querySelector('img')
   pmRichInputHasContent.value = !!(text.trim() || el.querySelector('img'))
+  // Check for @ trigger
+  checkAtTrigger()
+}
+
+function checkAtTrigger() {
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) { pmAtMenuVisible.value = false; return }
+  const range = sel.getRangeAt(0)
+  if (!range.collapsed) { pmAtMenuVisible.value = false; return }
+  // Get text before cursor in current text node
+  const node = range.startContainer
+  if (node.nodeType !== Node.TEXT_NODE) { pmAtMenuVisible.value = false; return }
+  const textBefore = node.textContent.slice(0, range.startOffset)
+  // Check if the last char is "@" and it's either at start or preceded by whitespace/newline
+  if (textBefore.endsWith('@') && (textBefore.length === 1 || /\s/.test(textBefore[textBefore.length - 2]))) {
+    // Position the popup near the cursor
+    const caretRect = range.getBoundingClientRect()
+    const containerRect = pmRichInputRef.value.parentElement.getBoundingClientRect()
+    pmAtMenuPos.value = {
+      top: caretRect.bottom - containerRect.top + 4,
+      left: caretRect.left - containerRect.left
+    }
+    pmAtMenuIndex.value = 0
+    pmAtMenuVisible.value = true
+  } else {
+    pmAtMenuVisible.value = false
+  }
+}
+
+function insertAtDate() {
+  const el = pmRichInputRef.value
+  if (!el) return
+  pmAtMenuVisible.value = false
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return
+  const range = sel.getRangeAt(0)
+  const node = range.startContainer
+  if (node.nodeType !== Node.TEXT_NODE) return
+  // Delete the "@" character before cursor
+  const offset = range.startOffset
+  const before = node.textContent.slice(0, offset - 1)
+  const after = node.textContent.slice(offset)
+  node.textContent = before
+  // Create date chip element
+  const today = new Date()
+  const chip = document.createElement('span')
+  chip.className = 'pm-date-chip'
+  chip.contentEditable = 'false'
+  chip.dataset.date = today.toISOString().slice(0, 10)
+  chip.textContent = '@' + formatDateChip(today)
+  // Insert chip after the text node
+  const afterNode = document.createTextNode(after || '\u200B')
+  node.parentNode.insertBefore(chip, node.nextSibling)
+  node.parentNode.insertBefore(afterNode, chip.nextSibling)
+  // Move cursor after chip
+  const newRange = document.createRange()
+  newRange.setStart(afterNode, after ? 0 : 1)
+  newRange.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(newRange)
+  onRichInputChange()
+}
+
+function onRichInputClick(e) {
+  const chip = e.target.closest('.pm-date-chip')
+  if (!chip) {
+    pmDatePickerVisible.value = false
+    return
+  }
+  // Parse date from chip
+  const dateStr = chip.dataset.date
+  const d = dateStr ? new Date(dateStr + 'T00:00:00') : new Date()
+  pmDatePickerDate.value = d
+  pmDatePickerMonth.value = new Date(d.getFullYear(), d.getMonth(), 1)
+  pmDatePickerTarget.value = chip
+  // Position picker below the chip
+  const containerRect = pmRichInputRef.value.parentElement.getBoundingClientRect()
+  const chipRect = chip.getBoundingClientRect()
+  pmDatePickerPos.value = {
+    top: chipRect.bottom - containerRect.top + 4,
+    left: chipRect.left - containerRect.left
+  }
+  pmDatePickerVisible.value = true
+}
+
+function pmDatePickerSelectToday() {
+  const today = new Date()
+  pmDatePickerMonth.value = new Date(today.getFullYear(), today.getMonth(), 1)
+  pmDatePickerSelectDay(today.getDate())
 }
 
 function onRichInputKeydown(e) {
+  // Handle @ menu keyboard navigation
+  if (pmAtMenuVisible.value) {
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      insertAtDate()
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      pmAtMenuVisible.value = false
+      return
+    }
+  }
   // Prevent exceeding max length (allow delete/backspace/arrows/select-all)
   const allowedKeys = ['Backspace','Delete','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End']
   if (allowedKeys.includes(e.key) || e.metaKey || e.ctrlKey) return
@@ -4786,6 +5014,11 @@ function serializeRichInput(el) {
     const isBlock = ['DIV','P','BLOCKQUOTE','LI','H1','H2','H3','H4','H5','H6'].includes(tag)
     if (isBlock && result.length > 0 && !result.endsWith('\n')) {
       result += '\n'
+    }
+    // Serialize date chip as its text content
+    if (node.classList?.contains('pm-date-chip')) {
+      result += node.textContent
+      return
     }
     // Skip placeholder spans
     if (node.classList?.contains('pm-img-placeholder')) return
@@ -5229,6 +5462,139 @@ function formatDateTime(isoStr) {
   color: #3b82f6;
   font-size: 13px;
 }
+/* @ mention autocomplete menu */
+.pm-at-menu {
+  position: absolute;
+  z-index: 100;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10);
+  padding: 4px;
+  min-width: 200px;
+}
+.pm-at-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #374151;
+  transition: background 0.15s;
+}
+.pm-at-menu-item:hover,
+.pm-at-menu-item--active {
+  background: #f0f5ff;
+  color: #2563eb;
+}
+.pm-at-menu-hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: #9ca3af;
+}
+/* Date chip — see unscoped <style> block (chips are created via JS DOM, no scoped attr) */
+/* Mini date picker */
+.pm-date-picker {
+  position: absolute;
+  z-index: 110;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  padding: 10px;
+  width: 252px;
+  font-size: 13px;
+}
+.pm-dp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.pm-dp-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #374151;
+}
+.pm-dp-arrow {
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: #6b7280;
+  font-size: 18px;
+  font-weight: bold;
+  transition: background 0.15s;
+}
+.pm-dp-arrow:hover {
+  background: #f3f4f6;
+}
+.pm-dp-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+  color: #9ca3af;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.pm-dp-weekdays span {
+  padding: 4px 0;
+}
+.pm-dp-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+}
+.pm-dp-cell {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #374151;
+  transition: background 0.15s;
+  margin: 0 auto;
+}
+.pm-dp-cell:not(.pm-dp-cell--empty):hover {
+  background: #f0f5ff;
+}
+.pm-dp-cell--empty {
+  cursor: default;
+}
+.pm-dp-cell--today {
+  color: #2563eb;
+  font-weight: 600;
+}
+.pm-dp-cell--selected {
+  background: #2563eb !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+.pm-dp-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #f3f4f6;
+}
+.pm-dp-today-btn {
+  cursor: pointer;
+  color: #2563eb;
+  font-size: 13px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.pm-dp-today-btn:hover {
+  background: #f0f5ff;
+}
 
 /* Rendered images in update display */
 .update-record-content :deep(.pm-rendered-img),
@@ -5474,5 +5840,20 @@ function formatDateTime(isoStr) {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   overflow: hidden;
   transition: opacity 0.1s;
+}
+/* Date chip inline element (unscoped — chips are created via JS DOM, not Vue template) */
+.pm-date-chip {
+  display: inline;
+  background: transparent;
+  color: #9ca3af !important;
+  padding: 0;
+  font-size: 0.9em;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: color 0.15s;
+}
+.pm-date-chip:hover {
+  color: #6b7280 !important;
 }
 </style>
