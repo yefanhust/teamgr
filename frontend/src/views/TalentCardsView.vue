@@ -781,7 +781,7 @@ async function createNewTalent() {
     newTalent.value = { name: '', email: '', phone: '', current_role: '', department: '' }
     await store.fetchTalents()
   } catch (e) {
-    showToast('添加失败')
+    showToast(e.response?.data?.detail || '添加失败')
   }
 }
 

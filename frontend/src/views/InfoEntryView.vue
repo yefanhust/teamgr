@@ -873,7 +873,7 @@ async function createAndSelect() {
     showToast('已创建')
     await store.fetchTalents({ page_size: 200 })
   } catch (e) {
-    showToast('创建失败')
+    showToast(e.response?.data?.detail || '创建失败')
   }
 }
 
