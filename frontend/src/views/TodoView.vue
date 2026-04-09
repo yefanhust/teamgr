@@ -2161,20 +2161,36 @@
                   <span class="text-xs text-gray-400">{{ formatDateTime(upd.created_at) }}</span>
                   <span class="text-sm font-medium text-gray-700">{{ upd.talent_name }}</span>
                 </div>
-                <div v-if="pmEditingUpdateId === upd.id">
-                  <textarea
-                    v-model="pmEditUpdateText"
-                    ref="pmUpdateInput"
-                    class="w-full text-base border border-blue-300 rounded-lg p-3 outline-none resize-y min-h-[48px]"
+                <div v-if="pmEditingUpdateId === upd.id" class="relative">
+                  <div
+                    ref="pmEditUpdateRef"
+                    contenteditable="true"
+                    class="w-full text-base border border-blue-300 rounded-lg p-3 outline-none pm-edit-update-input"
+                    @input="onEditUpdateInput"
+                    @keydown="onEditUpdateKeydown"
+                    @click="onEditUpdateClick"
                     @blur="saveUpdateRecord(upd)"
-                    @keydown.escape="pmEditingUpdateId = null"
-                    @input="autoResizeTextarea($event.target)"
-                  ></textarea>
+                  ></div>
+                  <div
+                    v-if="pmEditAtMenuVisible"
+                    class="pm-at-menu"
+                    :style="{ top: pmEditAtMenuPos.top + 'px', left: pmEditAtMenuPos.left + 'px' }"
+                  >
+                    <div
+                      class="pm-at-menu-item pm-at-menu-item--active"
+                      @mousedown.prevent="insertEditAtDate"
+                    >
+                      <van-icon name="calendar-o" size="16" />
+                      <span>今天的日期</span>
+                      <span class="pm-at-menu-hint">{{ todayDateStr }}</span>
+                    </div>
+                  </div>
                 </div>
                 <div
                   v-else
                   class="text-base text-gray-600 leading-snug cursor-pointer hover:bg-gray-50 rounded p-1 -m-1 update-record-content"
                   @dblclick="startEditUpdate(upd)"
+                  @click="onUpdateContentClick($event, upd)"
                   v-html="renderMarkdown(upd.raw_input)"
                 ></div>
                 <a v-if="upd.file_name" :href="'/api/projects/updates/' + upd.id + '/file'" target="_blank" class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 mt-1">
@@ -2245,6 +2261,39 @@
         }"
         v-html="pmDrag.ghostHtml"
       ></div>
+    </Teleport>
+
+    <!-- Display-mode date picker (readonly, for update records) -->
+    <Teleport to="body">
+      <div
+        v-if="pmDispPickerVisible"
+        class="pm-date-picker pm-date-picker--fixed"
+        :style="{ top: pmDispPickerPos.top + 'px', left: pmDispPickerPos.left + 'px' }"
+        @mousedown.prevent
+      >
+        <div class="pm-dp-header">
+          <span class="pm-dp-arrow" @click="pmDispPickerPrevMonth">&lsaquo;</span>
+          <span class="pm-dp-title">{{ pmDispPickerMonthLabel }}</span>
+          <span class="pm-dp-arrow" @click="pmDispPickerNextMonth">&rsaquo;</span>
+        </div>
+        <div class="pm-dp-weekdays">
+          <span v-for="w in ['日','一','二','三','四','五','六']" :key="w">{{ w }}</span>
+        </div>
+        <div v-for="(row, ri) in pmDispPickerDays" :key="ri" class="pm-dp-row">
+          <span
+            v-for="(day, di) in row"
+            :key="di"
+            class="pm-dp-cell"
+            :class="{
+              'pm-dp-cell--empty': !day,
+              'pm-dp-cell--selected': pmDispPickerIsSelected(day),
+              'pm-dp-cell--today': pmDispPickerIsToday(day)
+            }"
+            @click="pmDispPickerSelectDay(day)"
+          >{{ day || '' }}</span>
+        </div>
+      </div>
+      <div v-if="pmDispPickerVisible" class="pm-disp-picker-backdrop" @click="pmDispPickerVisible = false"></div>
     </Teleport>
 
     <!-- Organize Prompt Editor -->
@@ -2340,6 +2389,14 @@ const pmDatePickerPos = ref({ top: 0, left: 0 })
 const pmDatePickerTarget = ref(null)
 const pmDatePickerDate = ref(new Date())
 const pmDatePickerMonth = ref(new Date())
+// Display-mode date picker (fixed position, for update records)
+const pmDispPickerVisible = ref(false)
+const pmDispPickerPos = ref({ top: 0, left: 0 })
+const pmDispPickerDate = ref(new Date())
+const pmDispPickerMonth = ref(new Date())
+const pmDispPickerUpd = ref(null)
+const pmDispPickerOrigDate = ref('')
+const pmDispPickerChipEl = ref(null)
 const lightboxSrc = ref('')
 const pmSubmitting = ref(false)
 const pmLastResult = ref(null)
@@ -2348,6 +2405,9 @@ const pmCurrentModel = ref('')
 const pmAvailableModels = ref([])
 
 // @ mention date helper
+function toLocalDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 const weekDays = ['日', '一', '二', '三', '四', '五', '六']
 function formatDateChip(d) {
   const now = new Date()
@@ -2357,6 +2417,32 @@ function formatDateChip(d) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 周${weekDays[d.getDay()]}`
 }
 const todayDateStr = computed(() => formatDateChip(new Date()))
+
+// Dynamic date chip label with full relative rules
+const enDayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+function formatDateChipDisplay(isoDateStr) {
+  const d = new Date(isoDateStr + 'T00:00:00')
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const diffDays = Math.round((today - target) / 86400000)
+  if (diffDays === 0) return '@Today'
+  if (diffDays === 1) return '@Yesterday'
+  if (diffDays === -1) return '@Tomorrow'
+  // Past: within last 7 days
+  if (diffDays >= 2 && diffDays <= 7) return '@Last ' + enDayNames[d.getDay()]
+  // Future
+  if (diffDays < -1) {
+    const todayDow = today.getDay()
+    const thisWeekEnd = new Date(today)
+    thisWeekEnd.setDate(today.getDate() + (7 - todayDow))
+    const nextWeekEnd = new Date(thisWeekEnd)
+    nextWeekEnd.setDate(thisWeekEnd.getDate() + 7)
+    if (target < thisWeekEnd) return '@' + enDayNames[d.getDay()]
+    if (target < nextWeekEnd) return '@Next ' + enDayNames[d.getDay()]
+  }
+  return '@' + formatDateChip(d)
+}
 
 // Date picker calendar helpers
 const pmDatePickerDays = computed(() => {
@@ -2394,7 +2480,7 @@ function pmDatePickerSelectDay(day) {
   const chip = pmDatePickerTarget.value
   if (chip) {
     chip.textContent = '@' + formatDateChip(selected)
-    chip.dataset.date = selected.toISOString().slice(0, 10)
+    chip.dataset.date = toLocalDateStr(selected)
   }
   pmDatePickerVisible.value = false
   onRichInputChange()
@@ -2410,6 +2496,98 @@ function pmDatePickerIsToday(day) {
   const m = pmDatePickerMonth.value
   const today = new Date()
   return today.getFullYear() === m.getFullYear() && today.getMonth() === m.getMonth() && today.getDate() === day
+}
+
+// Display-mode date picker helpers (readonly, for update records)
+const pmDispPickerDays = computed(() => {
+  const m = pmDispPickerMonth.value
+  const year = m.getFullYear(), month = m.getMonth()
+  const firstDay = new Date(year, month, 1).getDay()
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+  const rows = []
+  let row = new Array(firstDay).fill(null)
+  for (let d = 1; d <= daysInMonth; d++) {
+    row.push(d)
+    if (row.length === 7) { rows.push(row); row = [] }
+  }
+  if (row.length) { while (row.length < 7) row.push(null); rows.push(row) }
+  return rows
+})
+const pmDispPickerMonthLabel = computed(() => {
+  const m = pmDispPickerMonth.value
+  return `${m.getFullYear()}年${m.getMonth() + 1}月`
+})
+function pmDispPickerPrevMonth() {
+  const m = pmDispPickerMonth.value
+  pmDispPickerMonth.value = new Date(m.getFullYear(), m.getMonth() - 1, 1)
+}
+function pmDispPickerNextMonth() {
+  const m = pmDispPickerMonth.value
+  pmDispPickerMonth.value = new Date(m.getFullYear(), m.getMonth() + 1, 1)
+}
+function pmDispPickerIsSelected(day) {
+  if (!day) return false
+  const m = pmDispPickerMonth.value
+  const sel = pmDispPickerDate.value
+  return sel && sel.getFullYear() === m.getFullYear() && sel.getMonth() === m.getMonth() && sel.getDate() === day
+}
+function pmDispPickerIsToday(day) {
+  if (!day) return false
+  const m = pmDispPickerMonth.value
+  const today = new Date()
+  return today.getFullYear() === m.getFullYear() && today.getMonth() === m.getMonth() && today.getDate() === day
+}
+watch(() => showPmInfoPopup.value, (v) => { if (!v) pmDispPickerVisible.value = false })
+function onUpdateContentClick(e, upd) {
+  const chip = e.target.closest('.pm-date-chip')
+  if (!chip) {
+    pmDispPickerVisible.value = false
+    return
+  }
+  e.stopPropagation()
+  const dateStr = chip.dataset?.date
+  if (!dateStr) return
+  const d = new Date(dateStr + 'T00:00:00')
+  pmDispPickerDate.value = d
+  pmDispPickerMonth.value = new Date(d.getFullYear(), d.getMonth(), 1)
+  pmDispPickerUpd.value = upd
+  pmDispPickerOrigDate.value = dateStr
+  pmDispPickerChipEl.value = chip
+  const chipRect = chip.getBoundingClientRect()
+  pmDispPickerPos.value = {
+    top: chipRect.bottom + 4,
+    left: Math.min(chipRect.left, window.innerWidth - 270)
+  }
+  pmDispPickerVisible.value = true
+}
+async function pmDispPickerSelectDay(day) {
+  if (!day) return
+  const m = pmDispPickerMonth.value
+  const selected = new Date(m.getFullYear(), m.getMonth(), day)
+  const newDateStr = toLocalDateStr(selected)
+  pmDispPickerDate.value = selected
+  const origDate = pmDispPickerOrigDate.value
+  if (!origDate || newDateStr === origDate) return
+  // Update chip DOM directly for immediate visual feedback
+  const chipEl = pmDispPickerChipEl.value
+  if (chipEl) {
+    chipEl.textContent = formatDateChipDisplay(newDateStr)
+    chipEl.setAttribute('data-date', newDateStr)
+  }
+  pmDispPickerOrigDate.value = newDateStr
+  // In display mode (upd set), also update raw_input and save
+  // In edit mode (upd null), chip DOM is enough — serialization handles save on blur
+  const upd = pmDispPickerUpd.value
+  if (!upd) return
+  const newRaw = upd.raw_input.replace(`{{date:${origDate}}}`, `{{date:${newDateStr}}}`)
+  upd.raw_input = newRaw
+  if (upd.parsed_data) upd.parsed_data.progress = newRaw
+  // Save to backend
+  try {
+    await pmStore.updateProjectUpdate(upd.id, newRaw)
+  } catch (e) {
+    showToast('保存失败')
+  }
 }
 
 // Create form
@@ -2437,6 +2615,9 @@ const pmSummaryTextarea = ref(null)
 const pmEditingUpdateId = ref(null)
 const pmEditUpdateText = ref('')
 const pmUpdateInput = ref(null)
+const pmEditUpdateRef = ref(null)
+const pmEditAtMenuVisible = ref(false)
+const pmEditAtMenuPos = ref({ top: 0, left: 0 })
 const pmInfoSettingParent = ref(false)
 const pmInfoParentSearch = ref('')
 const pmInfoParentResults = ref([])
@@ -4802,7 +4983,7 @@ function insertAtDate() {
   const chip = document.createElement('span')
   chip.className = 'pm-date-chip'
   chip.contentEditable = 'false'
-  chip.dataset.date = today.toISOString().slice(0, 10)
+  chip.dataset.date = toLocalDateStr(today)
   chip.textContent = '@' + formatDateChip(today)
   // Insert chip after the text node
   const afterNode = document.createTextNode(after || '\u200B')
@@ -5015,9 +5196,10 @@ function serializeRichInput(el) {
     if (isBlock && result.length > 0 && !result.endsWith('\n')) {
       result += '\n'
     }
-    // Serialize date chip as its text content
+    // Serialize date chip as special token preserving the date value
     if (node.classList?.contains('pm-date-chip')) {
-      result += node.textContent
+      const dateVal = node.dataset.date || ''
+      result += dateVal ? `{{date:${dateVal}}}` : node.textContent
       return
     }
     // Skip placeholder spans
@@ -5201,24 +5383,142 @@ async function savePmSummary() {
   }
 }
 
+// Populate a contenteditable element from serialized text ({{date:...}} → chips)
+function populateEditContent(el, text) {
+  el.innerHTML = ''
+  // Normalize legacy @YYYY年M月D日 周X → {{date:...}}
+  text = text.replace(/@(\d{4})年(\d{1,2})月(\d{1,2})日 周[日一二三四五六]/g, (_, y, m, d) =>
+    `{{date:${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}}}`)
+  const parts = text.split(/(\{\{date:\d{4}-\d{2}-\d{2}\}\})/)
+  for (const part of parts) {
+    const dm = part.match(/^\{\{date:(\d{4}-\d{2}-\d{2})\}\}$/)
+    if (dm) {
+      const chip = document.createElement('span')
+      chip.className = 'pm-date-chip'
+      chip.contentEditable = 'false'
+      chip.dataset.date = dm[1]
+      chip.textContent = formatDateChipDisplay(dm[1])
+      el.appendChild(chip)
+    } else if (part) {
+      const lines = part.split('\n')
+      lines.forEach((line, i) => {
+        if (i > 0) el.appendChild(document.createElement('br'))
+        if (line) el.appendChild(document.createTextNode(line))
+      })
+    }
+  }
+}
+
 function startEditUpdate(upd) {
   pmEditingUpdateId.value = upd.id
   pmEditUpdateText.value = upd.raw_input || ''
   nextTick(() => {
-    const el = pmUpdateInput.value
-    const input = Array.isArray(el) ? el[0] : el
-    if (input) { autoResizeTextarea(input); input.focus() }
+    const el = Array.isArray(pmEditUpdateRef.value) ? pmEditUpdateRef.value[0] : pmEditUpdateRef.value
+    if (el) {
+      populateEditContent(el, upd.raw_input || '')
+      el.focus()
+      // Move cursor to end
+      const sel = window.getSelection()
+      sel.selectAllChildren(el)
+      sel.collapseToEnd()
+    }
   })
 }
 
+function onEditUpdateInput() {
+  const el = Array.isArray(pmEditUpdateRef.value) ? pmEditUpdateRef.value[0] : pmEditUpdateRef.value
+  if (!el) return
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) { pmEditAtMenuVisible.value = false; return }
+  const range = sel.getRangeAt(0)
+  const node = range.startContainer
+  if (node.nodeType !== Node.TEXT_NODE) { pmEditAtMenuVisible.value = false; return }
+  const textBefore = node.textContent.slice(0, range.startOffset)
+  if (textBefore.endsWith('@')) {
+    const r = range.cloneRange()
+    r.setStart(node, range.startOffset - 1)
+    const rect = r.getBoundingClientRect()
+    const containerRect = el.getBoundingClientRect()
+    pmEditAtMenuPos.value = { top: rect.bottom - containerRect.top + 4, left: rect.left - containerRect.left }
+    pmEditAtMenuVisible.value = true
+  } else {
+    pmEditAtMenuVisible.value = false
+  }
+}
+
+function onEditUpdateKeydown(e) {
+  if (pmEditAtMenuVisible.value) {
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      insertEditAtDate()
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      pmEditAtMenuVisible.value = false
+      return
+    }
+  }
+  if (e.key === 'Escape') {
+    pmEditingUpdateId.value = null
+  }
+}
+
+function insertEditAtDate() {
+  const el = Array.isArray(pmEditUpdateRef.value) ? pmEditUpdateRef.value[0] : pmEditUpdateRef.value
+  if (!el) return
+  pmEditAtMenuVisible.value = false
+  const sel = window.getSelection()
+  if (!sel || sel.rangeCount === 0) return
+  const range = sel.getRangeAt(0)
+  const node = range.startContainer
+  if (node.nodeType !== Node.TEXT_NODE) return
+  const offset = range.startOffset
+  const before = node.textContent.slice(0, offset - 1)
+  const after = node.textContent.slice(offset)
+  node.textContent = before
+  const today = new Date()
+  const chip = document.createElement('span')
+  chip.className = 'pm-date-chip'
+  chip.contentEditable = 'false'
+  chip.dataset.date = toLocalDateStr(today)
+  chip.textContent = '@' + formatDateChip(today)
+  const afterNode = document.createTextNode(after || '\u200B')
+  node.parentNode.insertBefore(chip, node.nextSibling)
+  node.parentNode.insertBefore(afterNode, chip.nextSibling)
+  const newRange = document.createRange()
+  newRange.setStart(afterNode, after ? 0 : 1)
+  newRange.collapse(true)
+  sel.removeAllRanges()
+  sel.addRange(newRange)
+}
+
+function onEditUpdateClick(e) {
+  const chip = e.target.closest('.pm-date-chip')
+  if (!chip) { pmDispPickerVisible.value = false; return }
+  e.stopPropagation()
+  const dateStr = chip.dataset?.date
+  if (!dateStr) return
+  const d = new Date(dateStr + 'T00:00:00')
+  pmDispPickerDate.value = d
+  pmDispPickerMonth.value = new Date(d.getFullYear(), d.getMonth(), 1)
+  pmDispPickerChipEl.value = chip
+  pmDispPickerOrigDate.value = dateStr
+  pmDispPickerUpd.value = null
+  const chipRect = chip.getBoundingClientRect()
+  pmDispPickerPos.value = { top: chipRect.bottom + 4, left: Math.min(chipRect.left, window.innerWidth - 270) }
+  pmDispPickerVisible.value = true
+}
+
 async function saveUpdateRecord(upd) {
+  pmEditAtMenuVisible.value = false
+  const el = Array.isArray(pmEditUpdateRef.value) ? pmEditUpdateRef.value[0] : pmEditUpdateRef.value
+  const newText = el ? serializeRichInput(el) : pmEditUpdateText.value.trim()
   pmEditingUpdateId.value = null
-  const newText = pmEditUpdateText.value.trim()
   if (!newText || newText === (upd.raw_input || '')) return
   try {
     await pmStore.updateProjectUpdate(upd.id, newText)
     upd.raw_input = newText
-    // Also update the display text
     if (upd.parsed_data) upd.parsed_data.progress = newText
     showToast('已保存')
   } catch (e) {
@@ -5310,6 +5610,12 @@ function renderMarkdown(text) {
     .replace(/^- (.+)$/gm, '<li class="ml-3 list-disc">$1</li>')
     .replace(/^(\d+)\. (.+)$/gm, '<li class="ml-3 list-decimal">$2</li>')
     .replace(/(https?:\/\/[^\s<)]+)/g, '<a href="$1" target="_blank" class="text-blue-500 hover:text-blue-700 underline break-all">$1</a>')
+    .replace(/\{\{date:(\d{4}-\d{2}-\d{2})\}\}/g, (_, ds) => `<span class="pm-date-chip" data-date="${ds}">${formatDateChipDisplay(ds)}</span>`)
+    .replace(/@(\d{4})年(\d{1,2})月(\d{1,2})日 周[日一二三四五六]/g, (_, y, m, d) => {
+      const ds = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+      return `<span class="pm-date-chip" data-date="${ds}">${formatDateChipDisplay(ds)}</span>`
+    })
+    .replace(/@Today(?![a-zA-Z])/g, '<span class="pm-date-chip">@Today</span>')
     .replace(/\n/g, '<br>')
     .replace(/(<\/h[34]>)(<br>)+/g, '$1')
     .replace(/(<\/li>)(<br>)+/g, '$1')
@@ -5855,5 +6161,25 @@ function formatDateTime(isoStr) {
 }
 .pm-date-chip:hover {
   color: #6b7280 !important;
+}
+.pm-edit-update-input {
+  min-height: 48px;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pm-edit-update-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+.pm-date-picker--fixed {
+  position: fixed !important;
+  z-index: 9999 !important;
+}
+.pm-disp-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
 }
 </style>
