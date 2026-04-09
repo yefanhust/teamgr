@@ -5109,6 +5109,39 @@ async function onRichInputDrop(e) {
   }
 }
 
+function compressImage(file, maxDim = 1600, quality = 0.85) {
+  return new Promise((resolve) => {
+    // GIF: skip compression to preserve animation
+    if (file.type === 'image/gif') { resolve(file); return }
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const { width, height } = img
+      // Skip if already small enough
+      if (width <= maxDim && height <= maxDim && file.size <= 500 * 1024) {
+        resolve(file); return
+      }
+      const scale = Math.min(maxDim / width, maxDim / height, 1)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(width * scale)
+      canvas.height = Math.round(height * scale)
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) { resolve(file); return }
+          resolve(new File([blob], file.name, { type: blob.type }))
+        },
+        file.type === 'image/png' ? 'image/png' : 'image/jpeg',
+        quality
+      )
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+    img.src = url
+  })
+}
+
 async function insertImageFromFile(file) {
   if (file.size > 10 * 1024 * 1024) {
     showToast('图片大小不能超过 10MB')
@@ -5141,7 +5174,8 @@ async function insertImageFromFile(file) {
 
   try {
     pmImageUploading.value = true
-    const url = await pmStore.uploadProgressImage(file)
+    const compressed = await compressImage(file)
+    const url = await pmStore.uploadProgressImage(compressed)
     const img = document.createElement('img')
     img.src = url
     img.className = 'pm-rich-img'
@@ -5601,7 +5635,7 @@ function renderMarkdown(text) {
   if (!text) return ''
   return text
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="pm-rendered-img" />')
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<span class="pm-thumb-wrap"><img src="$2" alt="$1" class="pm-rendered-img pm-thumb" loading="lazy" /><span class="pm-thumb-hint">点击查看大图</span></span>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/^### (.+)$/gm, '<h4 class="font-semibold text-gray-800 mt-1 mb-0">$1</h4>')
@@ -5750,15 +5784,16 @@ function formatDateTime(isoStr) {
   pointer-events: none;
   position: absolute;
 }
-.pm-rich-input img.pm-rich-img {
-  max-width: 100%;
-  max-height: 300px;
+.pm-rich-input :deep(img.pm-rich-img) {
+  max-width: 240px;
+  max-height: 180px;
   border-radius: 8px;
   margin: 6px 0;
   display: block;
-  object-fit: contain;
+  object-fit: cover;
+  cursor: pointer;
 }
-.pm-img-placeholder {
+.pm-rich-input :deep(.pm-img-placeholder) {
   display: inline-block;
   padding: 4px 12px;
   margin: 4px 0;
@@ -5902,16 +5937,50 @@ function formatDateTime(isoStr) {
   background: #f0f5ff;
 }
 
-/* Rendered images in update display */
+/* Thumbnail wrapper in update display */
+.update-record-content :deep(.pm-thumb-wrap),
+.analysis-content :deep(.pm-thumb-wrap) {
+  display: inline-block;
+  position: relative;
+  margin: 6px 0;
+  cursor: zoom-in;
+  border-radius: 8px;
+  overflow: hidden;
+  vertical-align: top;
+}
+.update-record-content :deep(.pm-thumb-wrap:hover .pm-thumb-hint),
+.analysis-content :deep(.pm-thumb-wrap:hover .pm-thumb-hint) {
+  opacity: 1;
+}
+.update-record-content :deep(.pm-thumb-hint),
+.analysis-content :deep(.pm-thumb-hint) {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(0,0,0,0.5);
+  color: #fff;
+  font-size: 11px;
+  text-align: center;
+  padding: 3px 0;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+/* Rendered images in update display — thumbnail mode */
 .update-record-content :deep(.pm-rendered-img),
 .analysis-content :deep(.pm-rendered-img) {
-  max-width: 100%;
-  max-height: 400px;
+  max-width: 240px;
+  max-height: 180px;
   border-radius: 8px;
-  margin: 6px 0;
   display: block;
-  object-fit: contain;
+  object-fit: cover;
   cursor: zoom-in;
+  transition: filter 0.2s;
+}
+.update-record-content :deep(.pm-thumb-wrap:hover .pm-rendered-img),
+.analysis-content :deep(.pm-thumb-wrap:hover .pm-rendered-img) {
+  filter: brightness(0.92);
 }
 
 .pm-delete-btn {
@@ -6153,7 +6222,7 @@ function formatDateTime(isoStr) {
   background: transparent;
   color: #9ca3af !important;
   padding: 0;
-  font-size: 0.9em;
+  font-size: 1em;
   cursor: pointer;
   white-space: nowrap;
   user-select: none;

@@ -1061,11 +1061,14 @@ def _build_project_analysis_prompt(db: Session):
             role = m.role or "未指定"
             members_lines.append(f"{indent}  - {name}（{role}）")
 
+        # Detect children early — needed for aggregation
+        children = child_map.get(p.id, [])
+
         # Recent updates (last 10 for children, 20 for top-level)
         limit = 10 if is_child else 20
         sorted_updates = sorted(p.updates, key=lambda x: x.created_at or datetime.min, reverse=True)[:limit]
-        update_lines = []
-        for u in sorted_updates:
+
+        def _format_update(u, prefix="", ind=indent):
             talent_name = u.talent.name if u.talent else "未知"
             date_str = u.created_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai).strftime("%Y-%m-%d %H:%M") if u.created_at else "未知"
             parsed = u.parsed_data or {}
@@ -1073,27 +1076,52 @@ def _build_project_analysis_prompt(db: Session):
             blockers = parsed.get("blockers", "")
             next_steps = parsed.get("next_steps", "")
             completion_pct = parsed.get("completion_pct")
-            line = f"{indent}  - [{date_str}] {talent_name}: {progress}"
+            line = f"{ind}  - [{date_str}] {prefix}{talent_name}: {progress}"
             if blockers:
-                line += f"\n{indent}    阻碍：{blockers}"
+                line += f"\n{ind}    阻碍：{blockers}"
             if next_steps:
-                line += f"\n{indent}    下一步：{next_steps}"
+                line += f"\n{ind}    下一步：{next_steps}"
             if completion_pct is not None:
                 line += f" (完成度: {completion_pct}%)"
-            update_lines.append(line)
+            return line
 
-        # Update frequency
-        total_updates = len(p.updates)
+        update_lines = [_format_update(u) for u in sorted_updates]
+
+        # For parent projects, collect recent updates from all children
+        child_update_lines = []
+        latest_child_update_at = None
+        total_child_updates = 0
+        all_child_members = set()
+        if children:
+            all_child_updates = []
+            for c in children:
+                total_child_updates += len(c.updates)
+                for m in c.members:
+                    all_child_members.add(m.talent_id)
+                for u in c.updates:
+                    all_child_updates.append((c.name, u))
+            all_child_updates.sort(key=lambda x: x[1].created_at or datetime.min, reverse=True)
+            if all_child_updates:
+                latest_child_update_at = all_child_updates[0][1].created_at
+            for child_name, u in all_child_updates[:20]:
+                child_update_lines.append(_format_update(u, prefix=f"[{child_name}] "))
+
+        # Update frequency — include child updates for parent projects
+        total_updates = len(p.updates) + total_child_updates
         if days_active > 0 and total_updates > 0:
             freq = f"{total_updates}条/{days_active}天 (平均{total_updates/days_active:.1f}条/天)"
         else:
             freq = f"{total_updates}条"
 
-        # Last update time
+        # Last update time — for parents, use the most recent across self + children
+        effective_last_update = p.last_update_at
+        if latest_child_update_at:
+            if not effective_last_update or latest_child_update_at > effective_last_update:
+                effective_last_update = latest_child_update_at
         last_update_str = "无"
-        if p.last_update_at:
-            last_local = p.last_update_at.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai)
-            days_since = (datetime.utcnow() - p.last_update_at).days
+        if effective_last_update:
+            last_local = effective_last_update.replace(tzinfo=ZoneInfo("UTC")).astimezone(tz_shanghai)
+            days_since = (datetime.utcnow() - effective_last_update).days
             last_update_str = f"{last_local.strftime('%Y-%m-%d')} ({days_since}天前)"
 
         heading = f"{'####' if is_child else '###'} {'子项目' if is_child else '项目'}：{p.name}"
@@ -1106,17 +1134,9 @@ def _build_project_analysis_prompt(db: Session):
         lines.append(f"{indent}- 更新频率：{freq}")
 
         # Children summary for parent projects
-        children = child_map.get(p.id, [])
         if children:
             active_children = [c for c in children if c.status == "active"]
             lines.append(f"{indent}- 子项目数：{len(children)}个（活跃 {len(active_children)}个）")
-            # Aggregate child stats
-            all_child_members = set()
-            total_child_updates = 0
-            for c in children:
-                for m in c.members:
-                    all_child_members.add(m.talent_id)
-                total_child_updates += len(c.updates)
             if all_child_members:
                 lines.append(f"{indent}- 子项目合计参与人数：{len(all_child_members)}人")
             if total_child_updates:
@@ -1129,7 +1149,12 @@ def _build_project_analysis_prompt(db: Session):
         if update_lines:
             lines.append(f"\n{indent}最近进展记录：")
             lines.extend(update_lines)
-        elif not children:
+
+        # Show aggregated child updates for parent projects
+        if child_update_lines:
+            lines.append(f"\n{indent}子项目最近进展汇总：")
+            lines.extend(child_update_lines)
+        elif not children and not update_lines:
             lines.append(f"\n{indent}最近进展记录：")
             lines.append(f"{indent}  暂无进展记录")
 
