@@ -97,6 +97,7 @@ def _migrate_schema():
         ("teams", "parent_id", "INTEGER REFERENCES teams(id) ON DELETE SET NULL"),
         ("talents", "status", "TEXT DEFAULT ''"),
         ("talents", "recruitment_type", "TEXT DEFAULT ''"),
+        ("talents", "link", "TEXT DEFAULT ''"),
         ("projects", "display_order", "INTEGER DEFAULT 0"),
         ("project_updates", "file_name", "TEXT"),
     ]

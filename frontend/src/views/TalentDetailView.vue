@@ -145,6 +145,19 @@
           </div>
           <span class="text-xs text-gray-400">创建于 {{ formatDate(talent.created_at) }}</span>
         </div>
+        <!-- Link -->
+        <div class="flex items-center mt-2" v-if="talent.link || editingBasicField === 'link'">
+          <span class="text-sm text-gray-500 mr-1">链接：</span>
+          <textarea v-if="editingBasicField === 'link'" v-model="editValue" class="edit-value-input flex-1" ref="editBasicInput"
+            @blur="finishEditBasic" @keydown.enter.prevent="finishEditBasic" @keydown.escape="cancelEditBasic" rows="1" />
+          <a v-else :href="talent.link" target="_blank" rel="noopener"
+            class="text-sm text-blue-500 underline truncate flex-1 editable-value"
+            @dblclick.stop.prevent="startEditBasic('link', talent.link)">{{ talent.link }}</a>
+        </div>
+        <div v-else class="flex items-center mt-2">
+          <span class="text-sm text-gray-500 mr-1">链接：</span>
+          <span class="text-sm text-gray-400 cursor-pointer editable-value" @click="startEditBasic('link', '')">点击添加</span>
+        </div>
       </div>
 
       <!-- Status ActionSheet -->

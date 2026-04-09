@@ -35,6 +35,7 @@ class TalentUpdate(BaseModel):
     department: Optional[str] = None
     status: Optional[str] = None
     recruitment_type: Optional[str] = None
+    link: Optional[str] = None
     tag_ids: Optional[list[int]] = None
     card_data: Optional[dict] = None
 
@@ -153,6 +154,7 @@ def _talent_to_response(talent: Talent, team_talent_ids: set = None) -> dict:
         "department": talent.department or "",
         "status": _compute_status(talent, has_team=has_team),
         "recruitment_type": talent.recruitment_type or "",
+        "link": talent.link or "",
         "card_data": card_data,
         "summary": summary,
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in talent.tags],
@@ -354,6 +356,8 @@ async def update_talent(
         talent.status = body.status
     if body.recruitment_type is not None:
         talent.recruitment_type = body.recruitment_type
+    if body.link is not None:
+        talent.link = body.link
 
     if body.card_data is not None:
         # Merge provided card_data into existing

@@ -274,6 +274,16 @@
         </div>
       </div>
     </van-popup>
+
+    <!-- Draft saved toast at page bottom -->
+    <transition name="draft-toast">
+      <div
+        v-if="draftSavedText"
+        class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-[90vw] bg-gray-800 text-white text-xs rounded-full px-4 py-2 shadow-lg truncate"
+      >
+        草稿已保存至「{{ draftSavedText }}」
+      </div>
+    </transition>
   </div>
 </template>
 
@@ -323,6 +333,8 @@ const DRAFT_KEY = 'teamgr_entry_draft'
 let draftTimer = null
 const draftRestored = ref(false)
 const draftSavedAt = ref(null)
+const draftSavedText = ref('')
+let draftSavedTimer = null
 
 function saveDraft() {
   if (draftTimer) clearTimeout(draftTimer)
@@ -335,6 +347,9 @@ function saveDraft() {
         text,
         savedAt: Date.now(),
       }))
+      if (draftSavedTimer) clearTimeout(draftSavedTimer)
+      draftSavedText.value = text.trim().length > 20 ? text.trim().slice(-20) + '…' : text.trim()
+      draftSavedTimer = setTimeout(() => { draftSavedText.value = '' }, 2000)
     } else {
       localStorage.removeItem(DRAFT_KEY)
     }
@@ -951,5 +966,14 @@ function scrollToBottom() {
   min-height: 50px;
   padding: 10px 18px;
   font-size: 15px;
+}
+.draft-toast-enter-active,
+.draft-toast-leave-active {
+  transition: opacity 0.3s, transform 0.3s;
+}
+.draft-toast-enter-from,
+.draft-toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
 }
 </style>

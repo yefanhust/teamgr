@@ -27,6 +27,7 @@ class Talent(Base):
     summary = Column(Text, default="")
     status = Column(String(50), default="")
     recruitment_type = Column(String(20), default="")  # 社招 / 校招 / 实习 / 活水
+    link = Column(String(500), default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
