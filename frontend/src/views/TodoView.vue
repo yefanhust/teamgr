@@ -5785,8 +5785,8 @@ function formatDateTime(isoStr) {
   position: absolute;
 }
 .pm-rich-input :deep(img.pm-rich-img) {
-  max-width: 240px;
-  max-height: 180px;
+  max-width: 500px;
+  max-height: 375px;
   border-radius: 8px;
   margin: 6px 0;
   display: block;
@@ -5970,8 +5970,8 @@ function formatDateTime(isoStr) {
 /* Rendered images in update display — thumbnail mode */
 .update-record-content :deep(.pm-rendered-img),
 .analysis-content :deep(.pm-rendered-img) {
-  max-width: 240px;
-  max-height: 180px;
+  max-width: 500px;
+  max-height: 375px;
   border-radius: 8px;
   display: block;
   object-fit: cover;
