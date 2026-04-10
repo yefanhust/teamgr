@@ -35,9 +35,7 @@ do_frontend() {
 }
 
 do_backend() {
-    echo "[ops] 复制后端代码到容器..."
-    docker cp "$REPO_DIR/backend/." "$CONTAINER:/app/"
-    echo "[ops] 重启 uvicorn..."
+    echo "[ops] 重启 uvicorn（backend/app 已 bind-mount，无需复制）..."
     docker exec "$CONTAINER" pkill -f uvicorn || true
     $DC exec -T teamgr /workspace/scripts/start_web.sh
     echo "[ops] 后端更新完成"
