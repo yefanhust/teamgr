@@ -2988,7 +2988,7 @@ const vibeCommitted = computed(() =>
 )
 
 function onImgClick(e) {
-  const img = e.target.closest('img.pm-rendered-img')
+  const img = e.target.closest('img.pm-rendered-img') || e.target.closest('img.pm-rich-img')
   if (img) lightboxSrc.value = img.src
 }
 
@@ -5791,7 +5791,7 @@ function formatDateTime(isoStr) {
   margin: 6px 0;
   display: block;
   object-fit: cover;
-  cursor: pointer;
+  cursor: zoom-in;
 }
 .pm-rich-input :deep(.pm-img-placeholder) {
   display: inline-block;
